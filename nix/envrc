@@ -1,0 +1,4 @@
+watch_file nix/devShell.nix
+watch_file nix/common.nix
+
+use flake || use nix nix/shell.nix
