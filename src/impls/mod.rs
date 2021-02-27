@@ -14,3 +14,22 @@ fn gen_rand_str(len: usize) -> String {
 fn gen_rand_u64() -> u64 {
     rand::thread_rng().gen_range(1..u64::MAX)
 }
+
+#[macro_export]
+macro_rules! concat_static {
+    ( $len:expr, $first_arr:expr, $( $array:expr ),+ ) => {
+        {
+            let mut new = [0; $len];
+            for (to, from) in new.iter_mut().zip(
+                $first_arr
+                    .iter()
+                    $(
+                        .chain($array.iter())
+                    )+
+            ) {
+                *to = *from;
+            }
+            new
+        }
+    };
+}
