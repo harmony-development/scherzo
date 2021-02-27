@@ -366,15 +366,15 @@ impl auth_service_server::AuthService for AuthServer {
 
         if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
             if step_stack.last().unwrap().can_go_back {
-                prev_step = step_stack.pop().unwrap();
+                step_stack.pop();
                 log::debug!("auth session {} went to previous step", auth_id);
             } else {
-                prev_step = step_stack.last().unwrap().clone();
                 log::debug!(
                     "auth session {} wanted prev step, but we can't go back",
                     auth_id
                 );
             }
+            prev_step = step_stack.last().unwrap().clone();
         } else {
             return Err(ServerError::InvalidAuthId);
         }
