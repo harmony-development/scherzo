@@ -59,6 +59,8 @@ impl auth_service_server::AuthService for AuthServer {
             .and_modify(|s| *s = initial_step.clone())
             .or_insert(initial_step);
 
+        log::debug!("new auth session {}", auth_id);
+
         Ok(BeginAuthResponse { auth_id })
     }
 
@@ -72,11 +74,11 @@ impl auth_service_server::AuthService for AuthServer {
 
         if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
             if let Some(step) = maybe_step {
+                let current_step = step_stack.last().unwrap().step.as_ref().unwrap().clone();
+                log::debug!("current auth step for session {}", auth_id);
+                log::debug!("client replied with {:#?}", step);
                 match step {
                     next_step_request::Step::Choice(next_step_request::Choice { choice }) => {
-                        let current_step =
-                            step_stack.last().unwrap().step.as_ref().unwrap().clone();
-
                         if let auth_step::Step::Choice(auth_step::Choice { options, .. }) =
                             current_step
                         {
@@ -142,9 +144,6 @@ impl auth_service_server::AuthService for AuthServer {
                         }
                     }
                     next_step_request::Step::Form(next_step_request::Form { fields }) => {
-                        let current_step =
-                            step_stack.last().unwrap().step.as_ref().unwrap().clone();
-
                         if let auth_step::Step::Form(auth_step::Form {
                             fields: auth_fields,
                             title,
@@ -254,6 +253,8 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let session_token = gen_rand_str(30);
 
+                                    log::debug!("user {} logged in with email {}", user_id, email,);
+
                                     next_step = AuthStep {
                                         can_go_back: false,
                                         fallback_url: String::default(),
@@ -311,6 +312,13 @@ impl auth_service_server::AuthService for AuthServer {
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
+                                    log::debug!(
+                                        "new user {} registered with email {} and username {}",
+                                        user_id,
+                                        email,
+                                        username
+                                    );
+
                                     let session_token = gen_rand_str(30);
 
                                     next_step = AuthStep {
@@ -339,7 +347,12 @@ impl auth_service_server::AuthService for AuthServer {
             return Err(ServerError::InvalidAuthId);
         }
 
-        if matches!(next_step.step, Some(auth_step::Step::Session(_))) {
+        if let Some(auth_step::Step::Session(session)) = &next_step.step {
+            log::debug!(
+                "auth session {} complete with session {:#?}",
+                auth_id,
+                session
+            );
             self.step_map.lock().remove(&auth_id);
         }
 
@@ -354,8 +367,13 @@ impl auth_service_server::AuthService for AuthServer {
         if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
             if step_stack.last().unwrap().can_go_back {
                 prev_step = step_stack.pop().unwrap();
+                log::debug!("auth session {} went to previous step", auth_id);
             } else {
                 prev_step = step_stack.last().unwrap().clone();
+                log::debug!(
+                    "auth session {} wanted prev step, but we can't go back",
+                    auth_id
+                );
             }
         } else {
             return Err(ServerError::InvalidAuthId);
