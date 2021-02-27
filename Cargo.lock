@@ -1064,7 +1064,6 @@ name = "scherzo"
 version = "0.1.0"
 dependencies = [
  "harmony_rust_sdk",
- "hrpc",
  "parking_lot",
  "rand 0.8.3",
  "simplelog",

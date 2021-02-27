@@ -30,7 +30,7 @@ impl AuthServer {
     }
 }
 
-#[hrpc::async_trait]
+#[harmony_rust_sdk::api::exports::hrpc::async_trait]
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
