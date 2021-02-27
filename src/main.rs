@@ -1,6 +1,11 @@
-use harmony_rust_sdk::api::auth::auth_service_server::AuthServiceServer;
-use scherzo::impls::auth::AuthServer;
-
+use harmony_rust_sdk::api::{
+    auth::auth_service_server::AuthServiceServer, chat::chat_service_server::ChatServiceServer,
+    exports::hrpc::serve_multiple,
+};
+use scherzo::{
+    impls::{auth::AuthServer, chat::ChatServer},
+    ServerError,
+};
 use simplelog::{CombinedLogger, LevelFilter, TermLogger, TerminalMode, WriteLogger};
 
 #[tokio::main]
@@ -29,7 +34,13 @@ async fn main() {
         .open()
         .expect("couldn't open database");
 
-    AuthServiceServer::new(AuthServer::new(db))
-        .serve(([127, 0, 0, 1], 2289))
-        .await
+    let auth = AuthServiceServer::new(AuthServer::new(db.clone())).filters();
+    let chat = ChatServiceServer::new(ChatServer::new(db)).filters();
+
+    serve_multiple!(
+        addr: ([127, 0, 0, 1], 2289),
+        err: ServerError,
+        filters: auth, chat,
+    )
+    .await
 }

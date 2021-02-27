@@ -2,18 +2,10 @@ use std::{collections::HashMap, convert::TryInto};
 
 use harmony_rust_sdk::api::auth::*;
 use parking_lot::Mutex;
-use rand::Rng;
 use sled::Db;
 
+use super::{gen_rand_str, gen_rand_u64};
 use crate::ServerError;
-
-fn gen_rand_str(len: usize) -> String {
-    rand::thread_rng()
-        .sample_iter(rand::distributions::Alphanumeric)
-        .take(len)
-        .map(char::from)
-        .collect()
-}
 
 #[derive(Debug)]
 pub struct AuthServer {
@@ -306,7 +298,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         return Err(ServerError::UserAlreadyExists);
                                     }
 
-                                    let user_id: u64 = rand::thread_rng().gen_range(1..u64::MAX);
+                                    let user_id = gen_rand_u64();
 
                                     let mut batch = sled::Batch::default();
                                     batch.insert(
