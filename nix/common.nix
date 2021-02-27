@@ -26,7 +26,7 @@ in
   crateDeps =
     with pkgs;
     {
-      buildInputs = [ protobuf ];
+      buildInputs = [ protobuf binutils ];
       nativeBuildInputs = [ /* Add compile time dependencies here */ ];
     };
 

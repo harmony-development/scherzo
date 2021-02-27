@@ -7,4 +7,8 @@ edition = "2018"
 [dependencies]
 harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = ["gen_server"] }
 hrpc = { version = "0.4.0", default-features = false, features = ["server"] }
-sled = "0.34.6"
+sled = { version = "0.34.6", features = ["compression"] }
+parking_lot = "0.11"
+rand = "0.8"
+tokio = { version = "1.2", features = ["macros", "rt-multi-thread"] }
+simplelog = "0.9"
