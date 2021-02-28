@@ -25,10 +25,18 @@ fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 24] {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EventSub {
+    Guild(u64),
+    Homeserver,
+    Actions,
+}
+
 #[derive(Debug)]
 pub struct ChatServer {
     valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     db: Db,
+    subbed_to: Mutex<HashMap<u64, Vec<EventSub>>>,
     event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
 }
 
@@ -37,6 +45,7 @@ impl ChatServer {
         Self {
             valid_sessions,
             db,
+            subbed_to: Mutex::new(HashMap::new()),
             event_chans: Mutex::new(HashMap::new()),
         }
     }
@@ -109,7 +118,7 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<UpdateMessageRequest>,
     ) -> Result<(), Self::Error> {
-        self.auth(&request)?;
+        let user_id = self.auth(&request)?;
 
         let request = request.into_parts().0;
 
@@ -179,24 +188,33 @@ impl chat_service_server::ChatService for ChatServer {
         let edited_at = Some(std::time::SystemTime::now().into());
 
         for chan in self.event_chans.lock().values_mut() {
-            chan.push(event::Event::EditedMessage(Box::new(MessageUpdated {
-                guild_id,
-                channel_id,
-                message_id,
-                content: content.clone(),
-                update_content,
-                embeds: embeds.clone(),
-                update_embeds,
-                actions: actions.clone(),
-                update_actions,
-                attachments: attachments.clone(),
-                update_attachments,
-                overrides: overrides.clone(),
-                update_overrides,
-                metadata: metadata.clone(),
-                update_metadata,
-                edited_at: edited_at.clone(),
-            })));
+            if self
+                .subbed_to
+                .lock()
+                .get(&user_id)
+                .map_or(false, |subbed_to| {
+                    subbed_to.contains(&EventSub::Guild(guild_id))
+                })
+            {
+                chan.push(event::Event::EditedMessage(Box::new(MessageUpdated {
+                    guild_id,
+                    channel_id,
+                    message_id,
+                    content: content.clone(),
+                    update_content,
+                    embeds: embeds.clone(),
+                    update_embeds,
+                    actions: actions.clone(),
+                    update_actions,
+                    attachments: attachments.clone(),
+                    update_attachments,
+                    overrides: overrides.clone(),
+                    update_overrides,
+                    metadata: metadata.clone(),
+                    update_metadata,
+                    edited_at: edited_at.clone(),
+                })));
+            }
         }
 
         Ok(())
@@ -458,10 +476,19 @@ impl chat_service_server::ChatService for ChatServer {
         chat_tree.insert(&key, buf).unwrap();
 
         for chan in self.event_chans.lock().values_mut() {
-            chan.push(event::Event::SentMessage(Box::new(event::MessageSent {
-                echo_id,
-                message: Some(message.clone()),
-            })));
+            if self
+                .subbed_to
+                .lock()
+                .get(&user_id)
+                .map_or(false, |subbed_to| {
+                    subbed_to.contains(&EventSub::Guild(guild_id))
+                })
+            {
+                chan.push(event::Event::SentMessage(Box::new(event::MessageSent {
+                    echo_id,
+                    message: Some(message.clone()),
+                })));
+            }
         }
 
         Ok(SendMessageResponse { message_id })
@@ -539,20 +566,42 @@ impl chat_service_server::ChatService for ChatServer {
 
     async fn stream_events(
         &self,
+        validation_request: &Request<()>,
         request: Option<StreamEventsRequest>,
     ) -> Result<Option<Event>, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(validation_request)?;
+
+        if let Some(req) = request.map(|r| r.request).flatten() {
+            use stream_events_request::*;
+
+            let sub = match req {
+                Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
+                    EventSub::Guild(guild_id)
+                }
+                Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
+                Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
+                    EventSub::Homeserver
+                }
+            };
+
+            self.subbed_to.lock().entry(user_id).or_default().push(sub);
+        }
+
+        let event = self
+            .event_chans
+            .lock()
+            .entry(user_id)
+            .or_default()
+            .pop()
+            .map(|event| Event { event: Some(event) });
+
+        Ok(event)
     }
 
-    async fn stream_events_validate(&self, request: Request<()>) -> Result<(), Self::Error> {
-        let user_id = self.auth(&request)?;
-
-        self.event_chans.lock().entry(user_id).or_default();
-
-        Ok(())
-    }
-
-    async fn sync(&self) -> Result<Option<SyncEvent>, Self::Error> {
+    async fn sync(
+        &self,
+        validation_request: &Request<SyncRequest>,
+    ) -> Result<Option<SyncEvent>, Self::Error> {
         Err(ServerError::NotImplemented)
     }
 

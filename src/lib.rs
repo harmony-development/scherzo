@@ -1,4 +1,4 @@
-#![allow(clippy::unit_arg)]
+#![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::fmt::{self, Display, Formatter};
 

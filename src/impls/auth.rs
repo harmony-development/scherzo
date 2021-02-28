@@ -43,21 +43,19 @@ impl auth_service_server::AuthService for AuthServer {
         Err(ServerError::NotImplemented)
     }
 
-    async fn stream_steps(&self) -> Result<Option<AuthStep>, Self::Error> {
-        Err(ServerError::NotImplemented)
-    }
-
-    async fn stream_steps_validate(
+    async fn stream_steps(
         &self,
-        request: Request<StreamStepsRequest>,
-    ) -> Result<(), Self::Error> {
-        let request = request.into_parts().0;
-
-        if self.step_map.lock().contains_key(&request.auth_id) {
-            Ok(())
-        } else {
-            Err(ServerError::InvalidAuthId)
+        validation_request: &Request<StreamStepsRequest>,
+    ) -> Result<Option<AuthStep>, Self::Error> {
+        if !self
+            .step_map
+            .lock()
+            .contains_key(&validation_request.get_message().auth_id)
+        {
+            return Err(ServerError::InvalidAuthId);
         }
+
+        Err(ServerError::NotImplemented)
     }
 
     async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
