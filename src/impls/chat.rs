@@ -1,6 +1,7 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use event::MessageUpdated;
+use flume::Receiver;
 use harmony_rust_sdk::api::{
     chat::*,
     exports::{
@@ -26,15 +27,17 @@ fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 24] {
 
 #[derive(Debug)]
 pub struct ChatServer {
+    valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     db: Db,
-    event_chans: Vec<flume::Sender<event::Event>>,
+    event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
 }
 
 impl ChatServer {
-    pub fn new(db: Db) -> Self {
+    pub fn new(db: Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
         Self {
+            valid_sessions,
             db,
-            event_chans: Vec::new(),
+            event_chans: Mutex::new(HashMap::new()),
         }
     }
 
@@ -60,14 +63,22 @@ impl ChatServer {
         (message, key)
     }
 
-    fn auth<T>(&self, request: &Request<T>) -> bool {
-        let _auth_id = request
+    fn auth<T>(
+        &self,
+        request: &Request<T>,
+    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
+        let auth_id = request
             .get_header(&"Authorization".parse().unwrap())
             .map_or_else(String::default, |val| {
                 val.to_str()
                     .map_or_else(|_| String::default(), ToString::to_string)
             });
-        todo!()
+
+        self.valid_sessions
+            .lock()
+            .get(&auth_id)
+            .cloned()
+            .map_or(Err(ServerError::Unauthenticated), Ok)
     }
 }
 
@@ -79,9 +90,7 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetMessageRequest>,
     ) -> Result<GetMessageResponse, Self::Error> {
-        if !self.auth(&request) {
-            return Err(ServerError::Unauthenticated);
-        }
+        self.auth(&request)?;
 
         let request = request.into_parts().0;
 
@@ -100,9 +109,7 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<UpdateMessageRequest>,
     ) -> Result<(), Self::Error> {
-        if !self.auth(&request) {
-            return Err(ServerError::Unauthenticated);
-        }
+        self.auth(&request)?;
 
         let request = request.into_parts().0;
 
@@ -171,8 +178,8 @@ impl chat_service_server::ChatService for ChatServer {
 
         let edited_at = Some(std::time::SystemTime::now().into());
 
-        for chan in &self.event_chans {
-            chan.send_async(event::Event::EditedMessage(Box::new(MessageUpdated {
+        for chan in self.event_chans.lock().values_mut() {
+            chan.push(event::Event::EditedMessage(Box::new(MessageUpdated {
                 guild_id,
                 channel_id,
                 message_id,
@@ -189,9 +196,7 @@ impl chat_service_server::ChatService for ChatServer {
                 metadata: metadata.clone(),
                 update_metadata,
                 edited_at: edited_at.clone(),
-            })))
-            .await
-            .unwrap();
+            })));
         }
 
         Ok(())
@@ -391,7 +396,75 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<SendMessageRequest>,
     ) -> Result<SendMessageResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let request = request.into_parts().0;
+
+        let SendMessageRequest {
+            guild_id,
+            channel_id,
+            content,
+            actions,
+            embeds,
+            attachments,
+            in_reply_to,
+            overrides,
+            echo_id,
+            metadata,
+        } = request;
+
+        let chat_tree = self.db.open_tree("chat").unwrap();
+
+        let (message_id, key) = {
+            let mut message_id = gen_rand_u64();
+            let mut key = make_msg_key(guild_id, channel_id, message_id);
+            while chat_tree.contains_key(key).unwrap() {
+                message_id = gen_rand_u64();
+                key = make_msg_key(guild_id, channel_id, message_id);
+            }
+            (message_id, key)
+        };
+
+        // TODO: process hmc here
+        let attachments = attachments
+            .into_iter()
+            .map(|_hmc| Attachment {
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+
+        let created_at = Some(std::time::SystemTime::now().into());
+        let edited_at = None;
+
+        let message = HarmonyMessage {
+            metadata,
+            guild_id,
+            channel_id,
+            message_id,
+            author_id: user_id,
+            created_at,
+            edited_at,
+            content,
+            embeds,
+            actions,
+            attachments,
+            in_reply_to,
+            overrides,
+        };
+
+        let mut buf = Vec::with_capacity(message.encoded_len());
+        // will never fail
+        message.encode(&mut buf).unwrap();
+        chat_tree.insert(&key, buf).unwrap();
+
+        for chan in self.event_chans.lock().values_mut() {
+            chan.push(event::Event::SentMessage(Box::new(event::MessageSent {
+                echo_id,
+                message: Some(message.clone()),
+            })));
+        }
+
+        Ok(SendMessageResponse { message_id })
     }
 
     async fn query_has_permission(
@@ -469,6 +542,14 @@ impl chat_service_server::ChatService for ChatServer {
         request: Option<StreamEventsRequest>,
     ) -> Result<Option<Event>, Self::Error> {
         Err(ServerError::NotImplemented)
+    }
+
+    async fn stream_events_validate(&self, request: Request<()>) -> Result<(), Self::Error> {
+        let user_id = self.auth(&request)?;
+
+        self.event_chans.lock().entry(user_id).or_default();
+
+        Ok(())
     }
 
     async fn sync(&self) -> Result<Option<SyncEvent>, Self::Error> {

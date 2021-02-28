@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use harmony_rust_sdk::api::{auth::*, exports::hrpc::Request};
 use parking_lot::Mutex;
@@ -9,13 +9,15 @@ use crate::ServerError;
 
 #[derive(Debug)]
 pub struct AuthServer {
+    valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
     db: Db,
 }
 
 impl AuthServer {
-    pub fn new(db: Db) -> Self {
+    pub fn new(db: Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
         Self {
+            valid_sessions,
             step_map: Mutex::new(HashMap::new()),
             db,
         }
@@ -280,9 +282,11 @@ impl auth_service_server::AuthService for AuthServer {
                                         fallback_url: String::default(),
                                         step: Some(auth_step::Step::Session(Session {
                                             user_id,
-                                            session_token,
+                                            session_token: session_token.clone(),
                                         })),
                                     };
+
+                                    self.valid_sessions.lock().insert(session_token, user_id);
                                 }
                                 "register" => {
                                     let password = if let Some(Field::Bytes(value)) = values.pop() {
@@ -346,9 +350,11 @@ impl auth_service_server::AuthService for AuthServer {
                                         fallback_url: String::default(),
                                         step: Some(auth_step::Step::Session(Session {
                                             user_id,
-                                            session_token,
+                                            session_token: session_token.clone(),
                                         })),
                                     };
+
+                                    self.valid_sessions.lock().insert(session_token, user_id);
                                 }
                                 _ => unreachable!(),
                             }

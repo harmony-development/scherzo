@@ -1,7 +1,10 @@
+use std::{collections::HashMap, sync::Arc};
+
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer, chat::chat_service_server::ChatServiceServer,
     exports::hrpc::serve_multiple,
 };
+use parking_lot::Mutex;
 use scherzo::{
     impls::{auth::AuthServer, chat::ChatServer},
     ServerError,
@@ -34,8 +37,11 @@ async fn main() {
         .open()
         .expect("couldn't open database");
 
-    let auth = AuthServiceServer::new(AuthServer::new(db.clone())).filters();
-    let chat = ChatServiceServer::new(ChatServer::new(db)).filters();
+    let valid_sessions = Arc::new(Mutex::new(HashMap::new()));
+
+    let auth =
+        AuthServiceServer::new(AuthServer::new(db.clone(), valid_sessions.clone())).filters();
+    let chat = ChatServiceServer::new(ChatServer::new(db, valid_sessions)).filters();
 
     serve_multiple!(
         addr: ([127, 0, 0, 1], 2289),
