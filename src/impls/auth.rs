@@ -27,22 +27,22 @@ impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
     async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
-        todo!("federate")
+        Err(ServerError::NotImplemented)
     }
 
     async fn login_federated(
         &self,
         _: Request<LoginFederatedRequest>,
     ) -> Result<Session, Self::Error> {
-        todo!("login federated")
+        Err(ServerError::NotImplemented)
     }
 
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
-        todo!("key")
+        Err(ServerError::NotImplemented)
     }
 
     async fn stream_steps(&self) -> Result<Option<AuthStep>, Self::Error> {
-        Ok(None)
+        Err(ServerError::NotImplemented)
     }
 
     async fn stream_steps_validate(

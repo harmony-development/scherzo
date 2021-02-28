@@ -28,6 +28,7 @@ pub enum ServerError {
     },
     UserAlreadyExists,
     Unauthenticated,
+    NotImplemented,
 }
 
 impl Display for ServerError {
@@ -61,6 +62,7 @@ impl Display for ServerError {
             }
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
             ServerError::Unauthenticated => write!(f, "invalid auth id"),
+            ServerError::NotImplemented => write!(f, "not implemented"),
         }
     }
 }
@@ -86,6 +88,7 @@ impl CustomError for ServerError {
             | ServerError::WrongUserOrPassword { email: _ }
             | ServerError::UserAlreadyExists
             | ServerError::Unauthenticated => StatusCode::BAD_REQUEST,
+            ServerError::NotImplemented => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 

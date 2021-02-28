@@ -201,321 +201,321 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<CreateGuildRequest>,
     ) -> Result<CreateGuildResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn create_invite(
         &self,
         request: Request<CreateInviteRequest>,
     ) -> Result<CreateInviteResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn create_channel(
         &self,
         request: Request<CreateChannelRequest>,
     ) -> Result<CreateChannelResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn create_emote_pack(
         &self,
         request: Request<CreateEmotePackRequest>,
     ) -> Result<CreateEmotePackResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild_list(
         &self,
         request: Request<GetGuildListRequest>,
     ) -> Result<GetGuildListResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn add_guild_to_guild_list(
         &self,
         request: Request<AddGuildToGuildListRequest>,
     ) -> Result<AddGuildToGuildListResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn remove_guild_from_guild_list(
         &self,
         request: Request<RemoveGuildFromGuildListRequest>,
     ) -> Result<RemoveGuildFromGuildListResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild(
         &self,
         request: Request<GetGuildRequest>,
     ) -> Result<GetGuildResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild_invites(
         &self,
         request: Request<GetGuildInvitesRequest>,
     ) -> Result<GetGuildInvitesResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild_members(
         &self,
         request: Request<GetGuildMembersRequest>,
     ) -> Result<GetGuildMembersResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild_channels(
         &self,
         request: Request<GetGuildChannelsRequest>,
     ) -> Result<GetGuildChannelsResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_channel_messages(
         &self,
         request: Request<GetChannelMessagesRequest>,
     ) -> Result<GetChannelMessagesResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_emote_packs(
         &self,
         request: Request<GetEmotePacksRequest>,
     ) -> Result<GetEmotePacksResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_emote_pack_emotes(
         &self,
         request: Request<GetEmotePackEmotesRequest>,
     ) -> Result<GetEmotePackEmotesResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn update_guild_information(
         &self,
         request: Request<UpdateGuildInformationRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn update_channel_information(
         &self,
         request: Request<UpdateChannelInformationRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn update_channel_order(
         &self,
         request: Request<UpdateChannelOrderRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn add_emote_to_pack(
         &self,
         request: Request<AddEmoteToPackRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_guild(&self, request: Request<DeleteGuildRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_invite(
         &self,
         request: Request<DeleteInviteRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_channel(
         &self,
         request: Request<DeleteChannelRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_message(
         &self,
         request: Request<DeleteMessageRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_emote_from_pack(
         &self,
         request: Request<DeleteEmoteFromPackRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_emote_pack(
         &self,
         request: Request<DeleteEmotePackRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn dequip_emote_pack(
         &self,
         request: Request<DequipEmotePackRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn join_guild(
         &self,
         request: Request<JoinGuildRequest>,
     ) -> Result<JoinGuildResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn trigger_action(
         &self,
         request: Request<TriggerActionRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn send_message(
         &self,
         request: Request<SendMessageRequest>,
     ) -> Result<SendMessageResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn query_has_permission(
         &self,
         request: Request<QueryPermissionsRequest>,
     ) -> Result<QueryPermissionsResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn set_permissions(
         &self,
         request: Request<SetPermissionsRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_permissions(
         &self,
         request: Request<GetPermissionsRequest>,
     ) -> Result<GetPermissionsResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn move_role(
         &self,
         request: Request<MoveRoleRequest>,
     ) -> Result<MoveRoleResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_guild_roles(
         &self,
         request: Request<GetGuildRolesRequest>,
     ) -> Result<GetGuildRolesResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn add_guild_role(
         &self,
         request: Request<AddGuildRoleRequest>,
     ) -> Result<AddGuildRoleResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn modify_guild_role(
         &self,
         request: Request<ModifyGuildRoleRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn delete_guild_role(
         &self,
         request: Request<DeleteGuildRoleRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn manage_user_roles(
         &self,
         request: Request<ManageUserRolesRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_user_roles(
         &self,
         request: Request<GetUserRolesRequest>,
     ) -> Result<GetUserRolesResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn stream_events(
         &self,
         request: Option<StreamEventsRequest>,
     ) -> Result<Option<Event>, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn sync(&self) -> Result<Option<SyncEvent>, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_user(
         &self,
         request: Request<GetUserRequest>,
     ) -> Result<GetUserResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn get_user_metadata(
         &self,
         request: Request<GetUserMetadataRequest>,
     ) -> Result<GetUserMetadataResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn profile_update(
         &self,
         request: Request<ProfileUpdateRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn typing(&self, request: Request<TypingRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn preview_guild(
         &self,
         request: Request<PreviewGuildRequest>,
     ) -> Result<PreviewGuildResponse, Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn ban_user(&self, request: Request<BanUserRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn kick_user(&self, request: Request<KickUserRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 
     async fn unban_user(&self, request: Request<UnbanUserRequest>) -> Result<(), Self::Error> {
-        todo!()
+        Err(ServerError::NotImplemented)
     }
 }
