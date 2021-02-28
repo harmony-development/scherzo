@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use harmony_rust_sdk::api::auth::*;
+use harmony_rust_sdk::api::{auth::*, exports::hrpc::Request};
 use parking_lot::Mutex;
 use sled::Db;
 
@@ -26,19 +26,39 @@ impl AuthServer {
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
-    async fn federate(&self, _: FederateRequest) -> Result<FederateReply, Self::Error> {
+    async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
         todo!("federate")
     }
 
-    async fn login_federated(&self, _: LoginFederatedRequest) -> Result<Session, Self::Error> {
+    async fn login_federated(
+        &self,
+        _: Request<LoginFederatedRequest>,
+    ) -> Result<Session, Self::Error> {
         todo!("login federated")
     }
 
-    async fn key(&self, _: ()) -> Result<KeyReply, Self::Error> {
+    async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
         todo!("key")
     }
 
-    async fn begin_auth(&self, _: ()) -> Result<BeginAuthResponse, Self::Error> {
+    async fn stream_steps(&self) -> Result<Option<AuthStep>, Self::Error> {
+        Ok(None)
+    }
+
+    async fn stream_steps_validate(
+        &self,
+        request: Request<StreamStepsRequest>,
+    ) -> Result<(), Self::Error> {
+        let request = request.into_parts().0;
+
+        if self.step_map.lock().contains_key(&request.auth_id) {
+            Ok(())
+        } else {
+            Err(ServerError::InvalidAuthId)
+        }
+    }
+
+    async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
         let initial_step = vec![AuthStep {
             can_go_back: false,
             fallback_url: String::default(),
@@ -64,11 +84,11 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(BeginAuthResponse { auth_id })
     }
 
-    async fn next_step(&self, req: NextStepRequest) -> Result<AuthStep, Self::Error> {
+    async fn next_step(&self, req: Request<NextStepRequest>) -> Result<AuthStep, Self::Error> {
         let NextStepRequest {
             auth_id,
             step: maybe_step,
-        } = req;
+        } = req.into_parts().0;
 
         let next_step;
 
@@ -359,7 +379,8 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(next_step)
     }
 
-    async fn step_back(&self, req: StepBackRequest) -> Result<AuthStep, Self::Error> {
+    async fn step_back(&self, req: Request<StepBackRequest>) -> Result<AuthStep, Self::Error> {
+        let req = req.into_parts().0;
         let auth_id = req.auth_id;
 
         let prev_step;

@@ -3,7 +3,10 @@ use std::{collections::HashMap, convert::TryInto};
 use event::MessageUpdated;
 use harmony_rust_sdk::api::{
     chat::*,
-    exports::prost::{bytes::Bytes, Message},
+    exports::{
+        hrpc::Request,
+        prost::{bytes::Bytes, Message},
+    },
     harmonytypes::{Attachment, Message as HarmonyMessage},
 };
 use parking_lot::Mutex;
@@ -56,97 +59,32 @@ impl ChatServer {
 
         (message, key)
     }
+
+    fn auth<T>(&self, request: &Request<T>) -> bool {
+        let _auth_id = request
+            .get_header(&"Authorization".parse().unwrap())
+            .map_or_else(String::default, |val| {
+                val.to_str()
+                    .map_or_else(|_| String::default(), ToString::to_string)
+            });
+        todo!()
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
 impl chat_service_server::ChatService for ChatServer {
     type Error = ServerError;
 
-    async fn create_guild(
-        &self,
-        request: CreateGuildRequest,
-    ) -> Result<CreateGuildResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn create_invite(
-        &self,
-        request: CreateInviteRequest,
-    ) -> Result<CreateInviteResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn create_channel(
-        &self,
-        request: CreateChannelRequest,
-    ) -> Result<CreateChannelResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn create_emote_pack(
-        &self,
-        request: CreateEmotePackRequest,
-    ) -> Result<CreateEmotePackResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_guild_list(
-        &self,
-        request: GetGuildListRequest,
-    ) -> Result<GetGuildListResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn add_guild_to_guild_list(
-        &self,
-        request: AddGuildToGuildListRequest,
-    ) -> Result<AddGuildToGuildListResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn remove_guild_from_guild_list(
-        &self,
-        request: RemoveGuildFromGuildListRequest,
-    ) -> Result<RemoveGuildFromGuildListResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_guild(&self, request: GetGuildRequest) -> Result<GetGuildResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_guild_invites(
-        &self,
-        request: GetGuildInvitesRequest,
-    ) -> Result<GetGuildInvitesResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_guild_members(
-        &self,
-        request: GetGuildMembersRequest,
-    ) -> Result<GetGuildMembersResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_guild_channels(
-        &self,
-        request: GetGuildChannelsRequest,
-    ) -> Result<GetGuildChannelsResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_channel_messages(
-        &self,
-        request: GetChannelMessagesRequest,
-    ) -> Result<GetChannelMessagesResponse, Self::Error> {
-        todo!()
-    }
-
     async fn get_message(
         &self,
-        request: GetMessageRequest,
+        request: Request<GetMessageRequest>,
     ) -> Result<GetMessageResponse, Self::Error> {
+        if !self.auth(&request) {
+            return Err(ServerError::Unauthenticated);
+        }
+
+        let request = request.into_parts().0;
+
         let GetMessageRequest {
             guild_id,
             channel_id,
@@ -158,42 +96,16 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetMessageResponse { message })
     }
 
-    async fn get_emote_packs(
+    async fn update_message(
         &self,
-        request: GetEmotePacksRequest,
-    ) -> Result<GetEmotePacksResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn get_emote_pack_emotes(
-        &self,
-        request: GetEmotePackEmotesRequest,
-    ) -> Result<GetEmotePackEmotesResponse, Self::Error> {
-        todo!()
-    }
-
-    async fn update_guild_information(
-        &self,
-        request: UpdateGuildInformationRequest,
+        request: Request<UpdateMessageRequest>,
     ) -> Result<(), Self::Error> {
-        todo!()
-    }
+        if !self.auth(&request) {
+            return Err(ServerError::Unauthenticated);
+        }
 
-    async fn update_channel_information(
-        &self,
-        request: UpdateChannelInformationRequest,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
+        let request = request.into_parts().0;
 
-    async fn update_channel_order(
-        &self,
-        request: UpdateChannelOrderRequest,
-    ) -> Result<(), Self::Error> {
-        todo!()
-    }
-
-    async fn update_message(&self, request: UpdateMessageRequest) -> Result<(), Self::Error> {
         let UpdateMessageRequest {
             guild_id,
             channel_id,
@@ -285,157 +197,325 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    async fn add_emote_to_pack(&self, request: AddEmoteToPackRequest) -> Result<(), Self::Error> {
+    async fn create_guild(
+        &self,
+        request: Request<CreateGuildRequest>,
+    ) -> Result<CreateGuildResponse, Self::Error> {
         todo!()
     }
 
-    async fn delete_guild(&self, request: DeleteGuildRequest) -> Result<(), Self::Error> {
+    async fn create_invite(
+        &self,
+        request: Request<CreateInviteRequest>,
+    ) -> Result<CreateInviteResponse, Self::Error> {
         todo!()
     }
 
-    async fn delete_invite(&self, request: DeleteInviteRequest) -> Result<(), Self::Error> {
+    async fn create_channel(
+        &self,
+        request: Request<CreateChannelRequest>,
+    ) -> Result<CreateChannelResponse, Self::Error> {
         todo!()
     }
 
-    async fn delete_channel(&self, request: DeleteChannelRequest) -> Result<(), Self::Error> {
+    async fn create_emote_pack(
+        &self,
+        request: Request<CreateEmotePackRequest>,
+    ) -> Result<CreateEmotePackResponse, Self::Error> {
         todo!()
     }
 
-    async fn delete_message(&self, request: DeleteMessageRequest) -> Result<(), Self::Error> {
+    async fn get_guild_list(
+        &self,
+        request: Request<GetGuildListRequest>,
+    ) -> Result<GetGuildListResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn add_guild_to_guild_list(
+        &self,
+        request: Request<AddGuildToGuildListRequest>,
+    ) -> Result<AddGuildToGuildListResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn remove_guild_from_guild_list(
+        &self,
+        request: Request<RemoveGuildFromGuildListRequest>,
+    ) -> Result<RemoveGuildFromGuildListResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_guild(
+        &self,
+        request: Request<GetGuildRequest>,
+    ) -> Result<GetGuildResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_guild_invites(
+        &self,
+        request: Request<GetGuildInvitesRequest>,
+    ) -> Result<GetGuildInvitesResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_guild_members(
+        &self,
+        request: Request<GetGuildMembersRequest>,
+    ) -> Result<GetGuildMembersResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_guild_channels(
+        &self,
+        request: Request<GetGuildChannelsRequest>,
+    ) -> Result<GetGuildChannelsResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_channel_messages(
+        &self,
+        request: Request<GetChannelMessagesRequest>,
+    ) -> Result<GetChannelMessagesResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_emote_packs(
+        &self,
+        request: Request<GetEmotePacksRequest>,
+    ) -> Result<GetEmotePacksResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn get_emote_pack_emotes(
+        &self,
+        request: Request<GetEmotePackEmotesRequest>,
+    ) -> Result<GetEmotePackEmotesResponse, Self::Error> {
+        todo!()
+    }
+
+    async fn update_guild_information(
+        &self,
+        request: Request<UpdateGuildInformationRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn update_channel_information(
+        &self,
+        request: Request<UpdateChannelInformationRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn update_channel_order(
+        &self,
+        request: Request<UpdateChannelOrderRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn add_emote_to_pack(
+        &self,
+        request: Request<AddEmoteToPackRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn delete_guild(&self, request: Request<DeleteGuildRequest>) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn delete_invite(
+        &self,
+        request: Request<DeleteInviteRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn delete_channel(
+        &self,
+        request: Request<DeleteChannelRequest>,
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    async fn delete_message(
+        &self,
+        request: Request<DeleteMessageRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn delete_emote_from_pack(
         &self,
-        request: DeleteEmoteFromPackRequest,
+        request: Request<DeleteEmoteFromPackRequest>,
     ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn delete_emote_pack(&self, request: DeleteEmotePackRequest) -> Result<(), Self::Error> {
+    async fn delete_emote_pack(
+        &self,
+        request: Request<DeleteEmotePackRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn dequip_emote_pack(&self, request: DequipEmotePackRequest) -> Result<(), Self::Error> {
+    async fn dequip_emote_pack(
+        &self,
+        request: Request<DequipEmotePackRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn join_guild(
         &self,
-        request: JoinGuildRequest,
+        request: Request<JoinGuildRequest>,
     ) -> Result<JoinGuildResponse, Self::Error> {
         todo!()
     }
 
-    async fn leave_guild(&self, request: LeaveGuildRequest) -> Result<(), Self::Error> {
+    async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn trigger_action(&self, request: TriggerActionRequest) -> Result<(), Self::Error> {
+    async fn trigger_action(
+        &self,
+        request: Request<TriggerActionRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn send_message(
         &self,
-        request: SendMessageRequest,
+        request: Request<SendMessageRequest>,
     ) -> Result<SendMessageResponse, Self::Error> {
         todo!()
     }
 
     async fn query_has_permission(
         &self,
-        request: QueryPermissionsRequest,
+        request: Request<QueryPermissionsRequest>,
     ) -> Result<QueryPermissionsResponse, Self::Error> {
         todo!()
     }
 
-    async fn set_permissions(&self, request: SetPermissionsRequest) -> Result<(), Self::Error> {
+    async fn set_permissions(
+        &self,
+        request: Request<SetPermissionsRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn get_permissions(
         &self,
-        request: GetPermissionsRequest,
+        request: Request<GetPermissionsRequest>,
     ) -> Result<GetPermissionsResponse, Self::Error> {
         todo!()
     }
 
-    async fn move_role(&self, request: MoveRoleRequest) -> Result<MoveRoleResponse, Self::Error> {
+    async fn move_role(
+        &self,
+        request: Request<MoveRoleRequest>,
+    ) -> Result<MoveRoleResponse, Self::Error> {
         todo!()
     }
 
     async fn get_guild_roles(
         &self,
-        request: GetGuildRolesRequest,
+        request: Request<GetGuildRolesRequest>,
     ) -> Result<GetGuildRolesResponse, Self::Error> {
         todo!()
     }
 
     async fn add_guild_role(
         &self,
-        request: AddGuildRoleRequest,
+        request: Request<AddGuildRoleRequest>,
     ) -> Result<AddGuildRoleResponse, Self::Error> {
         todo!()
     }
 
-    async fn modify_guild_role(&self, request: ModifyGuildRoleRequest) -> Result<(), Self::Error> {
+    async fn modify_guild_role(
+        &self,
+        request: Request<ModifyGuildRoleRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn delete_guild_role(&self, request: DeleteGuildRoleRequest) -> Result<(), Self::Error> {
+    async fn delete_guild_role(
+        &self,
+        request: Request<DeleteGuildRoleRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn manage_user_roles(&self, request: ManageUserRolesRequest) -> Result<(), Self::Error> {
+    async fn manage_user_roles(
+        &self,
+        request: Request<ManageUserRolesRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn get_user_roles(
         &self,
-        request: GetUserRolesRequest,
+        request: Request<GetUserRolesRequest>,
     ) -> Result<GetUserRolesResponse, Self::Error> {
         todo!()
     }
 
-    async fn stream_events(&self, request: StreamEventsRequest) -> Result<Event, Self::Error> {
+    async fn stream_events(
+        &self,
+        request: Option<StreamEventsRequest>,
+    ) -> Result<Option<Event>, Self::Error> {
         todo!()
     }
 
-    async fn get_user(&self, request: GetUserRequest) -> Result<GetUserResponse, Self::Error> {
+    async fn sync(&self) -> Result<Option<SyncEvent>, Self::Error> {
+        todo!()
+    }
+
+    async fn get_user(
+        &self,
+        request: Request<GetUserRequest>,
+    ) -> Result<GetUserResponse, Self::Error> {
         todo!()
     }
 
     async fn get_user_metadata(
         &self,
-        request: GetUserMetadataRequest,
+        request: Request<GetUserMetadataRequest>,
     ) -> Result<GetUserMetadataResponse, Self::Error> {
         todo!()
     }
 
-    async fn profile_update(&self, request: ProfileUpdateRequest) -> Result<(), Self::Error> {
+    async fn profile_update(
+        &self,
+        request: Request<ProfileUpdateRequest>,
+    ) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn typing(&self, request: TypingRequest) -> Result<(), Self::Error> {
+    async fn typing(&self, request: Request<TypingRequest>) -> Result<(), Self::Error> {
         todo!()
     }
 
     async fn preview_guild(
         &self,
-        request: PreviewGuildRequest,
+        request: Request<PreviewGuildRequest>,
     ) -> Result<PreviewGuildResponse, Self::Error> {
         todo!()
     }
 
-    async fn ban_user(&self, request: BanUserRequest) -> Result<(), Self::Error> {
+    async fn ban_user(&self, request: Request<BanUserRequest>) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn kick_user(&self, request: KickUserRequest) -> Result<(), Self::Error> {
+    async fn kick_user(&self, request: Request<KickUserRequest>) -> Result<(), Self::Error> {
         todo!()
     }
 
-    async fn unban_user(&self, request: UnbanUserRequest) -> Result<(), Self::Error> {
+    async fn unban_user(&self, request: Request<UnbanUserRequest>) -> Result<(), Self::Error> {
         todo!()
     }
 }

@@ -27,6 +27,7 @@ pub enum ServerError {
         email: String,
     },
     UserAlreadyExists,
+    Unauthenticated,
 }
 
 impl Display for ServerError {
@@ -59,6 +60,7 @@ impl Display for ServerError {
                 write!(f, "wrong email or password for email {}", email)
             }
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
+            ServerError::Unauthenticated => write!(f, "invalid auth id"),
         }
     }
 }
@@ -82,7 +84,8 @@ impl CustomError for ServerError {
                 expected: _,
             }
             | ServerError::WrongUserOrPassword { email: _ }
-            | ServerError::UserAlreadyExists => StatusCode::BAD_REQUEST,
+            | ServerError::UserAlreadyExists
+            | ServerError::Unauthenticated => StatusCode::BAD_REQUEST,
         }
     }
 
