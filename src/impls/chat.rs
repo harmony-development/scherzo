@@ -19,30 +19,40 @@ use sled::Tree;
 use super::{gen_rand_str, gen_rand_u64};
 use crate::{concat_static, ServerError};
 
+fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 17] {
+    concat_static!(17, make_chan_key(guild_id, channel_id), [9])
+}
+
 fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 25] {
     concat_static!(
         25,
-        guild_id.to_le_bytes(),
-        channel_id.to_le_bytes(),
-        [9],
+        make_msg_prefix(guild_id, channel_id),
         message_id.to_le_bytes()
     )
 }
 
 fn make_chan_key(guild_id: u64, channel_id: u64) -> [u8; 17] {
-    concat_static!(17, guild_id.to_le_bytes(), [8], channel_id.to_le_bytes())
+    concat_static!(
+        17,
+        make_guild_chan_prefix(guild_id),
+        channel_id.to_le_bytes()
+    )
+}
+
+fn make_guild_chan_prefix(guild_id: u64) -> [u8; 9] {
+    concat_static!(9, guild_id.to_le_bytes(), [8])
+}
+
+fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
+    concat_static!(17, make_guild_mem_prefix(guild_id), user_id.to_le_bytes())
+}
+
+fn make_guild_mem_prefix(guild_id: u64) -> [u8; 9] {
+    concat_static!(9, guild_id.to_le_bytes(), [9])
 }
 
 fn make_guild_list_key_prefix(user_id: u64) -> [u8; 10] {
     concat_static!(10, user_id.to_le_bytes(), [1, 2])
-}
-
-fn make_invite_key(name: &str) -> Vec<u8> {
-    ["invite_".as_bytes(), name.as_bytes()].concat()
-}
-
-fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-    concat_static!(17, guild_id.to_le_bytes(), [9], user_id.to_le_bytes())
 }
 
 fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
@@ -52,6 +62,14 @@ fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
         host.as_bytes(),
     ]
     .concat()
+}
+
+fn make_invite_key(name: &str) -> Vec<u8> {
+    ["invite_".as_bytes(), name.as_bytes()].concat()
+}
+
+fn make_member_profile_key(user_id: u64) -> [u8; 13] {
+    concat_static!(13, "user_".as_bytes(), user_id.to_le_bytes())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -527,7 +545,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let members = self
             .chat_tree
-            .scan_prefix(concat_static!(9, guild_id.to_le_bytes(), [9]))
+            .scan_prefix(make_guild_mem_prefix(guild_id))
             .flatten()
             .map(|(id, _)| u64::from_le_bytes(id.split_at(9).1.try_into().unwrap()))
             .collect();
@@ -546,7 +564,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let channels = self
             .chat_tree
-            .scan_prefix(concat_static!(9, guild_id.to_le_bytes(), [8]))
+            .scan_prefix(make_guild_chan_prefix(guild_id))
             .flatten()
             .map(|(_, value)| Channel::decode(value.as_ref()).unwrap())
             .collect();
@@ -568,7 +586,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let mut msgs = self
             .chat_tree
-            .scan_prefix(concat_static!(17, make_chan_key(guild_id, channel_id), [9]))
+            .scan_prefix(make_msg_prefix(guild_id, channel_id))
             .flatten()
             .rev()
             .map(|(key, value)| {
@@ -639,28 +657,125 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     async fn delete_guild(&self, request: Request<DeleteGuildRequest>) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let DeleteGuildRequest { guild_id } = request.into_parts().0;
+
+        let channels = self
+            .chat_tree
+            .scan_prefix(make_guild_chan_prefix(guild_id))
+            .flatten()
+            .map(|(key, _)| key);
+        let members = self
+            .chat_tree
+            .scan_prefix(make_guild_mem_prefix(guild_id))
+            .flatten()
+            .map(|(key, _)| key);
+
+        let mut batch = sled::Batch::default();
+        for channel in channels {
+            batch.remove(&channel);
+            let messages = self
+                .chat_tree
+                .scan_prefix(concat_static!(17, channel, [9]))
+                .flatten()
+                .map(|(key, _)| key);
+            for message in messages {
+                batch.remove(&message);
+            }
+        }
+        for member in members {
+            batch.remove(&member);
+        }
+        self.chat_tree.apply_batch(batch).unwrap();
+
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
+        );
+
+        Ok(())
     }
 
     async fn delete_invite(
         &self,
         request: Request<DeleteInviteRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let DeleteInviteRequest {
+            guild_id: _,
+            invite_id,
+        } = request.into_parts().0;
+
+        self.chat_tree
+            .remove(make_invite_key(invite_id.as_str()))
+            .unwrap();
+
+        Ok(())
     }
 
     async fn delete_channel(
         &self,
         request: Request<DeleteChannelRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let DeleteChannelRequest {
+            guild_id,
+            channel_id,
+        } = request.into_parts().0;
+
+        let messages = self
+            .chat_tree
+            .scan_prefix(make_msg_prefix(guild_id, channel_id))
+            .flatten()
+            .map(|(k, _)| k);
+
+        let mut batch = sled::Batch::default();
+        batch.remove(&make_chan_key(guild_id, channel_id));
+        for key in messages {
+            batch.remove(key);
+        }
+        self.chat_tree.apply_batch(batch).unwrap();
+
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::DeletedChannel(event::ChannelDeleted {
+                guild_id,
+                channel_id,
+            }),
+        );
+
+        Ok(())
     }
 
     async fn delete_message(
         &self,
         request: Request<DeleteMessageRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let DeleteMessageRequest {
+            guild_id,
+            channel_id,
+            message_id,
+        } = request.into_parts().0;
+
+        self.chat_tree
+            .remove(make_msg_key(guild_id, channel_id, message_id))
+            .unwrap();
+
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::DeletedMessage(event::MessageDeleted {
+                channel_id,
+                guild_id,
+                message_id,
+            }),
+        );
+
+        Ok(())
     }
 
     async fn delete_emote_from_pack(
@@ -964,7 +1079,23 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetUserRequest>,
     ) -> Result<GetUserResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let GetUserRequest { user_id } = request.into_parts().0;
+
+        let key = make_member_profile_key(user_id);
+
+        let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
+            GetUserResponse::decode(profile_raw.as_ref()).unwrap()
+        } else {
+            let profile = GetUserResponse::default();
+            let mut buf = BytesMut::new();
+            encode_protobuf_message(&mut buf, profile.clone());
+            self.chat_tree.insert(key, buf.as_ref()).unwrap();
+            profile
+        };
+
+        Ok(profile)
     }
 
     async fn get_user_metadata(
@@ -978,11 +1109,67 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<ProfileUpdateRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let ProfileUpdateRequest {
+            new_username,
+            update_username,
+            new_avatar,
+            update_avatar,
+            new_status,
+            update_status,
+            is_bot,
+            update_is_bot,
+        } = request.into_parts().0;
+
+        let key = make_member_profile_key(user_id);
+
+        let mut profile = self
+            .chat_tree
+            .get(key)
+            .unwrap()
+            .map_or_else(GetUserResponse::default, |e| {
+                GetUserResponse::decode(e.as_ref()).unwrap()
+            });
+
+        if update_username {
+            profile.user_name = new_username;
+        }
+        if update_avatar {
+            profile.user_avatar = new_avatar;
+        }
+        if update_status {
+            profile.user_status = new_status;
+        }
+        if update_is_bot {
+            profile.is_bot = is_bot;
+        }
+
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, profile);
+        self.chat_tree.insert(key, buf.as_ref()).unwrap();
+
+        Ok(())
     }
 
     async fn typing(&self, request: Request<TypingRequest>) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let TypingRequest {
+            guild_id,
+            channel_id,
+        } = request.into_parts().0;
+
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::Typing(event::Typing {
+                channel_id,
+                guild_id,
+                user_id,
+            }),
+        );
+
+        Ok(())
     }
 
     async fn preview_guild(
