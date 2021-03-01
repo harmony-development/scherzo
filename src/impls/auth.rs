@@ -11,6 +11,7 @@ use crate::ServerError;
 pub struct AuthServer {
     valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
+    send_step: Mutex<HashMap<String, AuthStep>>,
     auth_tree: Tree,
 }
 
@@ -19,6 +20,7 @@ impl AuthServer {
         Self {
             valid_sessions,
             step_map: Mutex::new(HashMap::new()),
+            send_step: Mutex::new(HashMap::new()),
             auth_tree: db.open_tree("auth").unwrap(),
         }
     }
@@ -47,19 +49,17 @@ impl auth_service_server::AuthService for AuthServer {
         &self,
         validation_request: &Request<StreamStepsRequest>,
     ) -> Result<Option<AuthStep>, Self::Error> {
-        if !self
-            .step_map
-            .lock()
-            .contains_key(&validation_request.get_message().auth_id)
-        {
+        let auth_id = &validation_request.get_message().auth_id;
+
+        if !self.step_map.lock().contains_key(auth_id) {
             return Err(ServerError::InvalidAuthId);
         }
 
-        Err(ServerError::NotImplemented)
+        Ok(self.send_step.lock().remove(auth_id))
     }
 
     async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
-        let initial_step = vec![AuthStep {
+        let initial_step = AuthStep {
             can_go_back: false,
             fallback_url: String::default(),
             step: Some(auth_step::Step::Choice(auth_step::Choice {
@@ -69,15 +69,17 @@ impl auth_service_server::AuthService for AuthServer {
                     .map(ToString::to_string)
                     .collect(),
             })),
-        }];
+        };
 
         let auth_id: String = gen_rand_str(30);
 
         self.step_map
             .lock()
             .entry(auth_id.clone())
-            .and_modify(|s| *s = initial_step.clone())
-            .or_insert(initial_step);
+            .and_modify(|s| *s = vec![initial_step.clone()])
+            .or_insert_with(|| vec![initial_step.clone()]);
+
+        self.send_step.lock().insert(auth_id.clone(), initial_step);
 
         log::debug!("new auth session {}", auth_id);
 
@@ -379,6 +381,8 @@ impl auth_service_server::AuthService for AuthServer {
             self.step_map.lock().remove(&auth_id);
         }
 
+        self.send_step.lock().insert(auth_id, next_step.clone());
+
         Ok(next_step)
     }
 
@@ -399,6 +403,7 @@ impl auth_service_server::AuthService for AuthServer {
                 );
             }
             prev_step = step_stack.last().unwrap().clone();
+            self.send_step.lock().insert(auth_id, prev_step.clone());
         } else {
             return Err(ServerError::InvalidAuthId);
         }
