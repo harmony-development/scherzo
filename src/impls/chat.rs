@@ -19,13 +19,13 @@ use sled::Tree;
 use super::{gen_rand_str, gen_rand_u64};
 use crate::{concat_static, ServerError};
 
-fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 17] {
-    concat_static!(17, make_chan_key(guild_id, channel_id), [9])
+fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
+    concat_static!(18, make_chan_key(guild_id, channel_id), [9])
 }
 
-fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 25] {
+fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
     concat_static!(
-        25,
+        26,
         make_msg_prefix(guild_id, channel_id),
         message_id.to_le_bytes()
     )
@@ -112,7 +112,7 @@ impl ChatServer {
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-    ) -> Result<(HarmonyMessage, [u8; 25]), <Self as chat_service_server::ChatService>::Error> {
+    ) -> Result<(HarmonyMessage, [u8; 26]), <Self as chat_service_server::ChatService>::Error> {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
         let message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
@@ -584,14 +584,15 @@ impl chat_service_server::ChatService for ChatServer {
             before_message,
         } = request.into_parts().0;
 
+        let key = make_msg_prefix(guild_id, channel_id);
         let mut msgs = self
             .chat_tree
-            .scan_prefix(make_msg_prefix(guild_id, channel_id))
+            .scan_prefix(key)
             .flatten()
             .rev()
             .map(|(key, value)| {
                 (
-                    u64::from_le_bytes(key.split_at(17).1.try_into().unwrap()),
+                    u64::from_le_bytes(key.split_at(key.len()).1.try_into().unwrap()),
                     value,
                 )
             })
