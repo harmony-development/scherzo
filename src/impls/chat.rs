@@ -97,10 +97,10 @@ impl ChatServer {
         }
     }
 
-    fn send_event_through_chan(&self, guild_id: u64, event: event::Event) {
+    fn send_event_through_chan(&self, sub: EventSub, event: event::Event) {
         for chan in self.event_chans.lock().values_mut() {
             for subbed_to in self.subbed_to.lock().values() {
-                if subbed_to.contains(&EventSub::Guild(guild_id)) {
+                if subbed_to.contains(&sub) {
                     chan.push(event.clone());
                 }
             }
@@ -233,7 +233,7 @@ impl chat_service_server::ChatService for ChatServer {
         let edited_at = Some(std::time::SystemTime::now().into());
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::EditedMessage(Box::new(MessageUpdated {
                 guild_id,
                 channel_id,
@@ -380,7 +380,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::CreatedChannel(event::ChannelCreated {
                 guild_id,
                 channel_id,
@@ -457,7 +457,7 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Homeserver,
             event::Event::GuildAddedToList(event::GuildAddedToList {
                 guild_id,
                 homeserver,
@@ -483,7 +483,7 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Homeserver,
             event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
                 guild_id,
                 homeserver,
@@ -690,7 +690,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.apply_batch(batch).unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
         );
 
@@ -740,7 +740,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.apply_batch(batch).unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::DeletedChannel(event::ChannelDeleted {
                 guild_id,
                 channel_id,
@@ -767,7 +767,7 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::DeletedMessage(event::MessageDeleted {
                 channel_id,
                 guild_id,
@@ -833,7 +833,7 @@ impl chat_service_server::ChatService for ChatServer {
             .await?;
 
             self.send_event_through_chan(
-                guild_id,
+                EventSub::Guild(guild_id),
                 event::Event::JoinedMember(event::MemberJoined {
                     guild_id,
                     member_id: user_id,
@@ -872,7 +872,7 @@ impl chat_service_server::ChatService for ChatServer {
         .await?;
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::LeftMember(event::MemberLeft {
                 guild_id,
                 member_id: user_id,
@@ -954,7 +954,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.insert(&key, buf).unwrap();
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::SentMessage(Box::new(event::MessageSent {
                 echo_id,
                 message: Some(message),
@@ -1157,7 +1157,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.send_event_through_chan(
-            guild_id,
+            EventSub::Guild(guild_id),
             event::Event::Typing(event::Typing {
                 channel_id,
                 guild_id,
