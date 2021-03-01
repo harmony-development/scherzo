@@ -68,7 +68,7 @@ fn make_invite_key(name: &str) -> Vec<u8> {
     ["invite_".as_bytes(), name.as_bytes()].concat()
 }
 
-fn make_member_profile_key(user_id: u64) -> [u8; 13] {
+pub(super) fn make_member_profile_key(user_id: u64) -> [u8; 13] {
     concat_static!(13, "user_".as_bytes(), user_id.to_le_bytes())
 }
 
@@ -1088,11 +1088,7 @@ impl chat_service_server::ChatService for ChatServer {
         let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
             GetUserResponse::decode(profile_raw.as_ref()).unwrap()
         } else {
-            let profile = GetUserResponse::default();
-            let mut buf = BytesMut::new();
-            encode_protobuf_message(&mut buf, profile.clone());
-            self.chat_tree.insert(key, buf.as_ref()).unwrap();
-            profile
+            return Err(ServerError::NoSuchUser(user_id));
         };
 
         Ok(profile)

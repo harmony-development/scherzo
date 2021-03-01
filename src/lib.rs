@@ -36,6 +36,7 @@ pub enum ServerError {
     },
     NoSuchGuild(u64),
     NoSuchInvite(String),
+    NoSuchUser(u64),
 }
 
 impl Display for ServerError {
@@ -71,6 +72,7 @@ impl Display for ServerError {
             ServerError::Unauthenticated => write!(f, "invalid auth id"),
             ServerError::NotImplemented => write!(f, "not implemented"),
             ServerError::NoSuchGuild(id) => write!(f, "no such guild with id {}", id),
+            ServerError::NoSuchUser(id) => write!(f, "no such user with id {}", id),
             ServerError::NoSuchMessage {
                 guild_id,
                 channel_id,
@@ -112,7 +114,8 @@ impl CustomError for ServerError {
                 guild_id: _,
                 channel_id: _,
                 message_id: _,
-            } => StatusCode::BAD_REQUEST,
+            }
+            | ServerError::NoSuchUser(_) => StatusCode::BAD_REQUEST,
             ServerError::NotImplemented => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }

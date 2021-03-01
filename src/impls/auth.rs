@@ -1,10 +1,17 @@
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
-use harmony_rust_sdk::api::{auth::*, exports::hrpc::Request};
+use harmony_rust_sdk::api::{
+    auth::*,
+    chat::GetUserResponse,
+    exports::{
+        hrpc::{encode_protobuf_message, Request},
+        prost::bytes::BytesMut,
+    },
+};
 use parking_lot::Mutex;
 use sled::Tree;
 
-use super::{gen_rand_str, gen_rand_u64};
+use super::{chat::make_member_profile_key, gen_rand_str, gen_rand_u64};
 use crate::ServerError;
 
 #[derive(Debug)]
@@ -13,15 +20,21 @@ pub struct AuthServer {
     step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
     send_step: Mutex<HashMap<String, AuthStep>>,
     auth_tree: Tree,
+    chat_tree: Tree,
 }
 
 impl AuthServer {
-    pub fn new(auth_tree: Tree, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
+    pub fn new(
+        chat_tree: Tree,
+        auth_tree: Tree,
+        valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
+    ) -> Self {
         Self {
             valid_sessions,
             step_map: Mutex::new(HashMap::new()),
             send_step: Mutex::new(HashMap::new()),
             auth_tree,
+            chat_tree,
         }
     }
 }
@@ -325,21 +338,28 @@ impl auth_service_server::AuthService for AuthServer {
                                     let user_id = gen_rand_u64();
 
                                     let mut batch = sled::Batch::default();
-                                    batch.insert(
-                                        format!("{}_name", user_id).as_str(),
-                                        username.as_str(),
-                                    );
                                     batch.insert(email.as_str(), &user_id.to_le_bytes());
                                     batch.insert(&user_id.to_le_bytes(), password);
                                     self.auth_tree
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
+                                    let mut buf = BytesMut::new();
+                                    encode_protobuf_message(
+                                        &mut buf,
+                                        GetUserResponse {
+                                            user_name: username,
+                                            ..Default::default()
+                                        },
+                                    );
+                                    self.chat_tree
+                                        .insert(make_member_profile_key(user_id), buf.as_ref())
+                                        .unwrap();
+
                                     log::debug!(
-                                        "new user {} registered with email {} and username {}",
+                                        "new user {} registered with email {}",
                                         user_id,
                                         email,
-                                        username
                                     );
 
                                     let session_token = gen_rand_str(30);
