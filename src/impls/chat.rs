@@ -37,6 +37,10 @@ fn make_guild_list_key_prefix(user_id: u64) -> [u8; 10] {
     concat_static!(10, user_id.to_le_bytes(), [1, 2])
 }
 
+fn make_invite_key(name: &str) -> Vec<u8> {
+    ["invite_".as_bytes(), name.as_bytes()].concat()
+}
+
 fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
     [
         make_guild_list_key_prefix(user_id).as_ref(),
@@ -68,6 +72,16 @@ impl ChatServer {
             chat_tree,
             subbed_to: Mutex::new(HashMap::new()),
             event_chans: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn send_event_through_chan(&self, guild_id: u64, event: event::Event) {
+        for chan in self.event_chans.lock().values_mut() {
+            for subbed_to in self.subbed_to.lock().values() {
+                if subbed_to.contains(&EventSub::Guild(guild_id)) {
+                    chan.push(event.clone());
+                }
+            }
         }
     }
 
@@ -137,7 +151,7 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<UpdateMessageRequest>,
     ) -> Result<(), Self::Error> {
-        let user_id = self.auth(&request)?;
+        self.auth(&request)?;
 
         let request = request.into_parts().0;
 
@@ -204,35 +218,27 @@ impl chat_service_server::ChatService for ChatServer {
 
         let edited_at = Some(std::time::SystemTime::now().into());
 
-        for chan in self.event_chans.lock().values_mut() {
-            if self
-                .subbed_to
-                .lock()
-                .get(&user_id)
-                .map_or(false, |subbed_to| {
-                    subbed_to.contains(&EventSub::Guild(guild_id))
-                })
-            {
-                chan.push(event::Event::EditedMessage(Box::new(MessageUpdated {
-                    guild_id,
-                    channel_id,
-                    message_id,
-                    content: content.clone(),
-                    update_content,
-                    embeds: embeds.clone(),
-                    update_embeds,
-                    actions: actions.clone(),
-                    update_actions,
-                    attachments: attachments.clone(),
-                    update_attachments,
-                    overrides: overrides.clone(),
-                    update_overrides,
-                    metadata: metadata.clone(),
-                    update_metadata,
-                    edited_at: edited_at.clone(),
-                })));
-            }
-        }
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::EditedMessage(Box::new(MessageUpdated {
+                guild_id,
+                channel_id,
+                message_id,
+                content,
+                update_content,
+                embeds,
+                update_embeds,
+                actions,
+                update_actions,
+                attachments,
+                update_attachments,
+                overrides,
+                update_overrides,
+                metadata,
+                update_metadata,
+                edited_at,
+            })),
+        );
 
         Ok(())
     }
@@ -244,39 +250,31 @@ impl chat_service_server::ChatService for ChatServer {
         let user_id = self.auth(&request)?;
 
         let CreateGuildRequest {
-            metadata: _,
+            metadata,
             guild_name,
             picture_url,
         } = request.into_parts().0;
 
         let guild_id = {
             let mut guild_id = gen_rand_u64();
-            while self
-                .chat_tree
-                .scan_prefix(guild_id.to_le_bytes())
-                .flatten()
-                .count()
-                > 0
-            {
+            while self.chat_tree.contains_key(guild_id.to_le_bytes()).unwrap() {
                 guild_id = gen_rand_u64();
             }
             guild_id
         };
 
-        let mut batch = sled::Batch::default();
-        batch.insert(
-            &concat_static!(9, guild_id.to_le_bytes(), [1]),
-            &user_id.to_le_bytes(),
-        );
-        batch.insert(
-            &concat_static!(9, guild_id.to_le_bytes(), [2]),
-            guild_name.as_str(),
-        );
-        batch.insert(
-            &concat_static!(9, guild_id.to_le_bytes(), [3]),
-            picture_url.as_str(),
-        );
-        self.chat_tree.apply_batch(batch).unwrap();
+        let guild = GetGuildResponse {
+            guild_name,
+            guild_picture: picture_url,
+            guild_owner: user_id,
+            metadata,
+        };
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, guild);
+
+        self.chat_tree
+            .insert(guild_id.to_le_bytes().as_ref(), buf.as_ref())
+            .unwrap();
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -285,14 +283,39 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<CreateInviteRequest>,
     ) -> Result<CreateInviteResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let CreateInviteRequest {
+            guild_id,
+            name,
+            possible_uses,
+        } = request.into_parts().0;
+
+        let key = make_invite_key(name.as_str());
+
+        let invite = get_guild_invites_response::Invite {
+            possible_uses,
+            use_count: 0,
+            invite_id: name.clone(),
+        };
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, invite);
+
+        self.chat_tree
+            .insert(
+                key,
+                [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
+            )
+            .unwrap();
+
+        Ok(CreateInviteResponse { name })
     }
 
     async fn create_channel(
         &self,
         request: Request<CreateChannelRequest>,
     ) -> Result<CreateChannelResponse, Self::Error> {
-        let user_id = self.auth(&request)?;
+        self.auth(&request)?;
 
         // TODO: do ordering
         let CreateChannelRequest {
@@ -326,26 +349,18 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
 
-        for chan in self.event_chans.lock().values_mut() {
-            if self
-                .subbed_to
-                .lock()
-                .get(&user_id)
-                .map_or(false, |subbed_to| {
-                    subbed_to.contains(&EventSub::Guild(guild_id))
-                })
-            {
-                chan.push(event::Event::CreatedChannel(event::ChannelCreated {
-                    guild_id,
-                    channel_id,
-                    name: channel_name.clone(),
-                    previous_id,
-                    next_id,
-                    is_category,
-                    metadata: metadata.clone(),
-                }));
-            }
-        }
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::CreatedChannel(event::ChannelCreated {
+                guild_id,
+                channel_id,
+                name: channel_name,
+                previous_id,
+                next_id,
+                is_category,
+                metadata,
+            }),
+        );
 
         Ok(CreateChannelResponse { channel_id })
     }
@@ -411,6 +426,14 @@ impl chat_service_server::ChatService for ChatServer {
             )
             .unwrap();
 
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::GuildAddedToList(event::GuildAddedToList {
+                guild_id,
+                homeserver,
+            }),
+        );
+
         Ok(AddGuildToGuildListResponse {})
     }
 
@@ -429,6 +452,14 @@ impl chat_service_server::ChatService for ChatServer {
             .remove(make_guild_list_key(user_id, guild_id, homeserver.as_str()))
             .unwrap();
 
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
+                guild_id,
+                homeserver,
+            }),
+        );
+
         Ok(RemoveGuildFromGuildListResponse {})
     }
 
@@ -440,48 +471,14 @@ impl chat_service_server::ChatService for ChatServer {
 
         let GetGuildRequest { guild_id } = request.into_parts().0;
 
-        let guild_name = if let Some(guild_name_raw) = self
-            .chat_tree
-            .get(concat_static!(9, guild_id.to_le_bytes(), [2]))
-            .unwrap()
-        {
-            std::str::from_utf8(&guild_name_raw).unwrap().to_string()
-        } else {
-            todo!("no guild name")
-        };
+        let guild =
+            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_le_bytes().as_ref()).unwrap() {
+                GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
+            } else {
+                todo!("no such guild")
+            };
 
-        let guild_owner = if let Some(guild_name_raw) = self
-            .chat_tree
-            .get(concat_static!(9, guild_id.to_le_bytes(), [1]))
-            .unwrap()
-        {
-            u64::from_le_bytes(
-                guild_name_raw
-                    .split_at(std::mem::size_of::<u64>())
-                    .0
-                    .try_into()
-                    .unwrap(),
-            )
-        } else {
-            todo!("no guild owner")
-        };
-
-        let guild_picture = if let Some(guild_name_raw) = self
-            .chat_tree
-            .get(concat_static!(9, guild_id.to_le_bytes(), [3]))
-            .unwrap()
-        {
-            std::str::from_utf8(&guild_name_raw).unwrap().to_string()
-        } else {
-            todo!("no guild picture")
-        };
-
-        Ok(GetGuildResponse {
-            guild_name,
-            guild_picture,
-            guild_owner,
-            metadata: Default::default(),
-        })
+        Ok(guild)
     }
 
     async fn get_guild_invites(
@@ -662,11 +659,57 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<JoinGuildRequest>,
     ) -> Result<JoinGuildResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let JoinGuildRequest { invite_id } = request.into_parts().0;
+        let key = make_invite_key(invite_id.as_str());
+
+        let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
+            let (id_raw, invite_raw) = raw.split_at(std::mem::size_of::<u64>());
+            let guild_id = u64::from_le_bytes(id_raw.try_into().unwrap());
+            let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
+            (guild_id, invite)
+        } else {
+            todo!("no such invite")
+        };
+
+        if invite.use_count < invite.possible_uses || invite.possible_uses == -1 {
+            self.chat_tree
+                .insert(
+                    &concat_static!(17, guild_id.to_le_bytes(), [9], user_id.to_le_bytes()),
+                    &[],
+                )
+                .unwrap();
+            invite.use_count += 1;
+        }
+
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, invite);
+        self.chat_tree
+            .insert(
+                &key,
+                [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
+            )
+            .unwrap();
+
+        Ok(JoinGuildResponse { guild_id })
     }
 
     async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let LeaveGuildRequest { guild_id } = request.into_parts().0;
+
+        self.chat_tree
+            .remove(&concat_static!(
+                17,
+                guild_id.to_le_bytes(),
+                [9],
+                user_id.to_le_bytes()
+            ))
+            .unwrap();
+
+        Ok(())
     }
 
     async fn trigger_action(
@@ -739,21 +782,13 @@ impl chat_service_server::ChatService for ChatServer {
         message.encode(&mut buf).unwrap();
         self.chat_tree.insert(&key, buf).unwrap();
 
-        for chan in self.event_chans.lock().values_mut() {
-            if self
-                .subbed_to
-                .lock()
-                .get(&user_id)
-                .map_or(false, |subbed_to| {
-                    subbed_to.contains(&EventSub::Guild(guild_id))
-                })
-            {
-                chan.push(event::Event::SentMessage(Box::new(event::MessageSent {
-                    echo_id,
-                    message: Some(message.clone()),
-                })));
-            }
-        }
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::SentMessage(Box::new(event::MessageSent {
+                echo_id,
+                message: Some(message),
+            })),
+        );
 
         Ok(SendMessageResponse { message_id })
     }
