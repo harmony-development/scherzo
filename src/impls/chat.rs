@@ -41,6 +41,10 @@ fn make_invite_key(name: &str) -> Vec<u8> {
     ["invite_".as_bytes(), name.as_bytes()].concat()
 }
 
+fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
+    concat_static!(17, guild_id.to_le_bytes(), [9], user_id.to_le_bytes())
+}
+
 fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
     [
         make_guild_list_key_prefix(user_id).as_ref(),
@@ -249,11 +253,14 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<CreateGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let CreateGuildRequest {
-            metadata,
-            guild_name,
-            picture_url,
-        } = request.into_parts().0;
+        let (
+            CreateGuildRequest {
+                metadata,
+                guild_name,
+                picture_url,
+            },
+            headers,
+        ) = request.into_parts();
 
         let guild_id = {
             let mut guild_id = gen_rand_u64();
@@ -274,6 +281,19 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree
             .insert(guild_id.to_le_bytes().as_ref(), buf.as_ref())
+            .unwrap();
+
+        self.add_guild_to_guild_list(Request::from_parts((
+            AddGuildToGuildListRequest {
+                guild_id,
+                homeserver: "".to_string(),
+            },
+            headers,
+        )))
+        .await?;
+
+        self.chat_tree
+            .insert(&make_member_key(guild_id, user_id), &[])
             .unwrap();
 
         Ok(CreateGuildResponse { guild_id })
@@ -661,7 +681,7 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<JoinGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let JoinGuildRequest { invite_id } = request.into_parts().0;
+        let (JoinGuildRequest { invite_id }, headers) = request.into_parts();
         let key = make_invite_key(invite_id.as_str());
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
@@ -675,22 +695,36 @@ impl chat_service_server::ChatService for ChatServer {
 
         if invite.use_count < invite.possible_uses || invite.possible_uses == -1 {
             self.chat_tree
-                .insert(
-                    &concat_static!(17, guild_id.to_le_bytes(), [9], user_id.to_le_bytes()),
-                    &[],
-                )
+                .insert(&make_member_key(guild_id, user_id), &[])
                 .unwrap();
             invite.use_count += 1;
-        }
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, invite);
-        self.chat_tree
-            .insert(
-                &key,
-                [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
-            )
-            .unwrap();
+            self.add_guild_to_guild_list(Request::from_parts((
+                AddGuildToGuildListRequest {
+                    guild_id,
+                    homeserver: "".to_string(),
+                },
+                headers,
+            )))
+            .await?;
+
+            self.send_event_through_chan(
+                guild_id,
+                event::Event::JoinedMember(event::MemberJoined {
+                    guild_id,
+                    member_id: user_id,
+                }),
+            );
+
+            let mut buf = BytesMut::new();
+            encode_protobuf_message(&mut buf, invite);
+            self.chat_tree
+                .insert(
+                    &key,
+                    [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
+                )
+                .unwrap();
+        }
 
         Ok(JoinGuildResponse { guild_id })
     }
@@ -698,16 +732,29 @@ impl chat_service_server::ChatService for ChatServer {
     async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let LeaveGuildRequest { guild_id } = request.into_parts().0;
+        let (LeaveGuildRequest { guild_id }, headers) = request.into_parts();
 
         self.chat_tree
-            .remove(&concat_static!(
-                17,
-                guild_id.to_le_bytes(),
-                [9],
-                user_id.to_le_bytes()
-            ))
+            .remove(&make_member_key(guild_id, user_id))
             .unwrap();
+
+        self.remove_guild_from_guild_list(Request::from_parts((
+            RemoveGuildFromGuildListRequest {
+                guild_id,
+                homeserver: "".to_string(),
+            },
+            headers,
+        )))
+        .await?;
+
+        self.send_event_through_chan(
+            guild_id,
+            event::Event::LeftMember(event::MemberLeft {
+                guild_id,
+                member_id: user_id,
+                leave_reason: 0,
+            }),
+        );
 
         Ok(())
     }
