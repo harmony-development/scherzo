@@ -39,9 +39,8 @@ async fn main() {
 
     let valid_sessions = Arc::new(Mutex::new(HashMap::new()));
 
-    let auth =
-        AuthServiceServer::new(AuthServer::new(db.clone(), valid_sessions.clone())).filters();
-    let chat = ChatServiceServer::new(ChatServer::new(db, valid_sessions)).filters();
+    let auth = AuthServiceServer::new(AuthServer::new(&db, valid_sessions.clone())).filters();
+    let chat = ChatServiceServer::new(ChatServer::new(&db, valid_sessions)).filters();
 
     serve_multiple!(
         addr: ([127, 0, 0, 1], 2289),

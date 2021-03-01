@@ -2,7 +2,7 @@ use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use harmony_rust_sdk::api::{auth::*, exports::hrpc::Request};
 use parking_lot::Mutex;
-use sled::Db;
+use sled::{Db, Tree};
 
 use super::{gen_rand_str, gen_rand_u64};
 use crate::ServerError;
@@ -11,15 +11,15 @@ use crate::ServerError;
 pub struct AuthServer {
     valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
-    db: Db,
+    auth_tree: Tree,
 }
 
 impl AuthServer {
-    pub fn new(db: Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
+    pub fn new(db: &Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
         Self {
             valid_sessions,
             step_map: Mutex::new(HashMap::new()),
-            db,
+            auth_tree: db.open_tree("auth").unwrap(),
         }
     }
 }
@@ -248,21 +248,22 @@ impl auth_service_server::AuthService for AuthServer {
                                         });
                                     };
 
-                                    let auth_tree = self.db.open_tree("auth").unwrap();
+                                    let user_id =
+                                        if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
+                                            u64::from_le_bytes(
+                                                user_id
+                                                    .split_at(std::mem::size_of::<u64>())
+                                                    .0
+                                                    .try_into()
+                                                    .unwrap(),
+                                            )
+                                        } else {
+                                            return Err(ServerError::WrongUserOrPassword { email });
+                                        };
 
-                                    let user_id = if let Ok(Some(user_id)) = auth_tree.get(&email) {
-                                        u64::from_le_bytes(
-                                            user_id
-                                                .split_at(std::mem::size_of::<u64>())
-                                                .0
-                                                .try_into()
-                                                .unwrap(),
-                                        )
-                                    } else {
-                                        return Err(ServerError::WrongUserOrPassword { email });
-                                    };
-
-                                    if let Ok(Some(pass)) = auth_tree.get(user_id.to_le_bytes()) {
+                                    if let Ok(Some(pass)) =
+                                        self.auth_tree.get(user_id.to_le_bytes())
+                                    {
                                         // TODO: actually validate password properly lol
                                         if pass != password {
                                             return Err(ServerError::WrongUserOrPassword { email });
@@ -315,9 +316,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         });
                                     };
 
-                                    let auth_tree = self.db.open_tree("auth").unwrap();
-
-                                    if auth_tree.get(&email).unwrap().is_some() {
+                                    if self.auth_tree.get(&email).unwrap().is_some() {
                                         return Err(ServerError::UserAlreadyExists);
                                     }
 
@@ -330,7 +329,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     );
                                     batch.insert(email.as_str(), &user_id.to_le_bytes());
                                     batch.insert(&user_id.to_le_bytes(), password);
-                                    auth_tree
+                                    self.auth_tree
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
