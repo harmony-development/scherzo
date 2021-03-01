@@ -25,14 +25,25 @@ fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 24] {
     )
 }
 
+fn make_guild_list_key_prefix(user_id: u64) -> [u8; 10] {
+    concat_static!(10, user_id.to_le_bytes(), [1, 2])
+}
+
+fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
+    [
+        make_guild_list_key_prefix(user_id).as_ref(),
+        guild_id.to_le_bytes().as_ref(),
+        host.as_bytes(),
+    ]
+    .concat()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventSub {
     Guild(u64),
     Homeserver,
     Actions,
 }
-
-const GUILD_LIST_PREFIX: [u8; 2] = [1, 2];
 
 #[derive(Debug)]
 pub struct ChatServer {
@@ -258,7 +269,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let chat_tree = self.db.open_tree("chat").unwrap();
         let guilds = chat_tree
-            .scan_prefix(concat_static!(10, user_id.to_le_bytes(), GUILD_LIST_PREFIX))
+            .scan_prefix(make_guild_list_key_prefix(user_id))
             .flatten()
             .map(|(_, guild_id_raw)| {
                 let (id_raw, host_raw) = guild_id_raw.split_at(std::mem::size_of::<u64>());
@@ -280,14 +291,51 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<AddGuildToGuildListRequest>,
     ) -> Result<AddGuildToGuildListResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let AddGuildToGuildListRequest {
+            guild_id,
+            homeserver,
+        } = request.into_parts().0;
+
+        let serialized = [
+            guild_id.to_le_bytes().as_ref(),
+            homeserver.as_str().as_bytes(),
+        ]
+        .concat();
+
+        let chat_tree = self.db.open_tree("chat").unwrap();
+        chat_tree
+            .insert(
+                [
+                    make_guild_list_key_prefix(user_id).as_ref(),
+                    serialized.as_slice(),
+                ]
+                .concat(),
+                serialized,
+            )
+            .unwrap();
+
+        Ok(AddGuildToGuildListResponse {})
     }
 
     async fn remove_guild_from_guild_list(
         &self,
         request: Request<RemoveGuildFromGuildListRequest>,
     ) -> Result<RemoveGuildFromGuildListResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let RemoveGuildFromGuildListRequest {
+            guild_id,
+            homeserver,
+        } = request.into_parts().0;
+
+        let chat_tree = self.db.open_tree("chat").unwrap();
+        chat_tree
+            .remove(make_guild_list_key(user_id, guild_id, homeserver.as_str()))
+            .unwrap();
+
+        Ok(RemoveGuildFromGuildListResponse {})
     }
 
     async fn get_guild(
