@@ -293,7 +293,7 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<CreateChannelRequest>,
     ) -> Result<CreateChannelResponse, Self::Error> {
-        self.auth(&request)?;
+        let user_id = self.auth(&request)?;
 
         // TODO: do ordering
         let CreateChannelRequest {
@@ -318,14 +318,35 @@ impl chat_service_server::ChatService for ChatServer {
 
         let channel = Channel {
             channel_id,
-            channel_name,
+            channel_name: channel_name.clone(),
             is_category,
-            metadata,
+            metadata: metadata.clone(),
         };
         let mut buf = BytesMut::new();
         encode_protobuf_message(&mut buf, channel);
 
         self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
+
+        for chan in self.event_chans.lock().values_mut() {
+            if self
+                .subbed_to
+                .lock()
+                .get(&user_id)
+                .map_or(false, |subbed_to| {
+                    subbed_to.contains(&EventSub::Guild(guild_id))
+                })
+            {
+                chan.push(event::Event::CreatedChannel(event::ChannelCreated {
+                    guild_id,
+                    channel_id,
+                    name: channel_name.clone(),
+                    previous_id,
+                    next_id,
+                    is_category,
+                    metadata: metadata.clone(),
+                }));
+            }
+        }
 
         Ok(CreateChannelResponse { channel_id })
     }
