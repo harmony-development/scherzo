@@ -497,7 +497,24 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetGuildInvitesRequest>,
     ) -> Result<GetGuildInvitesResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let GetGuildInvitesRequest { guild_id } = request.into_parts().0;
+
+        let invites = self
+            .chat_tree
+            .scan_prefix("invite_")
+            .flatten()
+            .map(|(_, value)| {
+                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                let id = u64::from_le_bytes(id_raw.try_into().unwrap());
+                let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
+                (id, invite)
+            })
+            .filter_map(|(id, invite)| if guild_id == id { Some(invite) } else { None })
+            .collect();
+
+        Ok(GetGuildInvitesResponse { invites })
     }
 
     async fn get_guild_members(
