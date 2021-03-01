@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
 
 use harmony_rust_sdk::api::{
     auth::*,
@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use sled::Tree;
 
 use super::{chat::make_member_profile_key, gen_rand_str, gen_rand_u64};
-use crate::ServerError;
+use crate::{concat_static, ServerError};
 
 #[derive(Debug)]
 pub struct AuthServer {
@@ -29,6 +29,46 @@ impl AuthServer {
         auth_tree: Tree,
         valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     ) -> Self {
+        let tokens = auth_tree
+            .scan_prefix("token_")
+            .flatten()
+            .map(|(key, val)| {
+                (
+                    u64::from_le_bytes(key.split_at(6).1.try_into().unwrap()),
+                    val,
+                )
+            })
+            .collect::<Vec<_>>();
+        let atimes = auth_tree
+            .scan_prefix("atime_")
+            .flatten()
+            .map(|(key, val)| {
+                (
+                    u64::from_le_bytes(key.split_at(6).1.try_into().unwrap()),
+                    val,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut batch = sled::Batch::default();
+        for (id, token) in tokens {
+            for (oid, atime) in &atimes {
+                if &id == oid {
+                    let secs = u64::from_le_bytes(atime.as_ref().try_into().unwrap());
+                    let auth_how_old = Instant::now().elapsed().as_secs() - secs;
+
+                    if auth_how_old >= 60 * 60 * 24 * 2 {
+                        batch.remove(&concat_static!(14, "token_".as_bytes(), id.to_le_bytes()));
+                        batch.remove(&concat_static!(14, "atime_".as_bytes(), id.to_le_bytes()));
+                    } else {
+                        let token = std::str::from_utf8(token.as_ref()).unwrap();
+                        valid_sessions.lock().insert(token.to_string(), id);
+                    }
+                }
+            }
+        }
+        auth_tree.apply_batch(batch).unwrap();
+
         Self {
             valid_sessions,
             step_map: Mutex::new(HashMap::new()),
@@ -288,6 +328,24 @@ impl auth_service_server::AuthService for AuthServer {
                                     }
 
                                     let session_token = gen_rand_str(30);
+                                    let mut batch = sled::Batch::default();
+                                    batch.insert(
+                                        &concat_static!(
+                                            14,
+                                            "token_".as_bytes(),
+                                            user_id.to_le_bytes()
+                                        ),
+                                        session_token.as_str(),
+                                    );
+                                    batch.insert(
+                                        &concat_static!(
+                                            14,
+                                            "atime_".as_bytes(),
+                                            user_id.to_le_bytes()
+                                        ),
+                                        &Instant::now().elapsed().as_secs().to_le_bytes(),
+                                    );
+                                    self.auth_tree.apply_batch(batch).unwrap();
 
                                     log::debug!("user {} logged in with email {}", user_id, email,);
 
@@ -336,10 +394,27 @@ impl auth_service_server::AuthService for AuthServer {
                                     }
 
                                     let user_id = gen_rand_u64();
+                                    let session_token = gen_rand_str(30);
 
                                     let mut batch = sled::Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_le_bytes());
                                     batch.insert(&user_id.to_le_bytes(), password);
+                                    batch.insert(
+                                        &concat_static!(
+                                            14,
+                                            "token_".as_bytes(),
+                                            user_id.to_le_bytes()
+                                        ),
+                                        session_token.as_str(),
+                                    );
+                                    batch.insert(
+                                        &concat_static!(
+                                            14,
+                                            "atime_".as_bytes(),
+                                            user_id.to_le_bytes()
+                                        ),
+                                        &Instant::now().elapsed().as_secs().to_le_bytes(),
+                                    );
                                     self.auth_tree
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
@@ -361,8 +436,6 @@ impl auth_service_server::AuthService for AuthServer {
                                         user_id,
                                         email,
                                     );
-
-                                    let session_token = gen_rand_str(30);
 
                                     next_step = AuthStep {
                                         can_go_back: false,

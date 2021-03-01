@@ -69,7 +69,7 @@ impl Display for ServerError {
                 write!(f, "wrong email or password for email {}", email)
             }
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
-            ServerError::Unauthenticated => write!(f, "invalid auth id"),
+            ServerError::Unauthenticated => write!(f, "invalid-session"),
             ServerError::NotImplemented => write!(f, "not implemented"),
             ServerError::NoSuchGuild(id) => write!(f, "no such guild with id {}", id),
             ServerError::NoSuchUser(id) => write!(f, "no such user with id {}", id),
