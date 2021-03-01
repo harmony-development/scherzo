@@ -2,7 +2,7 @@ use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use harmony_rust_sdk::api::{auth::*, exports::hrpc::Request};
 use parking_lot::Mutex;
-use sled::{Db, Tree};
+use sled::Tree;
 
 use super::{gen_rand_str, gen_rand_u64};
 use crate::ServerError;
@@ -16,12 +16,12 @@ pub struct AuthServer {
 }
 
 impl AuthServer {
-    pub fn new(db: &Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
+    pub fn new(auth_tree: Tree, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
         Self {
             valid_sessions,
             step_map: Mutex::new(HashMap::new()),
             send_step: Mutex::new(HashMap::new()),
-            auth_tree: db.open_tree("auth").unwrap(),
+            auth_tree,
         }
     }
 }

@@ -1,7 +1,6 @@
 use std::{collections::HashMap, convert::TryInto, sync::Arc};
 
 use event::MessageUpdated;
-use flume::Receiver;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::*,
@@ -15,7 +14,7 @@ use harmony_rust_sdk::api::{
     harmonytypes::{Attachment, Message as HarmonyMessage},
 };
 use parking_lot::Mutex;
-use sled::{Db, Tree};
+use sled::Tree;
 
 use super::{gen_rand_str, gen_rand_u64};
 use crate::{concat_static, ServerError};
@@ -63,10 +62,10 @@ pub struct ChatServer {
 }
 
 impl ChatServer {
-    pub fn new(db: &Db, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
+    pub fn new(chat_tree: Tree, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
         Self {
             valid_sessions,
-            chat_tree: db.open_tree("chat").unwrap(),
+            chat_tree,
             subbed_to: Mutex::new(HashMap::new()),
             event_chans: Mutex::new(HashMap::new()),
         }
