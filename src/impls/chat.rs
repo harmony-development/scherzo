@@ -32,6 +32,8 @@ enum EventSub {
     Actions,
 }
 
+const GUILD_LIST_PREFIX: [u8; 2] = [1, 2];
+
 #[derive(Debug)]
 pub struct ChatServer {
     valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
@@ -252,7 +254,26 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetGuildListRequest>,
     ) -> Result<GetGuildListResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let chat_tree = self.db.open_tree("chat").unwrap();
+        let guilds = chat_tree
+            .scan_prefix(concat_static!(10, user_id.to_le_bytes(), GUILD_LIST_PREFIX))
+            .flatten()
+            .map(|(_, guild_id_raw)| {
+                let (id_raw, host_raw) = guild_id_raw.split_at(std::mem::size_of::<u64>());
+
+                let guild_id = u64::from_le_bytes(id_raw.try_into().unwrap());
+                let host = std::str::from_utf8(host_raw).unwrap();
+
+                get_guild_list_response::GuildListEntry {
+                    guild_id,
+                    host: host.to_string(),
+                }
+            })
+            .collect();
+
+        Ok(GetGuildListResponse { guilds })
     }
 
     async fn add_guild_to_guild_list(
