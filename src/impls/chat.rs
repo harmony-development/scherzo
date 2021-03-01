@@ -543,11 +543,12 @@ impl chat_service_server::ChatService for ChatServer {
 
         let GetGuildMembersRequest { guild_id } = request.into_parts().0;
 
+        let prefix = make_guild_mem_prefix(guild_id);
         let members = self
             .chat_tree
-            .scan_prefix(make_guild_mem_prefix(guild_id))
+            .scan_prefix(prefix)
             .flatten()
-            .map(|(id, _)| u64::from_le_bytes(id.split_at(9).1.try_into().unwrap()))
+            .map(|(id, _)| u64::from_le_bytes(id.split_at(prefix.len()).1.try_into().unwrap()))
             .collect();
 
         Ok(GetGuildMembersResponse { members })
@@ -591,15 +592,14 @@ impl chat_service_server::ChatService for ChatServer {
             before_message,
         } = request.into_parts().0;
 
-        let key = make_msg_prefix(guild_id, channel_id);
+        let prefix = make_msg_prefix(guild_id, channel_id);
         let mut msgs = self
             .chat_tree
-            .scan_prefix(key)
+            .scan_prefix(prefix)
             .flatten()
-            .rev()
             .map(|(key, value)| {
                 (
-                    u64::from_le_bytes(key.split_at(key.len()).1.try_into().unwrap()),
+                    u64::from_le_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
                     value,
                 )
             })
@@ -1129,10 +1129,10 @@ impl chat_service_server::ChatService for ChatServer {
             });
 
         if update_username {
-            profile.user_name = new_username;
+            profile.user_name = new_username.clone();
         }
         if update_avatar {
-            profile.user_avatar = new_avatar;
+            profile.user_avatar = new_avatar.clone();
         }
         if update_status {
             profile.user_status = new_status;
@@ -1144,6 +1144,21 @@ impl chat_service_server::ChatService for ChatServer {
         let mut buf = BytesMut::new();
         encode_protobuf_message(&mut buf, profile);
         self.chat_tree.insert(key, buf.as_ref()).unwrap();
+
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::ProfileUpdated(event::ProfileUpdated {
+                update_avatar,
+                update_is_bot,
+                update_status,
+                update_username,
+                new_avatar,
+                new_status,
+                new_username,
+                is_bot,
+                user_id,
+            }),
+        );
 
         Ok(())
     }
