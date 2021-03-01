@@ -94,19 +94,20 @@ impl ChatServer {
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-    ) -> (HarmonyMessage, [u8; 25]) {
+    ) -> Result<(HarmonyMessage, [u8; 25]), <Self as chat_service_server::ChatService>::Error> {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
         let message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
-            match HarmonyMessage::decode(Bytes::from(msg.to_vec())) {
-                Ok(m) => m,
-                Err(_) => todo!("return failed to decode msg internal server error"),
-            }
+            HarmonyMessage::decode(Bytes::from(msg.to_vec())).unwrap()
         } else {
-            todo!("return no such message error")
+            return Err(ServerError::NoSuchMessage {
+                guild_id,
+                channel_id,
+                message_id,
+            });
         };
 
-        (message, key)
+        Ok((message, key))
     }
 
     fn auth<T>(
@@ -146,7 +147,7 @@ impl chat_service_server::ChatService for ChatServer {
             message_id,
         } = request;
 
-        let message = Some(self.get_message(guild_id, channel_id, message_id).0);
+        let message = Some(self.get_message(guild_id, channel_id, message_id)?.0);
 
         Ok(GetMessageResponse { message })
     }
@@ -185,16 +186,7 @@ impl chat_service_server::ChatService for ChatServer {
             })
             .collect::<Vec<_>>();
 
-        let key = make_msg_key(guild_id, channel_id, message_id);
-
-        let mut message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
-            match HarmonyMessage::decode(Bytes::from(msg.to_vec())) {
-                Ok(m) => m,
-                Err(_) => todo!("return failed to decode msg internal server error"),
-            }
-        } else {
-            todo!("return no such message error")
-        };
+        let (mut message, key) = self.get_message(guild_id, channel_id, message_id)?;
 
         if update_content {
             message.content = content.clone();
@@ -495,7 +487,7 @@ impl chat_service_server::ChatService for ChatServer {
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_le_bytes().as_ref()).unwrap() {
                 GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
             } else {
-                todo!("no such guild")
+                return Err(ServerError::NoSuchGuild(guild_id));
             };
 
         Ok(guild)
@@ -690,7 +682,7 @@ impl chat_service_server::ChatService for ChatServer {
             let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
             (guild_id, invite)
         } else {
-            todo!("no such invite")
+            return Err(ServerError::NoSuchInvite(invite_id));
         };
 
         if invite.use_count < invite.possible_uses || invite.possible_uses == -1 {

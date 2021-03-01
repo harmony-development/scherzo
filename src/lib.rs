@@ -29,6 +29,13 @@ pub enum ServerError {
     UserAlreadyExists,
     Unauthenticated,
     NotImplemented,
+    NoSuchMessage {
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+    },
+    NoSuchGuild(u64),
+    NoSuchInvite(String),
 }
 
 impl Display for ServerError {
@@ -63,6 +70,17 @@ impl Display for ServerError {
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
             ServerError::Unauthenticated => write!(f, "invalid auth id"),
             ServerError::NotImplemented => write!(f, "not implemented"),
+            ServerError::NoSuchGuild(id) => write!(f, "no such guild with id {}", id),
+            ServerError::NoSuchMessage {
+                guild_id,
+                channel_id,
+                message_id,
+            } => write!(
+                f,
+                "no such message {} in channel {} in guild {}",
+                message_id, channel_id, guild_id
+            ),
+            ServerError::NoSuchInvite(id) => write!(f, "no such invite with id {}", id),
         }
     }
 }
@@ -87,7 +105,14 @@ impl CustomError for ServerError {
             }
             | ServerError::WrongUserOrPassword { email: _ }
             | ServerError::UserAlreadyExists
-            | ServerError::Unauthenticated => StatusCode::BAD_REQUEST,
+            | ServerError::Unauthenticated
+            | ServerError::NoSuchGuild(_)
+            | ServerError::NoSuchInvite(_)
+            | ServerError::NoSuchMessage {
+                guild_id: _,
+                channel_id: _,
+                message_id: _,
+            } => StatusCode::BAD_REQUEST,
             ServerError::NotImplemented => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
