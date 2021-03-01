@@ -618,6 +618,7 @@ impl chat_service_server::ChatService for ChatServer {
             messages: msgs
                 .drain(from..to)
                 .map(|(_, msg_raw)| HarmonyMessage::decode(msg_raw.as_ref()).unwrap())
+                .rev()
                 .collect(),
         })
     }
