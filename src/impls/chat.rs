@@ -562,11 +562,18 @@ impl chat_service_server::ChatService for ChatServer {
 
         let GetGuildChannelsRequest { guild_id } = request.into_parts().0;
 
+        let prefix = make_guild_chan_prefix(guild_id);
         let channels = self
             .chat_tree
-            .scan_prefix(make_guild_chan_prefix(guild_id))
+            .scan_prefix(prefix)
             .flatten()
-            .map(|(_, value)| Channel::decode(value.as_ref()).unwrap())
+            .flat_map(|(key, value)| {
+                if key.len() == 17 {
+                    Some(Channel::decode(value.as_ref()).unwrap())
+                } else {
+                    None
+                }
+            })
             .collect();
 
         Ok(GetGuildChannelsResponse { channels })
@@ -662,7 +669,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let DeleteGuildRequest { guild_id } = request.into_parts().0;
 
-        let channels = self
+        let chan_keys = self
             .chat_tree
             .scan_prefix(make_guild_chan_prefix(guild_id))
             .flatten()
@@ -674,16 +681,8 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|(key, _)| key);
 
         let mut batch = sled::Batch::default();
-        for channel in channels {
-            batch.remove(&channel);
-            let messages = self
-                .chat_tree
-                .scan_prefix(concat_static!(17, channel, [9]))
-                .flatten()
-                .map(|(key, _)| key);
-            for message in messages {
-                batch.remove(&message);
-            }
+        for key in chan_keys {
+            batch.remove(&key);
         }
         for member in members {
             batch.remove(&member);

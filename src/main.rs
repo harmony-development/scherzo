@@ -37,6 +37,8 @@ async fn main() {
         .open()
         .expect("couldn't open database");
 
+    db.verify_integrity().unwrap();
+
     let valid_sessions = Arc::new(Mutex::new(HashMap::new()));
 
     let auth_tree = db.open_tree("auth").unwrap();
