@@ -1,43 +1,68 @@
 use std::{collections::HashMap, sync::Arc};
 
 use harmony_rust_sdk::api::{
-    auth::auth_service_server::AuthServiceServer, chat::chat_service_server::ChatServiceServer,
-    exports::hrpc::serve_multiple,
+    auth::auth_service_server::AuthServiceServer,
+    chat::chat_service_server::ChatServiceServer,
+    exports::hrpc::{self, warp::Filter},
 };
+use hrpc::warp;
 use parking_lot::Mutex;
 use scherzo::{
     impls::{auth::AuthServer, chat::ChatServer},
     ServerError,
 };
-use simplelog::{CombinedLogger, LevelFilter, TermLogger, TerminalMode, WriteLogger};
+use tracing::{level_filters::LevelFilter, Level};
+use tracing_subscriber::{fmt, prelude::*};
 
 #[tokio::main]
 async fn main() {
     let filter_level = std::env::args()
         .find(|arg| matches!(arg.as_str(), "-v" | "--verbose" | "-d" | "--debug"))
-        .map_or(LevelFilter::Info, |s| match s.as_str() {
-            "-v" | "--verbose" => LevelFilter::Trace,
-            "-d" | "--debug" => LevelFilter::Debug,
-            _ => LevelFilter::Info,
+        .map_or(Level::INFO, |s| match s.as_str() {
+            "-v" | "--verbose" => Level::TRACE,
+            "-d" | "--debug" => Level::DEBUG,
+            _ => Level::INFO,
         });
 
-    CombinedLogger::init(vec![
-        TermLogger::new(filter_level, Default::default(), TerminalMode::Mixed),
-        WriteLogger::new(
-            filter_level,
-            Default::default(),
-            std::fs::File::create("log").unwrap(),
-        ),
-    ])
-    .expect("could not init logger");
+    let term_logger = fmt::layer().pretty();
 
-    let db = sled::Config::new()
-        .use_compression(true)
-        .path("db")
-        .open()
-        .expect("couldn't open database");
+    let file_appender = tracing_appender::rolling::hourly("log", "log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
 
-    db.verify_integrity().unwrap();
+    tracing_subscriber::registry()
+        .with(LevelFilter::from_level(filter_level))
+        .with(term_logger)
+        .with(file_logger)
+        .init();
+
+    tracing::info!("logging initialized");
+
+    let span = tracing::info_span!("db");
+
+    let db = span.in_scope(|| {
+        tracing::info!("initializing database");
+
+        let db_result = sled::Config::new()
+            .use_compression(true)
+            .path("db")
+            .open()
+            .map(|db| db.verify_integrity().map(|_| db));
+
+        let db_result_flattened = match db_result {
+            Ok(Ok(db)) => Ok(db),
+            Ok(Err(err)) | Err(err) => Err(err),
+        };
+
+        match db_result_flattened {
+            Ok(db) => db,
+            Err(err) => {
+                tracing::error!("cannot open database: {}; aborting", err);
+
+                std::process::exit(1);
+            }
+        }
+    });
 
     let valid_sessions = Arc::new(Mutex::new(HashMap::new()));
 
@@ -52,10 +77,11 @@ async fn main() {
     .filters();
     let chat = ChatServiceServer::new(ChatServer::new(chat_tree, valid_sessions)).filters();
 
-    serve_multiple!(
-        addr: ([127, 0, 0, 1], 2289),
-        err: ServerError,
-        filters: auth, chat,
+    hrpc::warp::serve(
+        auth.or(chat)
+            .with(warp::trace::request())
+            .recover(hrpc::server::handle_rejection::<ServerError>),
     )
+    .run(([127, 0, 0, 1], 2289))
     .await
 }

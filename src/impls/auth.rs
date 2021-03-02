@@ -134,7 +134,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         self.send_step.lock().insert(auth_id.clone(), initial_step);
 
-        log::debug!("new auth session {}", auth_id);
+        tracing::debug!("new auth session {}", auth_id);
 
         Ok(BeginAuthResponse { auth_id })
     }
@@ -150,8 +150,8 @@ impl auth_service_server::AuthService for AuthServer {
         if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
             if let Some(step) = maybe_step {
                 let current_step = step_stack.last().unwrap().step.as_ref().unwrap().clone();
-                log::debug!("current auth step for session {}", auth_id);
-                log::debug!("client replied with {:#?}", step);
+                tracing::debug!("current auth step for session {}", auth_id);
+                tracing::debug!("client replied with {:#?}", step);
                 match step {
                     next_step_request::Step::Choice(next_step_request::Choice { choice }) => {
                         if let auth_step::Step::Choice(auth_step::Choice { options, .. }) =
@@ -347,7 +347,11 @@ impl auth_service_server::AuthService for AuthServer {
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
 
-                                    log::debug!("user {} logged in with email {}", user_id, email,);
+                                    tracing::debug!(
+                                        "user {} logged in with email {}",
+                                        user_id,
+                                        email,
+                                    );
 
                                     next_step = AuthStep {
                                         can_go_back: false,
@@ -431,7 +435,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         .insert(make_member_profile_key(user_id), buf.as_ref())
                                         .unwrap();
 
-                                    log::debug!(
+                                    tracing::debug!(
                                         "new user {} registered with email {}",
                                         user_id,
                                         email,
@@ -466,7 +470,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
 
         if let Some(auth_step::Step::Session(session)) = &next_step.step {
-            log::debug!(
+            tracing::debug!(
                 "auth session {} complete with session {:#?}",
                 auth_id,
                 session
@@ -488,9 +492,9 @@ impl auth_service_server::AuthService for AuthServer {
         if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
             if step_stack.last().unwrap().can_go_back {
                 step_stack.pop();
-                log::debug!("auth session {} went to previous step", auth_id);
+                tracing::debug!("auth session {} went to previous step", auth_id);
             } else {
-                log::debug!(
+                tracing::debug!(
                     "auth session {} wanted prev step, but we can't go back",
                     auth_id
                 );
