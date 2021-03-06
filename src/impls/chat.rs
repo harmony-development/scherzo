@@ -17,60 +17,7 @@ use parking_lot::Mutex;
 use sled::Tree;
 
 use super::{gen_rand_str, gen_rand_u64};
-use crate::{concat_static, ServerError};
-
-fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
-    concat_static!(18, make_chan_key(guild_id, channel_id), [9])
-}
-
-fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
-    concat_static!(
-        26,
-        make_msg_prefix(guild_id, channel_id),
-        message_id.to_le_bytes()
-    )
-}
-
-fn make_chan_key(guild_id: u64, channel_id: u64) -> [u8; 17] {
-    concat_static!(
-        17,
-        make_guild_chan_prefix(guild_id),
-        channel_id.to_le_bytes()
-    )
-}
-
-fn make_guild_chan_prefix(guild_id: u64) -> [u8; 9] {
-    concat_static!(9, guild_id.to_le_bytes(), [8])
-}
-
-fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-    concat_static!(17, make_guild_mem_prefix(guild_id), user_id.to_le_bytes())
-}
-
-fn make_guild_mem_prefix(guild_id: u64) -> [u8; 9] {
-    concat_static!(9, guild_id.to_le_bytes(), [9])
-}
-
-fn make_guild_list_key_prefix(user_id: u64) -> [u8; 10] {
-    concat_static!(10, user_id.to_le_bytes(), [1, 2])
-}
-
-fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
-    [
-        make_guild_list_key_prefix(user_id).as_ref(),
-        guild_id.to_le_bytes().as_ref(),
-        host.as_bytes(),
-    ]
-    .concat()
-}
-
-fn make_invite_key(name: &str) -> Vec<u8> {
-    ["invite_".as_bytes(), name.as_bytes()].concat()
-}
-
-pub(super) fn make_member_profile_key(user_id: u64) -> [u8; 13] {
-    concat_static!(13, "user_".as_bytes(), user_id.to_le_bytes())
-}
+use crate::{db::*, ServerError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventSub {
@@ -85,6 +32,7 @@ pub struct ChatServer {
     chat_tree: Tree,
     subbed_to: Mutex<HashMap<u64, Vec<EventSub>>>,
     event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
+    pub check_auth: bool,
 }
 
 impl ChatServer {
@@ -94,6 +42,7 @@ impl ChatServer {
             chat_tree,
             subbed_to: Mutex::new(HashMap::new()),
             event_chans: Mutex::new(HashMap::new()),
+            check_auth: true,
         }
     }
 
@@ -132,18 +81,22 @@ impl ChatServer {
         &self,
         request: &Request<T>,
     ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
-        let auth_id = request
-            .get_header(&"Authorization".parse().unwrap())
-            .map_or_else(String::default, |val| {
-                val.to_str()
-                    .map_or_else(|_| String::default(), ToString::to_string)
-            });
+        if self.check_auth {
+            let auth_id = request
+                .get_header(&"Authorization".parse().unwrap())
+                .map_or_else(String::default, |val| {
+                    val.to_str()
+                        .map_or_else(|_| String::default(), ToString::to_string)
+                });
 
-        self.valid_sessions
-            .lock()
-            .get(&auth_id)
-            .cloned()
-            .map_or(Err(ServerError::Unauthenticated), Ok)
+            self.valid_sessions
+                .lock()
+                .get(&auth_id)
+                .cloned()
+                .map_or(Err(ServerError::Unauthenticated), Ok)
+        } else {
+            Ok(0)
+        }
     }
 }
 

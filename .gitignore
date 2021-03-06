@@ -13,4 +13,4 @@
 /shell.nix
 /.vscode
 /db
-/log
+/logs

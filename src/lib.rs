@@ -4,6 +4,7 @@ use std::fmt::{self, Display, Formatter};
 
 use harmony_rust_sdk::api::exports::hrpc::server::{json_err_bytes, CustomError, StatusCode};
 
+pub mod db;
 pub mod impls;
 
 #[derive(Debug)]

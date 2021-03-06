@@ -11,8 +11,8 @@ use harmony_rust_sdk::api::{
 use parking_lot::Mutex;
 use sled::Tree;
 
-use super::{chat::make_member_profile_key, gen_rand_str, gen_rand_u64};
-use crate::{concat_static, ServerError};
+use super::{gen_rand_str, gen_rand_u64};
+use crate::{concat_static, db::make_member_profile_key, ServerError};
 
 #[derive(Debug)]
 pub struct AuthServer {
