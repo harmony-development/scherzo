@@ -1,4 +1,6 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap, convert::TryInto, future::Future, sync::Arc, task::Poll, time::Instant,
+};
 
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
@@ -21,6 +23,7 @@ use scherzo::{
     impls::{auth::AuthServer, chat::ChatServer},
     ServerError,
 };
+use sled::Tree;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -197,37 +200,34 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
 
-            let handle = {
-                async move {
-                    let mut last_check = Instant::now();
-                    let span = tracing::info_span!("db_validate");
-                    let _guard = span.enter();
-                    tracing::info!("database integrity verification task is running");
-                    loop {
-                        if last_check.elapsed().as_secs() > INTEGRITY_VERIFICATION_PERIOD {
-                            if let Err(err) = chat_tree
-                                .verify_integrity()
-                                .and_then(|_| auth_tree.verify_integrity())
-                            {
-                                tracing::error!("database integrity check failed: {}", err);
-                                break;
-                            } else {
-                                tracing::info!("database integrity check successful");
-                            }
-                            last_check = Instant::now();
+            std::thread::spawn(move || {
+                let mut last = Instant::now();
+                let span = tracing::info_span!("db_validate");
+                let _guard = span.enter();
+                tracing::info!("database integrity verification task is running");
+                loop {
+                    if last.elapsed().as_secs() > INTEGRITY_VERIFICATION_PERIOD {
+                        if let Err(err) = chat_tree
+                            .verify_integrity()
+                            .and_then(|_| auth_tree.verify_integrity())
+                        {
+                            tracing::error!("database integrity check failed: {}", err);
+                            break;
+                        } else {
+                            tracing::info!("database integrity check successful");
                         }
+                        last = Instant::now();
                     }
                 }
-            };
+            });
 
-            let server = hrpc::warp::serve(
+            hrpc::warp::serve(
                 auth.or(chat)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>),
             )
-            .run(([127, 0, 0, 1], 2289));
-
-            hrpc::futures_util::future::select(Box::pin(handle), Box::pin(server)).await;
+            .run(([127, 0, 0, 1], 2289))
+            .await
         }
         Command::GetInvites => {
             let invites = chat_tree
