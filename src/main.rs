@@ -1,6 +1,4 @@
-use std::{
-    collections::HashMap, convert::TryInto, future::Future, sync::Arc, task::Poll, time::Instant,
-};
+use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
 
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
@@ -23,7 +21,6 @@ use scherzo::{
     impls::{auth::AuthServer, chat::ChatServer},
     ServerError,
 };
-use sled::Tree;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -246,7 +243,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         Command::GetMembers => {
             let members = chat_tree.scan_prefix(USER_PREFIX).flatten().map(|(k, v)| {
                 let member_id =
-                    u64::from_le_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
+                    u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
                 let member_data = GetUserResponse::decode(v.as_ref()).unwrap();
                 (member_id, member_data)
             });
@@ -258,7 +255,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         Command::GetGuilds => {
             let guilds = chat_tree.scan_prefix([]).flatten().filter_map(|(k, v)| {
                 if k.len() == 8 {
-                    let guild_id = u64::from_le_bytes(k.as_ref().try_into().unwrap());
+                    let guild_id = u64::from_be_bytes(k.as_ref().try_into().unwrap());
                     let guild_data = GetGuildResponse::decode(v.as_ref()).unwrap();
 
                     Some((guild_id, guild_data))

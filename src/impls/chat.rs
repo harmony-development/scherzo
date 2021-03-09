@@ -227,7 +227,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let guild_id = {
             let mut guild_id = gen_rand_u64();
-            while self.chat_tree.contains_key(guild_id.to_le_bytes()).unwrap() {
+            while self.chat_tree.contains_key(guild_id.to_be_bytes()).unwrap() {
                 guild_id = gen_rand_u64();
             }
             guild_id
@@ -243,7 +243,7 @@ impl chat_service_server::ChatService for ChatServer {
         encode_protobuf_message(&mut buf, guild);
 
         self.chat_tree
-            .insert(guild_id.to_le_bytes().as_ref(), buf.as_ref())
+            .insert(guild_id.to_be_bytes().as_ref(), buf.as_ref())
             .unwrap();
 
         self.add_guild_to_guild_list(Request::from_parts((
@@ -287,7 +287,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .insert(
                 key,
-                [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
+                [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
             )
             .unwrap();
 
@@ -368,7 +368,7 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|(_, guild_id_raw)| {
                 let (id_raw, host_raw) = guild_id_raw.split_at(std::mem::size_of::<u64>());
 
-                let guild_id = u64::from_le_bytes(id_raw.try_into().unwrap());
+                let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 let host = std::str::from_utf8(host_raw).unwrap();
 
                 get_guild_list_response::GuildListEntry {
@@ -393,7 +393,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         let serialized = [
-            guild_id.to_le_bytes().as_ref(),
+            guild_id.to_be_bytes().as_ref(),
             homeserver.as_str().as_bytes(),
         ]
         .concat();
@@ -455,7 +455,7 @@ impl chat_service_server::ChatService for ChatServer {
         let GetGuildRequest { guild_id } = request.into_parts().0;
 
         let guild =
-            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_le_bytes().as_ref()).unwrap() {
+            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
                 GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
             } else {
                 return Err(ServerError::NoSuchGuild(guild_id));
@@ -478,7 +478,7 @@ impl chat_service_server::ChatService for ChatServer {
             .flatten()
             .map(|(_, value)| {
                 let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
-                let id = u64::from_le_bytes(id_raw.try_into().unwrap());
+                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
                 (id, invite)
             })
@@ -501,7 +501,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .scan_prefix(prefix)
             .flatten()
-            .map(|(id, _)| u64::from_le_bytes(id.split_at(prefix.len()).1.try_into().unwrap()))
+            .map(|(id, _)| u64::from_be_bytes(id.split_at(prefix.len()).1.try_into().unwrap()))
             .collect();
 
         Ok(GetGuildMembersResponse { members })
@@ -552,7 +552,7 @@ impl chat_service_server::ChatService for ChatServer {
             .flatten()
             .map(|(key, value)| {
                 (
-                    u64::from_le_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
+                    u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
                     value,
                 )
             })
@@ -764,7 +764,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
             let (id_raw, invite_raw) = raw.split_at(std::mem::size_of::<u64>());
-            let guild_id = u64::from_le_bytes(id_raw.try_into().unwrap());
+            let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
             let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
             (guild_id, invite)
         } else {
@@ -799,7 +799,7 @@ impl chat_service_server::ChatService for ChatServer {
             self.chat_tree
                 .insert(
                     &key,
-                    [guild_id.to_le_bytes().as_ref(), buf.as_ref()].concat(),
+                    [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
                 )
                 .unwrap();
         }

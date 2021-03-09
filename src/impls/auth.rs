@@ -34,7 +34,7 @@ impl AuthServer {
             .flatten()
             .map(|(key, val)| {
                 (
-                    u64::from_le_bytes(key.split_at(6).1.try_into().unwrap()),
+                    u64::from_be_bytes(key.split_at(6).1.try_into().unwrap()),
                     val,
                 )
             })
@@ -44,7 +44,7 @@ impl AuthServer {
             .flatten()
             .map(|(key, val)| {
                 (
-                    u64::from_le_bytes(key.split_at(6).1.try_into().unwrap()),
+                    u64::from_be_bytes(key.split_at(6).1.try_into().unwrap()),
                     val,
                 )
             })
@@ -54,12 +54,12 @@ impl AuthServer {
         for (id, token) in tokens {
             for (oid, atime) in &atimes {
                 if &id == oid {
-                    let secs = u64::from_le_bytes(atime.as_ref().try_into().unwrap());
+                    let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
                     let auth_how_old = Instant::now().elapsed().as_secs() - secs;
 
                     if auth_how_old >= 60 * 60 * 24 * 2 {
-                        batch.remove(&concat_static!(14, "token_".as_bytes(), id.to_le_bytes()));
-                        batch.remove(&concat_static!(14, "atime_".as_bytes(), id.to_le_bytes()));
+                        batch.remove(&concat_static!(14, "token_".as_bytes(), id.to_be_bytes()));
+                        batch.remove(&concat_static!(14, "atime_".as_bytes(), id.to_be_bytes()));
                     } else {
                         let token = std::str::from_utf8(token.as_ref()).unwrap();
                         valid_sessions.lock().insert(token.to_string(), id);
@@ -305,7 +305,7 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let user_id =
                                         if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
-                                            u64::from_le_bytes(
+                                            u64::from_be_bytes(
                                                 user_id
                                                     .split_at(std::mem::size_of::<u64>())
                                                     .0
@@ -317,7 +317,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         };
 
                                     if let Ok(Some(pass)) =
-                                        self.auth_tree.get(user_id.to_le_bytes())
+                                        self.auth_tree.get(user_id.to_be_bytes())
                                     {
                                         // TODO: actually validate password properly lol
                                         if pass != password {
@@ -333,7 +333,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         &concat_static!(
                                             14,
                                             "token_".as_bytes(),
-                                            user_id.to_le_bytes()
+                                            user_id.to_be_bytes()
                                         ),
                                         session_token.as_str(),
                                     );
@@ -341,9 +341,9 @@ impl auth_service_server::AuthService for AuthServer {
                                         &concat_static!(
                                             14,
                                             "atime_".as_bytes(),
-                                            user_id.to_le_bytes()
+                                            user_id.to_be_bytes()
                                         ),
-                                        &Instant::now().elapsed().as_secs().to_le_bytes(),
+                                        &Instant::now().elapsed().as_secs().to_be_bytes(),
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
 
@@ -401,13 +401,13 @@ impl auth_service_server::AuthService for AuthServer {
                                     let session_token = gen_rand_str(30);
 
                                     let mut batch = sled::Batch::default();
-                                    batch.insert(email.as_str(), &user_id.to_le_bytes());
-                                    batch.insert(&user_id.to_le_bytes(), password);
+                                    batch.insert(email.as_str(), &user_id.to_be_bytes());
+                                    batch.insert(&user_id.to_be_bytes(), password);
                                     batch.insert(
                                         &concat_static!(
                                             14,
                                             "token_".as_bytes(),
-                                            user_id.to_le_bytes()
+                                            user_id.to_be_bytes()
                                         ),
                                         session_token.as_str(),
                                     );
@@ -415,9 +415,9 @@ impl auth_service_server::AuthService for AuthServer {
                                         &concat_static!(
                                             14,
                                             "atime_".as_bytes(),
-                                            user_id.to_le_bytes()
+                                            user_id.to_be_bytes()
                                         ),
-                                        &Instant::now().elapsed().as_secs().to_le_bytes(),
+                                        &Instant::now().elapsed().as_secs().to_be_bytes(),
                                     );
                                     self.auth_tree
                                         .apply_batch(batch)
