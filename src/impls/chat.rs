@@ -1048,6 +1048,30 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(profile)
     }
 
+    async fn get_user_bulk(
+        &self,
+        request: Request<GetUserBulkRequest>,
+    ) -> Result<GetUserBulkResponse, Self::Error> {
+        self.auth(&request)?;
+
+        let GetUserBulkRequest { user_ids } = request.into_parts().0;
+
+        let mut profiles = Vec::with_capacity(user_ids.len());
+
+        for (id, key) in user_ids
+            .into_iter()
+            .map(|id| (id, make_member_profile_key(id)))
+        {
+            if let Some(raw) = self.chat_tree.get(key).unwrap() {
+                profiles.push(GetUserResponse::decode(raw.as_ref()).unwrap());
+            } else {
+                return Err(ServerError::NoSuchUser(id));
+            }
+        }
+
+        Ok(GetUserBulkResponse { users: profiles })
+    }
+
     async fn get_user_metadata(
         &self,
         request: Request<GetUserMetadataRequest>,
