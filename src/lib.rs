@@ -2,7 +2,7 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use harmony_rust_sdk::api::exports::hrpc::server::{json_err_bytes, CustomError, StatusCode};
+use harmony_rust_sdk::api::exports::hrpc::server::{CustomError, StatusCode};
 
 pub mod db;
 pub mod impls;
@@ -28,6 +28,7 @@ pub enum ServerError {
         email: String,
     },
     UserAlreadyExists,
+    UserNotInGuild(u64),
     Unauthenticated,
     NotImplemented,
     NoSuchMessage {
@@ -69,6 +70,7 @@ impl Display for ServerError {
             ServerError::WrongUserOrPassword { email } => {
                 write!(f, "wrong email or password for email {}", email)
             }
+            ServerError::UserNotInGuild(guild_id) => write!(f, "user not in guild {}", guild_id),
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
             ServerError::Unauthenticated => write!(f, "invalid-session"),
             ServerError::NotImplemented => write!(f, "not implemented"),
@@ -108,6 +110,7 @@ impl CustomError for ServerError {
             }
             | ServerError::WrongUserOrPassword { email: _ }
             | ServerError::UserAlreadyExists
+            | ServerError::UserNotInGuild(_)
             | ServerError::Unauthenticated
             | ServerError::NoSuchGuild(_)
             | ServerError::NoSuchInvite(_)
@@ -122,6 +125,6 @@ impl CustomError for ServerError {
     }
 
     fn message(&self) -> Vec<u8> {
-        json_err_bytes(&self.to_string())
+        self.to_string().into_bytes()
     }
 }
