@@ -104,6 +104,21 @@ impl ChatServer {
             .contains_key(make_member_key(guild_id, user_id))
             .unwrap()
     }
+
+    fn is_user_guild_owner(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+    ) -> Result<bool, <Self as chat_service_server::ChatService>::Error> {
+        let guild_info =
+            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
+                GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
+            } else {
+                return Err(ServerError::NoSuchGuild(guild_id));
+            };
+
+        Ok(guild_info.guild_owner == user_id)
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -665,8 +680,11 @@ impl chat_service_server::ChatService for ChatServer {
 
         let DeleteGuildRequest { guild_id } = request.into_parts().0;
 
-        if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+        if !self.is_user_guild_owner(guild_id, user_id)? {
+            return Err(ServerError::NotEnoughPermissions {
+                must_be_guild_owner: true,
+                missing_permissions: vec![],
+            });
         }
 
         let chan_keys = self

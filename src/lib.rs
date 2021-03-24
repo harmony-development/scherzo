@@ -41,6 +41,10 @@ pub enum ServerError {
     NoSuchUser(u64),
     InternalServerError,
     SessionExpired,
+    NotEnoughPermissions {
+        must_be_guild_owner: bool,
+        missing_permissions: Vec<String>,
+    },
 }
 
 impl Display for ServerError {
@@ -90,6 +94,19 @@ impl Display for ServerError {
             ServerError::NoSuchInvite(id) => write!(f, "no such invite with id {}", id),
             ServerError::InternalServerError => write!(f, "internal server error"),
             ServerError::SessionExpired => write!(f, "session expired"),
+            ServerError::NotEnoughPermissions {
+                must_be_guild_owner,
+                missing_permissions,
+            } => {
+                writeln!(f, "missing permissions: ")?;
+                if *must_be_guild_owner {
+                    writeln!(f, "must be guild owner")?;
+                }
+                for perm in missing_permissions {
+                    writeln!(f, "{}", perm)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -100,33 +117,22 @@ impl CustomError for ServerError {
             ServerError::InvalidAuthId
             | ServerError::NoFieldSpecified
             | ServerError::NoSuchField
-            | ServerError::NoSuchChoice {
-                choice: _,
-                expected_any_of: _,
-            }
-            | ServerError::WrongStep {
-                expected: _,
-                got: _,
-            }
-            | ServerError::WrongTypeForField {
-                name: _,
-                expected: _,
-            }
-            | ServerError::WrongUserOrPassword { email: _ }
+            | ServerError::NoSuchChoice { .. }
+            | ServerError::WrongStep { .. }
+            | ServerError::WrongTypeForField { .. }
+            | ServerError::WrongUserOrPassword { .. }
             | ServerError::UserAlreadyExists
             | ServerError::UserNotInGuild(_)
             | ServerError::Unauthenticated
             | ServerError::NoSuchGuild(_)
             | ServerError::NoSuchInvite(_)
-            | ServerError::NoSuchMessage {
-                guild_id: _,
-                channel_id: _,
-                message_id: _,
+            | ServerError::NoSuchMessage { .. }
+            | ServerError::NoSuchUser(_)
+            | ServerError::NotEnoughPermissions { .. }
+            | ServerError::SessionExpired => StatusCode::BAD_REQUEST,
+            ServerError::NotImplemented | ServerError::InternalServerError => {
+                StatusCode::INTERNAL_SERVER_ERROR
             }
-            | ServerError::NoSuchUser(_) => StatusCode::BAD_REQUEST,
-            ServerError::NotImplemented
-            | ServerError::InternalServerError
-            | ServerError::SessionExpired => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
