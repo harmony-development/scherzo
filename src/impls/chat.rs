@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use sled::Tree;
 
 use super::{gen_rand_str, gen_rand_u64};
-use crate::{db::*, ServerError};
+use crate::{db::chat::*, ServerError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventSub {

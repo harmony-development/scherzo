@@ -9,10 +9,15 @@ use harmony_rust_sdk::api::{
     },
 };
 use parking_lot::Mutex;
-use sled::Tree;
+use sled::{IVec, Tree};
 
 use super::{gen_rand_str, gen_rand_u64};
-use crate::{concat_static, db::make_member_profile_key, ServerError};
+use crate::{
+    db::{auth::*, chat::make_member_profile_key},
+    ServerError,
+};
+
+const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
 #[derive(Debug)]
 pub struct AuthServer {
@@ -29,45 +34,80 @@ impl AuthServer {
         auth_tree: Tree,
         valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
     ) -> Self {
-        let tokens = auth_tree
-            .scan_prefix("token_")
-            .flatten()
-            .map(|(key, val)| {
-                (
-                    u64::from_be_bytes(key.split_at(6).1.try_into().unwrap()),
-                    val,
-                )
-            })
-            .collect::<Vec<_>>();
-        let atimes = auth_tree
-            .scan_prefix("atime_")
-            .flatten()
-            .map(|(key, val)| {
-                (
-                    u64::from_be_bytes(key.split_at(6).1.try_into().unwrap()),
-                    val,
-                )
-            })
-            .collect::<Vec<_>>();
+        fn scan_tree_for(auth_tree: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
+            auth_tree
+                .scan_prefix(prefix)
+                .flatten()
+                .map(|(key, val)| {
+                    (
+                        u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
+                        val,
+                    )
+                })
+                .collect()
+        }
+
+        let tokens = scan_tree_for(&auth_tree, &TOKEN_PREFIX);
+        let atimes = scan_tree_for(&auth_tree, &ATIME_PREFIX);
 
         let mut batch = sled::Batch::default();
+        let mut vs = valid_sessions.lock();
         for (id, token) in tokens {
             for (oid, atime) in &atimes {
                 if &id == oid {
                     let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
                     let auth_how_old = Instant::now().elapsed().as_secs() - secs;
 
-                    if auth_how_old >= 60 * 60 * 24 * 2 {
-                        batch.remove(&concat_static!(14, "token_".as_bytes(), id.to_be_bytes()));
-                        batch.remove(&concat_static!(14, "atime_".as_bytes(), id.to_be_bytes()));
+                    if auth_how_old >= SESSION_EXPIRE {
+                        tracing::info!("user {} session has expired", id);
+                        batch.remove(&token_key(id));
+                        batch.remove(&atime_key(id));
                     } else {
                         let token = std::str::from_utf8(token.as_ref()).unwrap();
-                        valid_sessions.lock().insert(token.to_string(), id);
+                        vs.insert(token.to_string(), id);
                     }
                 }
             }
         }
+        drop(vs);
         auth_tree.apply_batch(batch).unwrap();
+
+        let att = auth_tree.clone();
+        let vs = valid_sessions.clone();
+
+        std::thread::spawn(move || {
+            tracing::info!("starting auth session expiration check thread");
+            let mut since = Instant::now();
+            loop {
+                if since.elapsed().as_secs() > 60 * 5 {
+                    let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
+                    let atimes = scan_tree_for(&att, &ATIME_PREFIX);
+
+                    let mut batch = sled::Batch::default();
+                    let mut vs = vs.lock();
+                    for (id, token) in tokens {
+                        for (oid, atime) in &atimes {
+                            if &id == oid {
+                                let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
+                                let auth_how_old = Instant::now().elapsed().as_secs() - secs;
+
+                                if auth_how_old >= SESSION_EXPIRE {
+                                    tracing::info!("user {} session has expired", id);
+                                    batch.remove(&token_key(id));
+                                    batch.remove(&atime_key(id));
+                                    let token = std::str::from_utf8(token.as_ref()).unwrap();
+                                    vs.remove(token);
+                                }
+                            }
+                        }
+                    }
+                    drop(vs);
+                    att.apply_batch(batch).unwrap();
+
+                    since = Instant::now();
+                }
+            }
+        });
 
         Self {
             valid_sessions,
@@ -329,20 +369,9 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let session_token = gen_rand_str(30);
                                     let mut batch = sled::Batch::default();
+                                    batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
-                                        &concat_static!(
-                                            14,
-                                            "token_".as_bytes(),
-                                            user_id.to_be_bytes()
-                                        ),
-                                        session_token.as_str(),
-                                    );
-                                    batch.insert(
-                                        &concat_static!(
-                                            14,
-                                            "atime_".as_bytes(),
-                                            user_id.to_be_bytes()
-                                        ),
+                                        &atime_key(user_id),
                                         &Instant::now().elapsed().as_secs().to_be_bytes(),
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
@@ -403,20 +432,9 @@ impl auth_service_server::AuthService for AuthServer {
                                     let mut batch = sled::Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
                                     batch.insert(&user_id.to_be_bytes(), password);
+                                    batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
-                                        &concat_static!(
-                                            14,
-                                            "token_".as_bytes(),
-                                            user_id.to_be_bytes()
-                                        ),
-                                        session_token.as_str(),
-                                    );
-                                    batch.insert(
-                                        &concat_static!(
-                                            14,
-                                            "atime_".as_bytes(),
-                                            user_id.to_be_bytes()
-                                        ),
+                                        &atime_key(user_id),
                                         &Instant::now().elapsed().as_secs().to_be_bytes(),
                                     );
                                     self.auth_tree

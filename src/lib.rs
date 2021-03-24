@@ -39,6 +39,8 @@ pub enum ServerError {
     NoSuchGuild(u64),
     NoSuchInvite(String),
     NoSuchUser(u64),
+    InternalServerError,
+    SessionExpired,
 }
 
 impl Display for ServerError {
@@ -86,6 +88,8 @@ impl Display for ServerError {
                 message_id, channel_id, guild_id
             ),
             ServerError::NoSuchInvite(id) => write!(f, "no such invite with id {}", id),
+            ServerError::InternalServerError => write!(f, "internal server error"),
+            ServerError::SessionExpired => write!(f, "session expired"),
         }
     }
 }
@@ -120,7 +124,9 @@ impl CustomError for ServerError {
                 message_id: _,
             }
             | ServerError::NoSuchUser(_) => StatusCode::BAD_REQUEST,
-            ServerError::NotImplemented => StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::NotImplemented
+            | ServerError::InternalServerError
+            | ServerError::SessionExpired => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 

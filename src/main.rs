@@ -17,7 +17,7 @@ use harmony_rust_sdk::api::{
 use hrpc::warp;
 use parking_lot::Mutex;
 use scherzo::{
-    db::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
+    db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
     impls::{auth::AuthServer, chat::ChatServer},
     ServerError,
 };
