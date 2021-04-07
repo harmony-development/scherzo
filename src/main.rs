@@ -148,7 +148,7 @@ async fn main() {
 }
 
 pub async fn run_command(command: Command, filter_level: Level, db_path: String) {
-    let term_logger = fmt::layer().pretty();
+    let term_logger = fmt::layer();
 
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);

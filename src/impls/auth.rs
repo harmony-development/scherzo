@@ -5,7 +5,7 @@ use harmony_rust_sdk::api::{
     chat::GetUserResponse,
     exports::{
         hrpc::{encode_protobuf_message, Request},
-        prost::bytes::BytesMut,
+        prost::{bytes::BytesMut, Message},
     },
 };
 use parking_lot::Mutex;
@@ -13,7 +13,10 @@ use sled::{IVec, Tree};
 
 use super::{gen_rand_str, gen_rand_u64};
 use crate::{
-    db::{auth::*, chat::make_member_profile_key},
+    db::{
+        auth::*,
+        chat::{self as chatdb, make_member_profile_key},
+    },
     ServerError,
 };
 
@@ -53,18 +56,23 @@ impl AuthServer {
         let mut batch = sled::Batch::default();
         let mut vs = valid_sessions.lock();
         for (id, token) in tokens {
-            for (oid, atime) in &atimes {
-                if &id == oid {
-                    let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
-                    let auth_how_old = Instant::now().elapsed().as_secs() - secs;
+            if let Some(profile) = chat_tree.get(chatdb::make_member_profile_key(id)).unwrap() {
+                let profile = GetUserResponse::decode(profile.as_ref()).unwrap();
+                if !profile.is_bot {
+                    for (oid, atime) in &atimes {
+                        if &id == oid {
+                            let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
+                            let auth_how_old = Instant::now().elapsed().as_secs() - secs;
 
-                    if auth_how_old >= SESSION_EXPIRE {
-                        tracing::info!("user {} session has expired", id);
-                        batch.remove(&token_key(id));
-                        batch.remove(&atime_key(id));
-                    } else {
-                        let token = std::str::from_utf8(token.as_ref()).unwrap();
-                        vs.insert(token.to_string(), id);
+                            if auth_how_old >= SESSION_EXPIRE {
+                                tracing::info!("user {} session has expired", id);
+                                batch.remove(&token_key(id));
+                                batch.remove(&atime_key(id));
+                            } else {
+                                let token = std::str::from_utf8(token.as_ref()).unwrap();
+                                vs.insert(token.to_string(), id);
+                            }
+                        }
                     }
                 }
             }
@@ -73,6 +81,7 @@ impl AuthServer {
         auth_tree.apply_batch(batch).unwrap();
 
         let att = auth_tree.clone();
+        let ctt = chat_tree.clone();
         let vs = valid_sessions.clone();
 
         std::thread::spawn(move || {
@@ -86,17 +95,26 @@ impl AuthServer {
                     let mut batch = sled::Batch::default();
                     let mut vs = vs.lock();
                     for (id, token) in tokens {
-                        for (oid, atime) in &atimes {
-                            if &id == oid {
-                                let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
-                                let auth_how_old = Instant::now().elapsed().as_secs() - secs;
+                        if let Some(profile) = ctt.get(chatdb::make_member_profile_key(id)).unwrap()
+                        {
+                            let profile = GetUserResponse::decode(profile.as_ref()).unwrap();
+                            if !profile.is_bot {
+                                for (oid, atime) in &atimes {
+                                    if &id == oid {
+                                        let secs =
+                                            u64::from_be_bytes(atime.as_ref().try_into().unwrap());
+                                        let auth_how_old =
+                                            Instant::now().elapsed().as_secs() - secs;
 
-                                if auth_how_old >= SESSION_EXPIRE {
-                                    tracing::info!("user {} session has expired", id);
-                                    batch.remove(&token_key(id));
-                                    batch.remove(&atime_key(id));
-                                    let token = std::str::from_utf8(token.as_ref()).unwrap();
-                                    vs.remove(token);
+                                        if auth_how_old >= SESSION_EXPIRE {
+                                            tracing::info!("user {} session has expired", id);
+                                            batch.remove(&token_key(id));
+                                            batch.remove(&atime_key(id));
+                                            let token =
+                                                std::str::from_utf8(token.as_ref()).unwrap();
+                                            vs.remove(token);
+                                        }
+                                    }
                                 }
                             }
                         }
