@@ -1,3 +1,10 @@
+use cached::proc_macro::cached;
+use harmony_rust_sdk::api::{
+    chat::{get_guild_invites_response::Invite, GetGuildResponse, GetUserResponse},
+    exports::prost::Message,
+    harmonytypes::Message as HarmonyMessage,
+};
+
 pub mod chat {
     use crate::concat_static;
 
@@ -71,4 +78,25 @@ pub mod auth {
     pub fn atime_key(user_id: u64) -> [u8; 14] {
         concat_static!(14, ATIME_PREFIX, user_id.to_be_bytes())
     }
+}
+
+crate::impl_deser! {
+    profile, GetUserResponse, 5096;
+    invite, Invite, 1024;
+    message, HarmonyMessage, 10192;
+    guild, GetGuildResponse, 1024;
+}
+
+#[macro_export]
+macro_rules! impl_deser {
+    ( $( $name:ident, $msg:ty, $size:expr; )* ) => {
+        paste::paste! {
+            $(
+                #[cached(size = $size)]
+                pub fn [<deser_ $name>](data: sled::IVec) -> $msg {
+                    $msg::decode(data.as_ref()).unwrap()
+                }
+            )*
+        }
+    };
 }

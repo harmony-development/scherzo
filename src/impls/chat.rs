@@ -17,7 +17,10 @@ use parking_lot::Mutex;
 use sled::Tree;
 
 use super::{gen_rand_str, gen_rand_u64};
-use crate::{db::chat::*, ServerError};
+use crate::{
+    db::{self, chat::*},
+    ServerError,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventSub {
@@ -65,7 +68,7 @@ impl ChatServer {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
         let message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
-            HarmonyMessage::decode(Bytes::from(msg.to_vec())).unwrap()
+            db::deser_message(msg)
         } else {
             return Err(ServerError::NoSuchMessage {
                 guild_id,
@@ -112,7 +115,7 @@ impl ChatServer {
     ) -> Result<bool, <Self as chat_service_server::ChatService>::Error> {
         let guild_info =
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
-                GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
+                db::deser_guild(guild_raw)
             } else {
                 return Err(ServerError::NoSuchGuild(guild_id));
             };
@@ -459,7 +462,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let guild =
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
-                GetGuildResponse::decode(guild_raw.as_ref()).unwrap()
+                db::deser_guild(guild_raw)
             } else {
                 return Err(ServerError::NoSuchGuild(guild_id));
             };
@@ -486,7 +489,7 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|(_, value)| {
                 let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
                 let id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
+                let invite = db::deser_invite(invite_raw.into());
                 (id, invite)
             })
             .filter_map(|(id, invite)| if guild_id == id { Some(invite) } else { None })
@@ -589,7 +592,7 @@ impl chat_service_server::ChatService for ChatServer {
             reached_top: from == 0,
             messages: msgs
                 .drain(from..to)
-                .map(|(_, msg_raw)| HarmonyMessage::decode(msg_raw.as_ref()).unwrap())
+                .map(|(_, msg_raw)| db::deser_message(msg_raw))
                 .rev()
                 .collect(),
         })
@@ -803,7 +806,7 @@ impl chat_service_server::ChatService for ChatServer {
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
             let (id_raw, invite_raw) = raw.split_at(std::mem::size_of::<u64>());
             let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
-            let invite = get_guild_invites_response::Invite::decode(invite_raw).unwrap();
+            let invite = db::deser_invite(invite_raw.into());
             (guild_id, invite)
         } else {
             return Err(ServerError::NoSuchInvite(invite_id));
@@ -1076,7 +1079,7 @@ impl chat_service_server::ChatService for ChatServer {
         let key = make_member_profile_key(user_id);
 
         let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
-            GetUserResponse::decode(profile_raw.as_ref()).unwrap()
+            db::deser_profile(profile_raw)
         } else {
             return Err(ServerError::NoSuchUser(user_id));
         };
@@ -1099,7 +1102,7 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|id| (id, make_member_profile_key(id)))
         {
             if let Some(raw) = self.chat_tree.get(key).unwrap() {
-                profiles.push(GetUserResponse::decode(raw.as_ref()).unwrap());
+                profiles.push(db::deser_profile(raw));
             } else {
                 return Err(ServerError::NoSuchUser(id));
             }
@@ -1138,9 +1141,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .get(key)
             .unwrap()
-            .map_or_else(GetUserResponse::default, |e| {
-                GetUserResponse::decode(e.as_ref()).unwrap()
-            });
+            .map_or_else(GetUserResponse::default, db::deser_profile);
 
         if update_username {
             profile.user_name = new_username.clone();

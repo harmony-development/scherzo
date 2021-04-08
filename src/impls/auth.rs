@@ -5,7 +5,7 @@ use harmony_rust_sdk::api::{
     chat::GetUserResponse,
     exports::{
         hrpc::{encode_protobuf_message, Request},
-        prost::{bytes::BytesMut, Message},
+        prost::bytes::BytesMut,
     },
 };
 use parking_lot::Mutex;
@@ -14,6 +14,7 @@ use sled::{IVec, Tree};
 use super::{gen_rand_str, gen_rand_u64};
 use crate::{
     db::{
+        self,
         auth::*,
         chat::{self as chatdb, make_member_profile_key},
     },
@@ -57,7 +58,7 @@ impl AuthServer {
         let mut vs = valid_sessions.lock();
         for (id, token) in tokens {
             if let Some(profile) = chat_tree.get(chatdb::make_member_profile_key(id)).unwrap() {
-                let profile = GetUserResponse::decode(profile.as_ref()).unwrap();
+                let profile = db::deser_profile(profile);
                 if !profile.is_bot {
                     for (oid, atime) in &atimes {
                         if &id == oid {
@@ -97,7 +98,7 @@ impl AuthServer {
                     for (id, token) in tokens {
                         if let Some(profile) = ctt.get(chatdb::make_member_profile_key(id)).unwrap()
                         {
-                            let profile = GetUserResponse::decode(profile.as_ref()).unwrap();
+                            let profile = db::deser_profile(profile);
                             if !profile.is_bot {
                                 for (oid, atime) in &atimes {
                                     if &id == oid {
