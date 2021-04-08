@@ -11,7 +11,7 @@ use harmony_rust_sdk::api::{
             Message,
         },
     },
-    harmonytypes::{Attachment, Message as HarmonyMessage},
+    harmonytypes::{content, Content, ContentText, Message as HarmonyMessage},
 };
 use parking_lot::Mutex;
 use sled::Tree;
@@ -148,71 +148,44 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetMessageResponse { message })
     }
 
-    async fn update_message(
+    async fn update_message_text(
         &self,
-        request: Request<UpdateMessageRequest>,
+        request: Request<UpdateMessageTextRequest>,
     ) -> Result<(), Self::Error> {
         let user_id = self.auth(&request)?;
 
         let request = request.into_parts().0;
 
-        let UpdateMessageRequest {
+        let UpdateMessageTextRequest {
             guild_id,
             channel_id,
             message_id,
-            content,
-            update_content,
-            embeds,
-            update_embeds,
-            actions,
-            update_actions,
-            attachments,
-            update_attachments,
-            overrides,
-            update_overrides,
-            metadata,
-            update_metadata,
+            new_content,
         } = request;
 
         if !self.is_user_in_guild(guild_id, user_id) {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        // TODO: process hmc here
-        let attachments = attachments
-            .into_iter()
-            .map(|_hmc| Attachment {
-                ..Default::default()
-            })
-            .collect::<Vec<_>>();
-
         let (mut message, key) = self.get_message(guild_id, channel_id, message_id)?;
 
-        if update_content {
-            message.content = content.clone();
-        }
-        if update_embeds {
-            message.embeds = embeds.clone();
-        }
-        if update_actions {
-            message.actions = actions.clone();
-        }
-        if update_attachments {
-            message.attachments = attachments.clone();
-        }
-        if update_overrides {
-            message.overrides = overrides.clone();
-        }
-        if update_metadata {
-            message.metadata = metadata.clone();
-        }
+        let msg_content = if let Some(content) = &mut message.content {
+            content
+        } else {
+            message.content = Some(Content::default());
+            message.content.as_mut().unwrap()
+        };
+        msg_content.content = Some(content::Content::TextMessage(ContentText {
+            content: new_content.clone(),
+        }));
+
+        let edited_at = Some(std::time::SystemTime::now().into());
+        message.edited_at = edited_at.clone();
 
         let mut buf = Vec::with_capacity(message.encoded_len());
         // will never fail
         message.encode(&mut buf).unwrap();
         self.chat_tree.insert(&key, buf).unwrap();
-
-        let edited_at = Some(std::time::SystemTime::now().into());
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -220,19 +193,8 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 channel_id,
                 message_id,
-                content,
-                update_content,
-                embeds,
-                update_embeds,
-                actions,
-                update_actions,
-                attachments,
-                update_attachments,
-                overrides,
-                update_overrides,
-                metadata,
-                update_metadata,
                 edited_at,
+                content: new_content,
             })),
         );
 
@@ -940,9 +902,6 @@ impl chat_service_server::ChatService for ChatServer {
             guild_id,
             channel_id,
             content,
-            actions,
-            embeds,
-            attachments,
             in_reply_to,
             overrides,
             echo_id,
@@ -963,14 +922,6 @@ impl chat_service_server::ChatService for ChatServer {
             (message_id, key)
         };
 
-        // TODO: process hmc here
-        let attachments = attachments
-            .into_iter()
-            .map(|_hmc| Attachment {
-                ..Default::default()
-            })
-            .collect::<Vec<_>>();
-
         let created_at = Some(std::time::SystemTime::now().into());
         let edited_at = None;
 
@@ -983,9 +934,6 @@ impl chat_service_server::ChatService for ChatServer {
             created_at,
             edited_at,
             content,
-            embeds,
-            actions,
-            attachments,
             in_reply_to,
             overrides,
         };
@@ -1115,13 +1063,6 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|event| Event { event: Some(event) });
 
         Ok(event)
-    }
-
-    async fn sync(
-        &self,
-        validation_request: &Request<SyncRequest>,
-    ) -> Result<Option<SyncEvent>, Self::Error> {
-        Err(ServerError::NotImplemented)
     }
 
     async fn get_user(
