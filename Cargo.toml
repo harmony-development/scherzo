@@ -34,3 +34,13 @@ debug-assertions = false
 debug = false
 codegen-units = 1
 panic = 'abort'
+
+[package.metadata.nix]
+app = true
+build = true
+library = false
+toolchain = "stable"
+buildInputs = ["protobuf", "binutils"]
+
+[package.metadata.nix.env]
+PROTOC = "protoc"

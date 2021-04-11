@@ -10,7 +10,6 @@
 /.direnv
 /.envrc
 
-/shell.nix
 /.vscode
 /db
 /logs
