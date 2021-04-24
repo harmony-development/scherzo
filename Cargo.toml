@@ -36,11 +36,9 @@ codegen-units = 1
 panic = 'abort'
 
 [package.metadata.nix]
+systems = ["x86_64-linux"]
 app = true
 build = true
-library = false
-toolchain = "stable"
-buildInputs = ["protobuf", "binutils"]
-
-[package.metadata.nix.env]
-PROTOC = "protoc"
+buildInputs = ["protobuf"]
+nativeBuildInputs = ["binutils"]
+env.PROTOC = "protoc"
