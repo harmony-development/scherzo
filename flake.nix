@@ -17,5 +17,14 @@
     };
   };
 
-  outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs { root = ./.; };
+  outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
+    root = ./.;
+    overrides = {
+      build = common: prevb: {
+        allRefs = true;
+        gitSubmodules = true;
+        nativeBuildInputs = prevb.nativeBuildInputs ++ [ common.pkgs.rustfmt ];
+      };
+    };
+  };
 }
