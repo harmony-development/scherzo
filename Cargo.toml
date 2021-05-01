@@ -39,6 +39,8 @@ panic = 'abort'
 systems = ["x86_64-linux"]
 app = true
 build = true
-buildInputs = ["protobuf"]
-nativeBuildInputs = ["binutils"]
-env.PROTOC = "protoc"
+library = true
+
+[package.metadata.nix.cachix]
+name = "harmony"
+key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
