@@ -3,14 +3,11 @@ use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     chat::{
-        chat_service_server::{ChatService, ChatServiceServer},
-        get_guild_invites_response::Invite,
-        GetChannelMessagesRequest, GetGuildChannelsRequest, GetGuildInvitesRequest,
-        GetGuildMembersRequest, GetGuildRequest, GetGuildResponse, GetMessageRequest,
-        GetUserRequest, GetUserResponse,
+        chat_service_server::ChatServiceServer, get_guild_invites_response::Invite,
+        GetGuildResponse, GetUserResponse,
     },
     exports::{
-        hrpc::{self, warp::Filter, IntoRequest},
+        hrpc::{self, warp::Filter},
         prost::Message,
     },
 };
@@ -189,11 +186,10 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     let chat_tree = db.open_tree("chat").unwrap();
 
     let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
-    let mut chat_server = ChatServer::new(chat_tree.clone(), valid_sessions);
+    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions);
 
     match command {
         Command::RunServer => {
-            chat_server.check_auth = true;
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
 
@@ -269,20 +265,12 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
         }
         Command::GetGuildInvites(id) => {
-            chat_server.check_auth = false;
-            let invites = chat_server
-                .get_guild_invites(GetGuildInvitesRequest { guild_id: id }.into_request())
-                .await
-                .map(|r| r.invites);
-            println!("{:#?}", invites)
+            let invites = chat_server.get_guild_invites_logic(id);
+            println!("{:#?}", invites.invites)
         }
         Command::GetGuildChannels(id) => {
-            chat_server.check_auth = false;
-            let channels = chat_server
-                .get_guild_channels(GetGuildChannelsRequest { guild_id: id }.into_request())
-                .await
-                .map(|r| r.channels);
-            println!("{:#?}", channels)
+            let channels = chat_server.get_guild_channels_logic(id);
+            println!("{:#?}", channels.channels)
         }
         Command::GetInvite(id) => {
             let invite = chat_tree
@@ -295,17 +283,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             message_id,
         } => {
-            chat_server.check_auth = false;
-            let message = chat_server
-                .get_message(
-                    GetMessageRequest {
-                        guild_id,
-                        channel_id,
-                        message_id,
-                    }
-                    .into_request(),
-                )
-                .await;
+            let message = chat_server.get_message_logic(guild_id, channel_id, message_id);
             println!("{:#?}", message);
         }
         Command::GetChannelMessages {
@@ -313,50 +291,26 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             before_message_id,
         } => {
-            chat_server.check_auth = false;
-            let messages = chat_server
-                .get_channel_messages(
-                    GetChannelMessagesRequest {
-                        guild_id,
-                        channel_id,
-                        before_message: before_message_id.unwrap_or(0),
-                    }
-                    .into_request(),
-                )
-                .await
-                .map(|r| r.messages);
-            match messages {
-                Ok(messages) => {
-                    for message in messages {
-                        println!("{:?}", message);
-                    }
-                }
-                Err(err) => {
-                    eprintln!("{}", err);
-                }
+            let messages = chat_server.get_channel_messages_logic(
+                guild_id,
+                channel_id,
+                before_message_id.unwrap_or(0),
+            );
+            for message in messages.messages {
+                println!("{:?}", message);
             }
         }
         Command::GetGuild(id) => {
-            chat_server.check_auth = false;
-            let guild = chat_server
-                .get_guild(GetGuildRequest { guild_id: id }.into_request())
-                .await;
+            let guild = chat_server.get_guild_logic(id);
             println!("{:#?}", guild);
         }
         Command::GetMember(id) => {
-            chat_server.check_auth = false;
-            let member = chat_server
-                .get_user(GetUserRequest { user_id: id }.into_request())
-                .await;
+            let member = chat_server.get_user_logic(id);
             println!("{:#?}", member);
         }
         Command::GetGuildMembers(id) => {
-            chat_server.check_auth = false;
-            let members = chat_server
-                .get_guild_members(GetGuildMembersRequest { guild_id: id }.into_request())
-                .await
-                .map(|r| r.members);
-            println!("{:?}", members);
+            let members = chat_server.get_guild_members_logic(id);
+            println!("{:?}", members.members);
         }
     }
 }

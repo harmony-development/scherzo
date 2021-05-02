@@ -35,7 +35,6 @@ pub struct ChatServer {
     chat_tree: Tree,
     subbed_to: Mutex<HashMap<u64, Vec<EventSub>>>,
     event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
-    pub check_auth: bool,
 }
 
 impl ChatServer {
@@ -45,7 +44,6 @@ impl ChatServer {
             chat_tree,
             subbed_to: Mutex::new(HashMap::new()),
             event_chans: Mutex::new(HashMap::new()),
-            check_auth: true,
         }
     }
 
@@ -59,7 +57,46 @@ impl ChatServer {
         }
     }
 
-    fn get_message(
+    fn auth<T>(
+        &self,
+        request: &Request<T>,
+    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
+        let auth_id = request
+            .get_header(&"Authorization".parse().unwrap())
+            .map_or_else(String::default, |val| {
+                val.to_str()
+                    .map_or_else(|_| String::default(), ToString::to_string)
+            });
+
+        self.valid_sessions
+            .lock()
+            .get(&auth_id)
+            .cloned()
+            .map_or(Err(ServerError::Unauthenticated), Ok)
+    }
+
+    pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
+        self.chat_tree
+            .contains_key(make_member_key(guild_id, user_id))
+            .unwrap()
+    }
+
+    pub fn is_user_guild_owner(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+    ) -> Result<bool, <Self as chat_service_server::ChatService>::Error> {
+        let guild_info =
+            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
+                db::deser_guild(guild_raw)
+            } else {
+                return Err(ServerError::NoSuchGuild(guild_id));
+            };
+
+        Ok(guild_info.guild_owner == user_id)
+    }
+
+    pub fn get_message_logic(
         &self,
         guild_id: u64,
         channel_id: u64,
@@ -80,47 +117,117 @@ impl ChatServer {
         Ok((message, key))
     }
 
-    fn auth<T>(
+    pub fn get_user_logic(
         &self,
-        request: &Request<T>,
-    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
-        if self.check_auth {
-            let auth_id = request
-                .get_header(&"Authorization".parse().unwrap())
-                .map_or_else(String::default, |val| {
-                    val.to_str()
-                        .map_or_else(|_| String::default(), ToString::to_string)
-                });
+        user_id: u64,
+    ) -> Result<GetUserResponse, <Self as chat_service_server::ChatService>::Error> {
+        let key = make_member_profile_key(user_id);
 
-            self.valid_sessions
-                .lock()
-                .get(&auth_id)
-                .cloned()
-                .map_or(Err(ServerError::Unauthenticated), Ok)
+        let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
+            db::deser_profile(profile_raw)
         } else {
-            Ok(0)
-        }
+            return Err(ServerError::NoSuchUser(user_id));
+        };
+
+        Ok(profile)
     }
 
-    fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
-        self.chat_tree
-            .contains_key(make_member_key(guild_id, user_id))
-            .unwrap()
-    }
-
-    fn is_user_guild_owner(
+    pub fn get_guild_logic(
         &self,
         guild_id: u64,
-        user_id: u64,
-    ) -> Result<bool, <Self as chat_service_server::ChatService>::Error> {
-        let guild_info =
+    ) -> Result<GetGuildResponse, <Self as chat_service_server::ChatService>::Error> {
+        let guild =
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
                 db::deser_guild(guild_raw)
             } else {
                 return Err(ServerError::NoSuchGuild(guild_id));
             };
 
-        Ok(guild_info.guild_owner == user_id)
+        Ok(guild)
+    }
+
+    pub fn get_guild_invites_logic(&self, guild_id: u64) -> GetGuildInvitesResponse {
+        let invites = self
+            .chat_tree
+            .scan_prefix("invite_")
+            .flatten()
+            .map(|(_, value)| {
+                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                let invite = db::deser_invite(invite_raw.into());
+                (id, invite)
+            })
+            .filter_map(|(id, invite)| if guild_id == id { Some(invite) } else { None })
+            .collect();
+
+        GetGuildInvitesResponse { invites }
+    }
+
+    pub fn get_guild_members_logic(&self, guild_id: u64) -> GetGuildMembersResponse {
+        let prefix = make_guild_mem_prefix(guild_id);
+        let members = self
+            .chat_tree
+            .scan_prefix(prefix)
+            .flatten()
+            .map(|(id, _)| u64::from_be_bytes(id.split_at(prefix.len()).1.try_into().unwrap()))
+            .collect();
+
+        GetGuildMembersResponse { members }
+    }
+
+    pub fn get_guild_channels_logic(&self, guild_id: u64) -> GetGuildChannelsResponse {
+        let prefix = make_guild_chan_prefix(guild_id);
+        let channels = self
+            .chat_tree
+            .scan_prefix(prefix)
+            .flatten()
+            .flat_map(|(key, value)| {
+                if key.len() == 17 {
+                    Some(Channel::decode(value.as_ref()).unwrap())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        GetGuildChannelsResponse { channels }
+    }
+
+    pub fn get_channel_messages_logic(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        before_message: u64,
+    ) -> GetChannelMessagesResponse {
+        let prefix = make_msg_prefix(guild_id, channel_id);
+        let mut msgs = self
+            .chat_tree
+            .scan_prefix(prefix)
+            .flatten()
+            .map(|(key, value)| {
+                (
+                    u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
+                    value,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let before_msg_pos = msgs
+            .iter()
+            .position(|(id, _)| *id == before_message)
+            .unwrap_or_else(|| msgs.len());
+
+        let from = before_msg_pos.saturating_sub(25);
+        let to = before_msg_pos;
+
+        GetChannelMessagesResponse {
+            reached_top: from == 0,
+            messages: msgs
+                .drain(from..to)
+                .map(|(_, msg_raw)| db::deser_message(msg_raw))
+                .rev()
+                .collect(),
+        }
     }
 }
 
@@ -146,7 +253,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let message = Some(self.get_message(guild_id, channel_id, message_id)?.0);
+        let message = Some(self.get_message_logic(guild_id, channel_id, message_id)?.0);
 
         Ok(GetMessageResponse { message })
     }
@@ -170,7 +277,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let (mut message, key) = self.get_message(guild_id, channel_id, message_id)?;
+        let (mut message, key) = self.get_message_logic(guild_id, channel_id, message_id)?;
 
         let msg_content = if let Some(content) = &mut message.content {
             content
@@ -460,14 +567,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let guild =
-            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
-                db::deser_guild(guild_raw)
-            } else {
-                return Err(ServerError::NoSuchGuild(guild_id));
-            };
-
-        Ok(guild)
+        self.get_guild_logic(guild_id)
     }
 
     async fn get_guild_invites(
@@ -482,20 +582,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let invites = self
-            .chat_tree
-            .scan_prefix("invite_")
-            .flatten()
-            .map(|(_, value)| {
-                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
-                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                let invite = db::deser_invite(invite_raw.into());
-                (id, invite)
-            })
-            .filter_map(|(id, invite)| if guild_id == id { Some(invite) } else { None })
-            .collect();
-
-        Ok(GetGuildInvitesResponse { invites })
+        Ok(self.get_guild_invites_logic(guild_id))
     }
 
     async fn get_guild_members(
@@ -510,15 +597,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let prefix = make_guild_mem_prefix(guild_id);
-        let members = self
-            .chat_tree
-            .scan_prefix(prefix)
-            .flatten()
-            .map(|(id, _)| u64::from_be_bytes(id.split_at(prefix.len()).1.try_into().unwrap()))
-            .collect();
-
-        Ok(GetGuildMembersResponse { members })
+        Ok(self.get_guild_members_logic(guild_id))
     }
 
     // TODO: do ordering
@@ -534,21 +613,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let prefix = make_guild_chan_prefix(guild_id);
-        let channels = self
-            .chat_tree
-            .scan_prefix(prefix)
-            .flatten()
-            .flat_map(|(key, value)| {
-                if key.len() == 17 {
-                    Some(Channel::decode(value.as_ref()).unwrap())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        Ok(GetGuildChannelsResponse { channels })
+        Ok(self.get_guild_channels_logic(guild_id))
     }
 
     async fn get_channel_messages(
@@ -567,35 +632,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild(guild_id));
         }
 
-        let prefix = make_msg_prefix(guild_id, channel_id);
-        let mut msgs = self
-            .chat_tree
-            .scan_prefix(prefix)
-            .flatten()
-            .map(|(key, value)| {
-                (
-                    u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
-                    value,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let before_msg_pos = msgs
-            .iter()
-            .position(|(id, _)| *id == before_message)
-            .unwrap_or_else(|| msgs.len());
-
-        let from = before_msg_pos.saturating_sub(25);
-        let to = before_msg_pos;
-
-        Ok(GetChannelMessagesResponse {
-            reached_top: from == 0,
-            messages: msgs
-                .drain(from..to)
-                .map(|(_, msg_raw)| db::deser_message(msg_raw))
-                .rev()
-                .collect(),
-        })
+        Ok(self.get_channel_messages_logic(guild_id, channel_id, before_message))
     }
 
     async fn get_emote_packs(
@@ -1076,15 +1113,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let GetUserRequest { user_id } = request.into_parts().0;
 
-        let key = make_member_profile_key(user_id);
-
-        let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
-            db::deser_profile(profile_raw)
-        } else {
-            return Err(ServerError::NoSuchUser(user_id));
-        };
-
-        Ok(profile)
+        self.get_user_logic(user_id)
     }
 
     async fn get_user_bulk(
