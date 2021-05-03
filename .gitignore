@@ -13,3 +13,5 @@
 /.vscode
 /db
 /logs
+
+/.pre-commit-config.yaml
