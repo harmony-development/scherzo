@@ -40,7 +40,6 @@ systems = ["x86_64-linux"]
 app = true
 build = true
 library = true
-preCommitHooks.enable = true
 
 [package.metadata.nix.cachix]
 name = "harmony"
