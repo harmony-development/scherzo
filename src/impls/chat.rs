@@ -3,13 +3,10 @@ use std::{collections::HashMap, convert::TryInto, sync::Arc};
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
-    chat::*,
+    chat::{event::LeaveReason, *},
     exports::{
         hrpc::{encode_protobuf_message, Request},
-        prost::{
-            bytes::BytesMut,
-            Message,
-        },
+        prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{content, Content, ContentText, Message as HarmonyMessage},
 };
@@ -250,7 +247,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let message = Some(self.get_message_logic(guild_id, channel_id, message_id)?.0);
@@ -274,7 +271,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let (mut message, key) = self.get_message_logic(guild_id, channel_id, message_id)?;
@@ -376,7 +373,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let key = make_invite_key(name.as_str());
@@ -416,7 +413,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let channel_id = {
@@ -564,7 +561,7 @@ impl chat_service_server::ChatService for ChatServer {
         let GetGuildRequest { guild_id } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         self.get_guild_logic(guild_id)
@@ -579,7 +576,7 @@ impl chat_service_server::ChatService for ChatServer {
         let GetGuildInvitesRequest { guild_id } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         Ok(self.get_guild_invites_logic(guild_id))
@@ -594,7 +591,7 @@ impl chat_service_server::ChatService for ChatServer {
         let GetGuildMembersRequest { guild_id } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         Ok(self.get_guild_members_logic(guild_id))
@@ -610,7 +607,7 @@ impl chat_service_server::ChatService for ChatServer {
         let GetGuildChannelsRequest { guild_id } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         Ok(self.get_guild_channels_logic(guild_id))
@@ -629,7 +626,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         Ok(self.get_channel_messages_logic(guild_id, channel_id, before_message))
@@ -729,7 +726,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         self.chat_tree
@@ -751,7 +748,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let messages = self
@@ -791,7 +788,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         self.chat_tree
@@ -886,7 +883,7 @@ impl chat_service_server::ChatService for ChatServer {
         let (LeaveGuildRequest { guild_id }, _) = request.into_parts();
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         self.chat_tree
@@ -898,7 +895,7 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::LeftMember(event::MemberLeft {
                 guild_id,
                 member_id: user_id,
-                leave_reason: 0,
+                leave_reason: LeaveReason::Willingly.into(),
             }),
         );
 
@@ -931,7 +928,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         let (message_id, key) = {
@@ -1063,7 +1060,7 @@ impl chat_service_server::ChatService for ChatServer {
                         .contains_key(make_member_key(guild_id, user_id))
                         .unwrap()
                     {
-                        return Err(ServerError::UserNotInGuild(guild_id));
+                        return Err(ServerError::UserNotInGuild { guild_id, user_id });
                     }
                     EventSub::Guild(guild_id)
                 }
@@ -1198,7 +1195,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         if !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild(guild_id));
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
 
         self.send_event_through_chan(
@@ -1225,7 +1222,37 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     async fn kick_user(&self, request: Request<KickUserRequest>) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let (
+            KickUserRequest {
+                guild_id,
+                user_id: user_to_kick,
+            },
+            _,
+        ) = request.into_parts();
+
+        if !self.is_user_in_guild(guild_id, user_id) {
+            return Err(ServerError::UserNotInGuild { guild_id, user_id });
+        }
+        if !self.is_user_in_guild(guild_id, user_to_kick) {
+            return Err(ServerError::UserNotInGuild { guild_id, user_id: user_to_kick });
+        }
+
+        self.chat_tree
+            .remove(&make_member_key(guild_id, user_to_kick))
+            .unwrap();
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::LeftMember(event::MemberLeft {
+                guild_id,
+                member_id: user_to_kick,
+                leave_reason: LeaveReason::Kicked.into(),
+            }),
+        );
+
+        Ok(())
     }
 
     async fn unban_user(&self, request: Request<UnbanUserRequest>) -> Result<(), Self::Error> {

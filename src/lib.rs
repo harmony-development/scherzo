@@ -28,7 +28,10 @@ pub enum ServerError {
         email: String,
     },
     UserAlreadyExists,
-    UserNotInGuild(u64),
+    UserNotInGuild {
+        guild_id: u64,
+        user_id: u64,
+    },
     Unauthenticated,
     NotImplemented,
     NoSuchMessage {
@@ -76,7 +79,9 @@ impl Display for ServerError {
             ServerError::WrongUserOrPassword { email } => {
                 write!(f, "wrong email or password for email {}", email)
             }
-            ServerError::UserNotInGuild(guild_id) => write!(f, "user not in guild {}", guild_id),
+            ServerError::UserNotInGuild { guild_id, user_id } => {
+                write!(f, "user {} not in guild {}", user_id, guild_id)
+            }
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
             ServerError::Unauthenticated => write!(f, "invalid-session"),
             ServerError::NotImplemented => write!(f, "not implemented"),
@@ -122,7 +127,7 @@ impl CustomError for ServerError {
             | ServerError::WrongTypeForField { .. }
             | ServerError::WrongUserOrPassword { .. }
             | ServerError::UserAlreadyExists
-            | ServerError::UserNotInGuild(_)
+            | ServerError::UserNotInGuild { .. }
             | ServerError::Unauthenticated
             | ServerError::NoSuchGuild(_)
             | ServerError::NoSuchInvite(_)
