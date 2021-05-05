@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{encode_protobuf_message, Request},
         prost::{
-            bytes::{Bytes, BytesMut},
+            bytes::BytesMut,
             Message,
         },
     },
@@ -16,7 +16,7 @@ use harmony_rust_sdk::api::{
 use parking_lot::Mutex;
 use sled::Tree;
 
-use super::{gen_rand_str, gen_rand_u64};
+use super::gen_rand_u64;
 use crate::{
     db::{self, chat::*},
     ServerError,
@@ -837,7 +837,7 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<JoinGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let (JoinGuildRequest { invite_id }, headers) = request.into_parts();
+        let (JoinGuildRequest { invite_id }, _) = request.into_parts();
         let key = make_invite_key(invite_id.as_str());
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
@@ -858,15 +858,6 @@ impl chat_service_server::ChatService for ChatServer {
                 .insert(&make_member_key(guild_id, user_id), &[])
                 .unwrap();
             invite.use_count += 1;
-
-            self.add_guild_to_guild_list(Request::from_parts((
-                AddGuildToGuildListRequest {
-                    guild_id,
-                    homeserver: "".to_string(),
-                },
-                headers,
-            )))
-            .await?;
 
             self.send_event_through_chan(
                 EventSub::Guild(guild_id),
@@ -892,7 +883,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let (LeaveGuildRequest { guild_id }, headers) = request.into_parts();
+        let (LeaveGuildRequest { guild_id }, _) = request.into_parts();
 
         if !self.is_user_in_guild(guild_id, user_id) {
             return Err(ServerError::UserNotInGuild(guild_id));
@@ -901,15 +892,6 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .remove(&make_member_key(guild_id, user_id))
             .unwrap();
-
-        self.remove_guild_from_guild_list(Request::from_parts((
-            RemoveGuildFromGuildListRequest {
-                guild_id,
-                homeserver: "".to_string(),
-            },
-            headers,
-        )))
-        .await?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
