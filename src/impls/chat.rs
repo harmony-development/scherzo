@@ -344,15 +344,6 @@ impl chat_service_server::ChatService for ChatServer {
             .insert(guild_id.to_be_bytes().as_ref(), buf.as_ref())
             .unwrap();
 
-        self.add_guild_to_guild_list(Request::from_parts((
-            AddGuildToGuildListRequest {
-                guild_id,
-                homeserver: "".to_string(),
-            },
-            headers,
-        )))
-        .await?;
-
         self.chat_tree
             .insert(&make_member_key(guild_id, user_id), &[])
             .unwrap();
