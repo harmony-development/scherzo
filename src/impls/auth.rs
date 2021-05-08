@@ -23,9 +23,29 @@ use crate::{
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
+pub type SessionMap = Arc<Mutex<HashMap<String, u64>>>;
+
+pub fn check_auth<T>(
+    valid_sessions: &SessionMap,
+    request: &Request<T>,
+) -> Result<u64, ServerError> {
+    let auth_id = request
+        .get_header(&"Authorization".parse().unwrap())
+        .map_or_else(String::default, |val| {
+            val.to_str()
+                .map_or_else(|_| String::default(), ToString::to_string)
+        });
+
+    valid_sessions
+        .lock()
+        .get(&auth_id)
+        .cloned()
+        .map_or(Err(ServerError::Unauthenticated), Ok)
+}
+
 #[derive(Debug)]
 pub struct AuthServer {
-    valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
+    valid_sessions: SessionMap,
     step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
     send_step: Mutex<HashMap<String, AuthStep>>,
     auth_tree: Tree,
@@ -136,11 +156,19 @@ impl AuthServer {
             chat_tree,
         }
     }
+
+    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
+        check_auth(&self.valid_sessions, request)
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
+
+    async fn check_logged_in(&self, request: Request<()>) -> Result<(), Self::Error> {
+        self.auth(&request).map(|_| ())
+    }
 
     async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
         Err(ServerError::NotImplemented)

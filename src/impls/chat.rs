@@ -16,6 +16,7 @@ use sled::Tree;
 use super::gen_rand_u64;
 use crate::{
     db::{self, chat::*},
+    impls::auth,
     ServerError,
 };
 
@@ -28,7 +29,7 @@ enum EventSub {
 
 #[derive(Debug)]
 pub struct ChatServer {
-    valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
+    valid_sessions: auth::SessionMap,
     chat_tree: Tree,
     subbed_to: Mutex<HashMap<u64, Vec<EventSub>>>,
     event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
@@ -54,22 +55,8 @@ impl ChatServer {
         }
     }
 
-    fn auth<T>(
-        &self,
-        request: &Request<T>,
-    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
-        let auth_id = request
-            .get_header(&"Authorization".parse().unwrap())
-            .map_or_else(String::default, |val| {
-                val.to_str()
-                    .map_or_else(|_| String::default(), ToString::to_string)
-            });
-
-        self.valid_sessions
-            .lock()
-            .get(&auth_id)
-            .cloned()
-            .map_or(Err(ServerError::Unauthenticated), Ok)
+    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
+        auth::check_auth(&self.valid_sessions, request)
     }
 
     pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
@@ -1227,7 +1214,10 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserNotInGuild { guild_id, user_id });
         }
         if !self.is_user_in_guild(guild_id, user_to_kick) {
-            return Err(ServerError::UserNotInGuild { guild_id, user_id: user_to_kick });
+            return Err(ServerError::UserNotInGuild {
+                guild_id,
+                user_id: user_to_kick,
+            });
         }
 
         self.chat_tree
