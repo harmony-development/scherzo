@@ -142,6 +142,26 @@ impl CustomError for ServerError {
     }
 
     fn message(&self) -> Vec<u8> {
-        self.to_string().into_bytes()
+        let i18n_code = match self {
+            ServerError::InternalServerError => "h.internal-server-error",
+            ServerError::Unauthenticated => "h.blank-session",
+            ServerError::InvalidAuthId => "h.bad-auth-id",
+            ServerError::UserAlreadyExists => "h.already-registered",
+            ServerError::NotEnoughPermissions { .. } => "h.not-enough-permissions",
+            ServerError::NoFieldSpecified => "h.missing-form",
+            ServerError::NoSuchField => "h.missing-form",
+            ServerError::NoSuchChoice { .. } => "h.bad-auth-choice",
+            ServerError::WrongStep { .. } => "h.bad-auth-choice",
+            ServerError::WrongTypeForField { .. } => "h.missing-form",
+            ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
+            ServerError::UserNotInGuild { .. } => "h.not-joined",
+            ServerError::NotImplemented => "h.not-implemented",
+            ServerError::NoSuchMessage { .. } => "h.bad-message-id",
+            ServerError::NoSuchGuild(_) => "h.bad-guild-id",
+            ServerError::NoSuchInvite(_) => "h.bad-invite-id",
+            ServerError::NoSuchUser(_) => "h.bad-user-id",
+            ServerError::SessionExpired => "h.bad-session",
+        };
+        format!("{}\n{}", i18n_code, self).into_bytes()
     }
 }
