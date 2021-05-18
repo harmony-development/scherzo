@@ -4,7 +4,7 @@ use harmony_rust_sdk::api::{
     auth::*,
     chat::GetUserResponse,
     exports::{
-        hrpc::{encode_protobuf_message, Request},
+        hrpc::{encode_protobuf_message, warp::reply::Response, Request},
         prost::bytes::BytesMut,
     },
 };
@@ -18,7 +18,7 @@ use crate::{
         auth::*,
         chat::{self as chatdb, make_member_profile_key},
     },
-    ServerError,
+    set_proto_name, ServerError, WS_PROTO_HEADER,
 };
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
@@ -31,10 +31,24 @@ pub fn check_auth<T>(
 ) -> Result<u64, ServerError> {
     let auth_id = request
         .get_header(&"Authorization".parse().unwrap())
-        .map_or_else(String::default, |val| {
-            val.to_str()
-                .map_or_else(|_| String::default(), ToString::to_string)
-        });
+        .map_or_else(
+            || {
+                // Specific handling for web clients
+                request
+                    .get_header(&WS_PROTO_HEADER.parse().unwrap())
+                    .map_or_else(String::default, |val| {
+                        val.to_str()
+                            .unwrap_or("")
+                            .split(',')
+                            .nth(1)
+                            .map_or_else(String::default, |auth| auth.trim().to_string())
+                    })
+            },
+            |val| {
+                val.to_str()
+                    .map_or_else(|_| String::default(), ToString::to_string)
+            },
+        );
 
     valid_sessions
         .lock()
@@ -183,6 +197,10 @@ impl auth_service_server::AuthService for AuthServer {
 
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
         Err(ServerError::NotImplemented)
+    }
+
+    fn stream_steps_on_upgrade(&self, response: Response) -> Response {
+        set_proto_name(response)
     }
 
     async fn stream_steps(

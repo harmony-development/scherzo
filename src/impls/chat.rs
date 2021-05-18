@@ -5,7 +5,7 @@ use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{event::LeaveReason, *},
     exports::{
-        hrpc::{encode_protobuf_message, Request},
+        hrpc::{encode_protobuf_message, warp::reply::Response, Request},
         prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{content, Content, ContentText, Message as HarmonyMessage},
@@ -17,7 +17,7 @@ use super::gen_rand_u64;
 use crate::{
     db::{self, chat::*},
     impls::auth,
-    ServerError,
+    set_proto_name, ServerError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -776,8 +776,8 @@ impl chat_service_server::ChatService for ChatServer {
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             event::Event::DeletedMessage(event::MessageDeleted {
-                channel_id,
                 guild_id,
+                channel_id,
                 message_id,
             }),
         );
@@ -1021,6 +1021,10 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
+    fn stream_events_on_upgrade(&self, response: Response) -> Response {
+        set_proto_name(response)
+    }
+
     async fn stream_events(
         &self,
         validation_request: &Request<()>,
@@ -1149,15 +1153,15 @@ impl chat_service_server::ChatService for ChatServer {
         self.send_event_through_chan(
             EventSub::Homeserver,
             event::Event::ProfileUpdated(event::ProfileUpdated {
-                update_avatar,
-                update_is_bot,
-                update_status,
+                user_id,
+                new_username,
                 update_username,
                 new_avatar,
+                update_avatar,
                 new_status,
-                new_username,
+                update_status,
                 is_bot,
-                user_id,
+                update_is_bot,
             }),
         );
 
@@ -1179,9 +1183,9 @@ impl chat_service_server::ChatService for ChatServer {
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             event::Event::Typing(event::Typing {
-                channel_id,
-                guild_id,
                 user_id,
+                guild_id,
+                channel_id,
             }),
         );
 

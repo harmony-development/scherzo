@@ -2,10 +2,23 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use harmony_rust_sdk::api::exports::hrpc::server::{CustomError, StatusCode};
+use harmony_rust_sdk::api::exports::hrpc::{
+    server::{CustomError, StatusCode},
+    warp::reply::Response,
+};
 
 pub mod db;
 pub mod impls;
+
+pub const WS_PROTO_HEADER: &str = "Sec-WebSocket-Protocol";
+pub const HARMONY_PROTO_NAME: &str = "harmony";
+
+pub fn set_proto_name(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(WS_PROTO_HEADER, HARMONY_PROTO_NAME.parse().unwrap());
+    response
+}
 
 #[derive(Debug)]
 pub enum ServerError {
