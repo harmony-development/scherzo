@@ -190,6 +190,21 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     match command {
         Command::RunServer => {
+            use scherzo::config::Config;
+
+            let config_path = std::path::Path::new("./config.toml");
+            let config: Config = if config_path.exists() {
+                toml::from_slice(&std::fs::read(config_path).expect("failed to read config file"))
+                    .expect("failed to parse config file")
+            } else {
+                tracing::info!("No config file found, writing default config file");
+                let def = Config::default();
+                std::fs::write(config_path, toml::to_vec(&def).unwrap())
+                    .expect("failed to write default config file");
+                def
+            };
+            tracing::debug!("Config: {:?}", config);
+
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
 
@@ -214,13 +229,22 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 }
             });
 
-            hrpc::warp::serve(
+            let serve = hrpc::warp::serve(
                 auth.or(chat)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>),
-            )
-            .run(([127, 0, 0, 1], 2289))
-            .await
+            );
+
+            if let Some(tls_config) = config.tls {
+                serve
+                    .tls()
+                    .cert_path(tls_config.cert_file)
+                    .key_path(tls_config.key_file)
+                    .run(([127, 0, 0, 1], config.port))
+                    .await
+            } else {
+                serve.run(([127, 0, 0, 1], config.port)).await
+            }
         }
         Command::GetInvites => {
             let invites = chat_tree

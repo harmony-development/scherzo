@@ -7,6 +7,7 @@ use harmony_rust_sdk::api::exports::hrpc::{
     warp::reply::Response,
 };
 
+pub mod config;
 pub mod db;
 pub mod impls;
 

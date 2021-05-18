@@ -13,3 +13,4 @@
 /.vscode
 /db
 /logs
+/config.toml

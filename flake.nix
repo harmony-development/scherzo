@@ -10,5 +10,16 @@
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
     root = ./.;
     buildPlatform = "crate2nix";
+    overrides = {
+      shell = common: prev: {
+        packages = prev.packages ++ [ common.pkgs.mkcert ];
+        commands = prev.commands ++ [
+          {
+            name = "generate-cert";
+            command = "mkcert 127.0.0.1 ::1 localhost";
+          }
+        ];
+      };
+    };
   };
 }

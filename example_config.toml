@@ -1,0 +1,5 @@
+port = 2289
+
+[tls]
+cert_file = "./cert"
+key_file = "./key"
