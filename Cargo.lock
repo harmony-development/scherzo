@@ -499,7 +499,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#9ac564222b3f9e7a1ffc37a1a2236df5404e8cb0"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#de2cd0ee45f4a6f5d8ad8bd89bef90b7b1f6495e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -509,7 +509,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.5.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#9ac564222b3f9e7a1ffc37a1a2236df5404e8cb0"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#de2cd0ee45f4a6f5d8ad8bd89bef90b7b1f6495e"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -572,8 +572,7 @@ dependencies = [
 [[package]]
 name = "hrpc"
 version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b6e3a3f7ebad9893c056444643a3f830592d113e9c3c14e6e4ed5cce7f3da63"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=workaround/tls-fix#2c1bc5ec0f5a748a411cebdaa3b06d39a39bf26a"
 dependencies = [
  "async-trait",
  "bytes",
