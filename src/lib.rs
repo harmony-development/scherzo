@@ -41,6 +41,8 @@ pub enum ServerError {
     WrongUserOrPassword {
         email: String,
     },
+    UserBanned,
+    UserAlreadyInGuild,
     UserAlreadyExists,
     UserNotInGuild {
         guild_id: u64,
@@ -53,7 +55,16 @@ pub enum ServerError {
         channel_id: u64,
         message_id: u64,
     },
+    GuildAlreadyExists(u64),
     NoSuchGuild(u64),
+    ChannelAlreadyExists {
+        guild_id: u64,
+        channel_id: u64,
+    },
+    NoSuchChannel {
+        guild_id: u64,
+        channel_id: u64,
+    },
     NoSuchInvite(String),
     NoSuchUser(u64),
     InternalServerError,
@@ -62,6 +73,13 @@ pub enum ServerError {
         must_be_guild_owner: bool,
         missing_permissions: Vec<String>,
     },
+    EmptyPermissionQuery,
+    NoSuchRole {
+        guild_id: u64,
+        role_id: u64,
+    },
+    NoRoleSpecified,
+    NoPermissionsSpecified,
 }
 
 impl Display for ServerError {
@@ -93,12 +111,33 @@ impl Display for ServerError {
             ServerError::WrongUserOrPassword { email } => {
                 write!(f, "wrong email or password for email {}", email)
             }
+            ServerError::UserBanned => write!(f, "user banned in guild"),
             ServerError::UserNotInGuild { guild_id, user_id } => {
                 write!(f, "user {} not in guild {}", user_id, guild_id)
             }
             ServerError::UserAlreadyExists => write!(f, "user already exists"),
+            ServerError::UserAlreadyInGuild => write!(f, "user already in guild"),
             ServerError::Unauthenticated => write!(f, "invalid-session"),
             ServerError::NotImplemented => write!(f, "not implemented"),
+            ServerError::NoSuchChannel {
+                guild_id,
+                channel_id,
+            } => write!(
+                f,
+                "channel {} does not exist in guild {}",
+                channel_id, guild_id
+            ),
+            ServerError::ChannelAlreadyExists {
+                guild_id,
+                channel_id,
+            } => write!(
+                f,
+                "channel {} already exists in guild {}",
+                channel_id, guild_id
+            ),
+            ServerError::GuildAlreadyExists(guild_id) => {
+                write!(f, "guild {} already exists", guild_id)
+            }
             ServerError::NoSuchGuild(id) => write!(f, "no such guild with id {}", id),
             ServerError::NoSuchUser(id) => write!(f, "no such user with id {}", id),
             ServerError::NoSuchMessage {
@@ -126,6 +165,18 @@ impl Display for ServerError {
                 }
                 Ok(())
             }
+            ServerError::EmptyPermissionQuery => write!(f, "permission query cant be empty"),
+            ServerError::NoSuchRole { guild_id, role_id } => {
+                write!(f, "no such role {} in guild {}", role_id, guild_id)
+            }
+            ServerError::NoRoleSpecified => write!(
+                f,
+                "no role specified when there must have been one specified"
+            ),
+            ServerError::NoPermissionsSpecified => write!(
+                f,
+                "no permissions specified when there must have been some specified"
+            ),
         }
     }
 }
@@ -148,7 +199,16 @@ impl CustomError for ServerError {
             | ServerError::NoSuchMessage { .. }
             | ServerError::NoSuchUser(_)
             | ServerError::NotEnoughPermissions { .. }
-            | ServerError::SessionExpired => StatusCode::BAD_REQUEST,
+            | ServerError::SessionExpired
+            | ServerError::UserBanned
+            | ServerError::UserAlreadyInGuild
+            | ServerError::NoSuchChannel { .. }
+            | ServerError::ChannelAlreadyExists { .. }
+            | ServerError::GuildAlreadyExists(_)
+            | ServerError::EmptyPermissionQuery
+            | ServerError::NoRoleSpecified
+            | ServerError::NoSuchRole { .. }
+            | ServerError::NoPermissionsSpecified => StatusCode::BAD_REQUEST,
             ServerError::NotImplemented | ServerError::InternalServerError => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -161,7 +221,18 @@ impl CustomError for ServerError {
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
-            ServerError::NotEnoughPermissions { .. } => "h.not-enough-permissions",
+            ServerError::UserAlreadyInGuild => "h.already-in-guild",
+            ServerError::UserBanned => "h.banned-from-guild",
+            ServerError::NotEnoughPermissions {
+                must_be_guild_owner,
+                ..
+            } => {
+                if *must_be_guild_owner {
+                    "h.not-owner"
+                } else {
+                    "h.not-enough-permissions"
+                }
+            }
             ServerError::NoFieldSpecified => "h.missing-form",
             ServerError::NoSuchField => "h.missing-form",
             ServerError::NoSuchChoice { .. } => "h.bad-auth-choice",
@@ -170,11 +241,18 @@ impl CustomError for ServerError {
             ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
             ServerError::UserNotInGuild { .. } => "h.not-joined",
             ServerError::NotImplemented => "h.not-implemented",
+            ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
+            ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
             ServerError::NoSuchMessage { .. } => "h.bad-message-id",
+            ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
             ServerError::NoSuchGuild(_) => "h.bad-guild-id",
             ServerError::NoSuchInvite(_) => "h.bad-invite-id",
             ServerError::NoSuchUser(_) => "h.bad-user-id",
             ServerError::SessionExpired => "h.bad-session",
+            ServerError::EmptyPermissionQuery => "h.permission-query-empty",
+            ServerError::NoSuchRole { .. } => "h.bad-role-id",
+            ServerError::NoRoleSpecified => "h.missing-role",
+            ServerError::NoPermissionsSpecified => "h.missing-permissions",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }

@@ -293,7 +293,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             println!("{:#?}", invites.invites)
         }
         Command::GetGuildChannels(id) => {
-            let channels = chat_server.get_guild_channels_logic(id);
+            let channels = chat_server.get_guild_channels_logic(id, 0);
             println!("{:#?}", channels.channels)
         }
         Command::GetInvite(id) => {
