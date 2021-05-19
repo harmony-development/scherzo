@@ -575,6 +575,22 @@ impl ChatServer {
 
         Ok(())
     }
+
+    pub fn add_default_role_to(
+        &self,
+        guild_id: u64,
+        user_id: u64,
+    ) -> Result<(), <Self as chat_service_server::ChatService>::Error> {
+        if let Some(raw) = self
+            .chat_tree
+            .get(&make_guild_default_role_key(guild_id))
+            .unwrap()
+        {
+            let default_role_id = u64::from_be_bytes(raw.as_ref().try_into().unwrap());
+            self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::default())?;
+        }
+        Ok(())
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -621,6 +637,7 @@ impl chat_service_server::ChatService for ChatServer {
             .insert(&make_member_key(guild_id, user_id), &[])
             .unwrap();
 
+        // Some basic default setup
         let everyone_role_id = self
             .add_guild_role(Request::from_parts((
                 AddGuildRoleRequest {
@@ -641,6 +658,7 @@ impl chat_service_server::ChatService for ChatServer {
                 everyone_role_id.to_be_bytes().as_ref(),
             )
             .unwrap();
+        self.add_default_role_to(guild_id, user_id)?;
         self.set_permissions(Request::from_parts((
             SetPermissionsRequest {
                 guild_id,
@@ -1358,19 +1376,7 @@ impl chat_service_server::ChatService for ChatServer {
             self.chat_tree
                 .insert(&make_member_key(guild_id, user_id), &[])
                 .unwrap();
-            if let Some(raw) = self
-                .chat_tree
-                .get(&make_guild_default_role_key(guild_id))
-                .unwrap()
-            {
-                let default_role_id = u64::from_be_bytes(raw.as_ref().try_into().unwrap());
-                self.manage_user_roles_logic(
-                    guild_id,
-                    user_id,
-                    vec![default_role_id],
-                    Vec::default(),
-                )?;
-            }
+            self.add_default_role_to(guild_id, user_id)?;
             invite.use_count += 1;
 
             self.send_event_through_chan(
