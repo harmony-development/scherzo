@@ -8,7 +8,7 @@ use harmony_rust_sdk::api::{
         hrpc::{encode_protobuf_message, warp::reply::Response, Request},
         prost::{bytes::BytesMut, Message},
     },
-    harmonytypes::{content, Content, ContentText, Message as HarmonyMessage},
+    harmonytypes::{content, Content, ContentText, Message as HarmonyMessage, Metadata},
 };
 use parking_lot::Mutex;
 use sled::Tree;
@@ -591,6 +591,98 @@ impl ChatServer {
         }
         Ok(())
     }
+
+    pub fn add_guild_role_logic(
+        &self,
+        guild_id: u64,
+        mut role: Role,
+    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
+        let key = {
+            role.role_id = gen_rand_u64();
+            let mut key = make_guild_role_key(guild_id, role.role_id);
+            while self.chat_tree.contains_key(key).unwrap() {
+                role.role_id = gen_rand_u64();
+                key = make_guild_role_key(guild_id, role.role_id);
+            }
+            key
+        };
+        let role_id = role.role_id;
+        let mut ser_role = BytesMut::new();
+        encode_protobuf_message(&mut ser_role, role);
+        self.chat_tree.insert(&key, ser_role.as_ref()).unwrap();
+        self.move_role_logic(guild_id, role_id, 0, 0)?;
+        Ok(role_id)
+    }
+
+    pub fn set_permissions_logic(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+        perms: PermissionList,
+    ) {
+        let put_perms = |key| {
+            let mut buf = BytesMut::new();
+            encode_protobuf_message(&mut buf, perms);
+            self.chat_tree.insert(key, buf.as_ref()).unwrap();
+        };
+        // TODO: categories?
+        if channel_id != 0 {
+            put_perms(make_guild_channel_roles_key(guild_id, channel_id, role_id).as_ref())
+        } else {
+            put_perms(make_guild_role_perms_key(guild_id, role_id).as_ref())
+        }
+    }
+
+    pub fn create_channel_logic(
+        &self,
+        guild_id: u64,
+        channel_name: String,
+        is_category: bool,
+        metadata: Option<Metadata>,
+        previous_id: u64,
+        next_id: u64,
+    ) -> Result<u64, <Self as chat_service_server::ChatService>::Error> {
+        let channel_id = {
+            let mut channel_id = gen_rand_u64();
+            let mut key = make_chan_key(guild_id, channel_id);
+            while self.chat_tree.contains_key(key).unwrap() {
+                channel_id = gen_rand_u64();
+                key = make_chan_key(guild_id, channel_id);
+            }
+            channel_id
+        };
+        let key = make_chan_key(guild_id, channel_id);
+
+        let channel = Channel {
+            metadata: metadata.clone(),
+            channel_id,
+            channel_name: channel_name.clone(),
+            is_category,
+        };
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, channel);
+
+        self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
+
+        // Add from ordering list
+        self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::CreatedChannel(event::ChannelCreated {
+                guild_id,
+                channel_id,
+                name: channel_name,
+                previous_id,
+                next_id,
+                is_category,
+                metadata,
+            }),
+        );
+
+        Ok(channel_id)
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -603,14 +695,11 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<CreateGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let (
-            CreateGuildRequest {
-                metadata,
-                guild_name,
-                picture_url,
-            },
-            headers,
-        ) = request.into_parts();
+        let CreateGuildRequest {
+            metadata,
+            guild_name,
+            picture_url,
+        } = request.into_parts().0;
 
         let guild_id = {
             let mut guild_id = gen_rand_u64();
@@ -638,20 +727,14 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap();
 
         // Some basic default setup
-        let everyone_role_id = self
-            .add_guild_role(Request::from_parts((
-                AddGuildRoleRequest {
-                    guild_id,
-                    role: Some(Role {
-                        name: "everyone".to_string(),
-                        pingable: false,
-                        ..Default::default()
-                    }),
-                },
-                headers.clone(),
-            )))
-            .await?
-            .role_id;
+        let everyone_role_id = self.add_guild_role_logic(
+            guild_id,
+            Role {
+                name: "everyone".to_string(),
+                pingable: false,
+                ..Default::default()
+            },
+        )?;
         self.chat_tree
             .insert(
                 &make_guild_default_role_key(guild_id),
@@ -659,33 +742,21 @@ impl chat_service_server::ChatService for ChatServer {
             )
             .unwrap();
         self.add_default_role_to(guild_id, user_id)?;
-        self.set_permissions(Request::from_parts((
-            SetPermissionsRequest {
-                guild_id,
-                channel_id: 0,
-                role_id: everyone_role_id,
-                perms: Some(PermissionList {
-                    permissions: ["messages.send", "messages.view"]
-                        .iter()
-                        .map(|m| Permission {
-                            matches: m.to_string(),
-                            mode: permission::Mode::Allow.into(),
-                        })
-                        .collect(),
-                }),
+        self.set_permissions_logic(
+            guild_id,
+            0,
+            everyone_role_id,
+            PermissionList {
+                permissions: ["messages.send", "messages.view"]
+                    .iter()
+                    .map(|m| Permission {
+                        matches: m.to_string(),
+                        mode: permission::Mode::Allow.into(),
+                    })
+                    .collect(),
             },
-            headers.clone(),
-        )))
-        .await?;
-        self.create_channel(Request::from_parts((
-            CreateChannelRequest {
-                channel_name: "general".to_string(),
-                guild_id,
-                ..Default::default()
-            },
-            headers,
-        )))
-        .await?;
+        );
+        self.create_channel_logic(guild_id, "general".to_string(), false, None, 0, 0)?;
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -743,43 +814,14 @@ impl chat_service_server::ChatService for ChatServer {
         self.check_guild_user(guild_id, user_id)?;
         self.check_perms(guild_id, 0, user_id, "channels.manage.create", false)?;
 
-        let channel_id = {
-            let mut channel_id = gen_rand_u64();
-            let mut key = make_chan_key(guild_id, channel_id);
-            while self.chat_tree.contains_key(key).unwrap() {
-                channel_id = gen_rand_u64();
-                key = make_chan_key(guild_id, channel_id);
-            }
-            channel_id
-        };
-        let key = make_chan_key(guild_id, channel_id);
-
-        let channel = Channel {
-            channel_id,
-            channel_name: channel_name.clone(),
+        let channel_id = self.create_channel_logic(
+            guild_id,
+            channel_name,
             is_category,
-            metadata: metadata.clone(),
-        };
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, channel);
-
-        self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
-
-        // Add from ordering list
-        self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
-
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            event::Event::CreatedChannel(event::ChannelCreated {
-                guild_id,
-                channel_id,
-                name: channel_name,
-                previous_id,
-                next_id,
-                is_category,
-                metadata,
-            }),
-        );
+            metadata,
+            previous_id,
+            next_id,
+        )?;
 
         Ok(CreateChannelResponse { channel_id })
     }
@@ -1546,17 +1588,7 @@ impl chat_service_server::ChatService for ChatServer {
         )?;
 
         if let Some(perms) = perms {
-            let put_perms = |key| {
-                let mut buf = BytesMut::new();
-                encode_protobuf_message(&mut buf, perms);
-                self.chat_tree.insert(key, buf.as_ref()).unwrap();
-            };
-            // TODO: categories?
-            if channel_id != 0 {
-                put_perms(make_guild_channel_roles_key(guild_id, channel_id, role_id).as_ref())
-            } else {
-                put_perms(make_guild_role_perms_key(guild_id, role_id).as_ref())
-            }
+            self.set_permissions_logic(guild_id, channel_id, role_id, perms);
             Ok(())
         } else {
             Err(ServerError::NoPermissionsSpecified)
@@ -1656,21 +1688,8 @@ impl chat_service_server::ChatService for ChatServer {
         self.check_guild_user(guild_id, user_id)?;
         self.check_perms(guild_id, 0, user_id, "roles.manage", false)?;
 
-        if let Some(mut role) = role {
-            let key = {
-                role.role_id = gen_rand_u64();
-                let mut key = make_guild_role_key(guild_id, role.role_id);
-                while self.chat_tree.contains_key(key).unwrap() {
-                    role.role_id = gen_rand_u64();
-                    key = make_guild_role_key(guild_id, role.role_id);
-                }
-                key
-            };
-            let role_id = role.role_id;
-            let mut ser_role = BytesMut::new();
-            encode_protobuf_message(&mut ser_role, role);
-            self.chat_tree.insert(&key, ser_role.as_ref()).unwrap();
-            self.move_role_logic(guild_id, role_id, 0, 0)?;
+        if let Some(role) = role {
+            let role_id = self.add_guild_role_logic(guild_id, role)?;
             Ok(AddGuildRoleResponse { role_id })
         } else {
             Err(ServerError::NoRoleSpecified)
