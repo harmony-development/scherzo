@@ -18,6 +18,7 @@ cached = "0.23"
 paste = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.5"
+sha3 = "0.9"
 
 [profile.dev]
 opt-level = 0

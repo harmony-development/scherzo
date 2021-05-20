@@ -9,6 +9,7 @@ use harmony_rust_sdk::api::{
     },
 };
 use parking_lot::Mutex;
+use sha3::Digest;
 use sled::{IVec, Tree};
 
 use super::{gen_rand_str, gen_rand_u64};
@@ -389,14 +390,16 @@ impl auth_service_server::AuthService for AuthServer {
 
                             match title.as_str() {
                                 "login" => {
-                                    let password = if let Some(Field::Bytes(value)) = values.pop() {
-                                        value
-                                    } else {
-                                        return Err(ServerError::WrongTypeForField {
-                                            name: "password".to_string(),
-                                            expected: "bytes".to_string(),
-                                        });
-                                    };
+                                    let password_raw =
+                                        if let Some(Field::Bytes(value)) = values.pop() {
+                                            value
+                                        } else {
+                                            return Err(ServerError::WrongTypeForField {
+                                                name: "password".to_string(),
+                                                expected: "bytes".to_string(),
+                                            });
+                                        };
+                                    let password_hashed = hash_password(password_raw);
 
                                     let email = if let Some(Field::String(value)) = values.pop() {
                                         value
@@ -423,8 +426,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     if let Ok(Some(pass)) =
                                         self.auth_tree.get(user_id.to_be_bytes())
                                     {
-                                        // TODO: actually validate password properly lol
-                                        if pass != password {
+                                        if pass != password_hashed.as_ref() {
                                             return Err(ServerError::WrongUserOrPassword { email });
                                         }
                                     } else {
@@ -458,14 +460,16 @@ impl auth_service_server::AuthService for AuthServer {
                                     self.valid_sessions.lock().insert(session_token, user_id);
                                 }
                                 "register" => {
-                                    let password = if let Some(Field::Bytes(value)) = values.pop() {
-                                        value
-                                    } else {
-                                        return Err(ServerError::WrongTypeForField {
-                                            name: "password".to_string(),
-                                            expected: "bytes".to_string(),
-                                        });
-                                    };
+                                    let password_raw =
+                                        if let Some(Field::Bytes(value)) = values.pop() {
+                                            value
+                                        } else {
+                                            return Err(ServerError::WrongTypeForField {
+                                                name: "password".to_string(),
+                                                expected: "bytes".to_string(),
+                                            });
+                                        };
+                                    let password_hashed = hash_password(password_raw);
 
                                     let email = if let Some(Field::String(value)) = values.pop() {
                                         value
@@ -495,7 +499,7 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let mut batch = sled::Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
-                                    batch.insert(&user_id.to_be_bytes(), password);
+                                    batch.insert(&user_id.to_be_bytes(), password_hashed.as_ref());
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
                                         &atime_key(user_id),
@@ -589,4 +593,10 @@ impl auth_service_server::AuthService for AuthServer {
 
         Ok(prev_step)
     }
+}
+
+fn hash_password(raw: Vec<u8>) -> impl AsRef<[u8]> {
+    let mut sh = sha3::Sha3_512::new();
+    sh.update(raw);
+    sh.finalize()
 }
