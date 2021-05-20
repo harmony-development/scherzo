@@ -170,7 +170,7 @@ impl ChatServer {
         &self,
         user_id: u64,
     ) -> Result<GetUserResponse, <Self as chat_service_server::ChatService>::Error> {
-        let key = make_member_profile_key(user_id);
+        let key = make_user_profile_key(user_id);
 
         let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
             db::deser_profile(profile_raw)
@@ -1398,10 +1398,7 @@ impl chat_service_server::ChatService for ChatServer {
         let key = make_invite_key(invite_id.as_str());
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.get(&key).unwrap() {
-            let (id_raw, invite_raw) = raw.split_at(std::mem::size_of::<u64>());
-            let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
-            let invite = db::deser_invite(invite_raw.into());
-            (guild_id, invite)
+            db::deser_invite_entry(raw)
         } else {
             return Err(ServerError::NoSuchInvite(invite_id));
         };
@@ -1478,8 +1475,6 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<SendMessageResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let request = request.into_parts().0;
-
         let SendMessageRequest {
             guild_id,
             channel_id,
@@ -1488,7 +1483,7 @@ impl chat_service_server::ChatService for ChatServer {
             overrides,
             echo_id,
             metadata,
-        } = request;
+        } = request.into_parts().0;
 
         self.check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
@@ -1892,7 +1887,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         for (id, key) in user_ids
             .into_iter()
-            .map(|id| (id, make_member_profile_key(id)))
+            .map(|id| (id, make_user_profile_key(id)))
         {
             if let Some(raw) = self.chat_tree.get(key).unwrap() {
                 profiles.push(db::deser_profile(raw));
@@ -1908,7 +1903,18 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetUserMetadataRequest>,
     ) -> Result<GetUserMetadataResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let user_id = self.auth(&request)?;
+
+        let GetUserMetadataRequest { app_id } = request.into_parts().0;
+        let metadata = self
+            .chat_tree
+            .get(&make_user_metadata_key(user_id, &app_id))
+            .unwrap()
+            .map_or_else(String::default, |raw| {
+                String::from_utf8_lossy(raw.as_ref()).into()
+            });
+
+        Ok(GetUserMetadataResponse { metadata })
     }
 
     async fn profile_update(
@@ -1928,7 +1934,7 @@ impl chat_service_server::ChatService for ChatServer {
             update_is_bot,
         } = request.into_parts().0;
 
-        let key = make_member_profile_key(user_id);
+        let key = make_user_profile_key(user_id);
 
         let mut profile = self
             .chat_tree
@@ -1998,7 +2004,28 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<PreviewGuildRequest>,
     ) -> Result<PreviewGuildResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        self.auth(&request)?;
+
+        let PreviewGuildRequest { invite_id } = request.into_parts().0;
+
+        let key = make_invite_key(&invite_id);
+        let guild_id = self
+            .chat_tree
+            .get(&key)
+            .unwrap()
+            .ok_or(ServerError::NoSuchInvite(invite_id))
+            .map(|raw| db::deser_invite_entry_guild_id(&raw))?;
+        let guild = self.get_guild_logic(guild_id)?;
+        let member_count = self
+            .chat_tree
+            .scan_prefix(&make_guild_mem_prefix(guild_id))
+            .count();
+
+        Ok(PreviewGuildResponse {
+            name: guild.guild_name,
+            avatar: guild.guild_picture,
+            member_count: member_count as u64,
+        })
     }
 
     async fn ban_user(&self, request: Request<BanUserRequest>) -> Result<(), Self::Error> {

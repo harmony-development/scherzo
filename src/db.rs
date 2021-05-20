@@ -44,8 +44,17 @@ pub mod chat {
         )
     }
 
-    pub fn make_member_profile_key(user_id: u64) -> [u8; 13] {
+    pub fn make_user_profile_key(user_id: u64) -> [u8; 13] {
         concat_static!(13, USER_PREFIX, user_id.to_be_bytes())
+    }
+
+    pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
+        [
+            make_user_profile_key(user_id).as_ref(),
+            &[1],
+            app_id.as_bytes(),
+        ]
+        .concat()
     }
 
     // member
@@ -165,6 +174,22 @@ crate::impl_deser! {
     chan, Channel, 1024;
     role, Role, 1024;
     perm_list, PermissionList, 1024;
+}
+
+pub fn deser_invite_entry_guild_id(data: &sled::IVec) -> u64 {
+    use std::convert::TryInto;
+
+    let (id_raw, _) = data.split_at(std::mem::size_of::<u64>());
+    u64::from_be_bytes(id_raw.try_into().unwrap())
+}
+
+#[cached(size = 1024)]
+pub fn deser_invite_entry(data: sled::IVec) -> (u64, Invite) {
+    let guild_id = deser_invite_entry_guild_id(&data);
+    let (_, invite_raw) = data.split_at(std::mem::size_of::<u64>());
+    let invite = deser_invite(invite_raw.into());
+
+    (guild_id, invite)
 }
 
 #[macro_export]

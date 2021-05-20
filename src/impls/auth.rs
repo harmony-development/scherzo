@@ -16,7 +16,7 @@ use crate::{
     db::{
         self,
         auth::*,
-        chat::{self as chatdb, make_member_profile_key},
+        chat::{self as chatdb, make_user_profile_key},
     },
     set_proto_name, ServerError, WS_PROTO_HEADER,
 };
@@ -91,7 +91,7 @@ impl AuthServer {
         let mut batch = sled::Batch::default();
         let mut vs = valid_sessions.lock();
         for (id, token) in tokens {
-            if let Some(profile) = chat_tree.get(chatdb::make_member_profile_key(id)).unwrap() {
+            if let Some(profile) = chat_tree.get(chatdb::make_user_profile_key(id)).unwrap() {
                 let profile = db::deser_profile(profile);
                 if !profile.is_bot {
                     for (oid, atime) in &atimes {
@@ -130,8 +130,7 @@ impl AuthServer {
                     let mut batch = sled::Batch::default();
                     let mut vs = vs.lock();
                     for (id, token) in tokens {
-                        if let Some(profile) = ctt.get(chatdb::make_member_profile_key(id)).unwrap()
-                        {
+                        if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
                             let profile = db::deser_profile(profile);
                             if !profile.is_bot {
                                 for (oid, atime) in &atimes {
@@ -515,7 +514,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         },
                                     );
                                     self.chat_tree
-                                        .insert(make_member_profile_key(user_id), buf.as_ref())
+                                        .insert(make_user_profile_key(user_id), buf.as_ref())
                                         .unwrap();
 
                                     tracing::debug!(
