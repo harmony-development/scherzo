@@ -4,13 +4,17 @@ use crate::ServerError;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 
 use futures_util::StreamExt;
-use harmony_rust_sdk::api::exports::{
-    hrpc::{futures_util, server::ServerError as HrpcError, warp},
-    prost::bytes::Buf,
+use harmony_rust_sdk::api::{
+    exports::{
+        hrpc::{futures_util, server::ServerError as HrpcError, warp},
+        prost::bytes::Buf,
+    },
+    rest::FileId,
 };
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
@@ -27,16 +31,67 @@ pub fn rest(data: RestConfig) -> BoxedFilter<(impl Reply,)> {
 }
 
 pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
+    let http_client = reqwest::Client::new();
     warp::path("_harmony")
         .and(warp::path("media"))
         .and(warp::path("download"))
         .and(warp::path::param::<String>())
         .and_then(move |id: String| {
+            let id = urlencoding::decode(&id).unwrap_or(id);
             let media_root = media_root.clone();
+            let http_client = http_client.clone();
+            let map_reqwest_err = |err| reject(ServerError::ReqwestError(err));
             async move {
-                get_file(media_root.as_ref(), &id)
-                    .await
-                    .map_err(|err| reject(ServerError::IoError(err)))
+                let file_id =
+                    FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId))?;
+                match file_id {
+                    FileId::External(url) => {
+                        let resp = http_client
+                            .get(url)
+                            .send()
+                            .await
+                            .map_err(map_reqwest_err)?
+                            .error_for_status()
+                            .map_err(map_reqwest_err)?;
+                        let filename = resp
+                            .url()
+                            .path_segments()
+                            .expect("cannot be a cannot-be-a-base url")
+                            .last()
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let data = resp.bytes().await.map_err(map_reqwest_err)?;
+                        let content_type = infer::get(&data).map_or_else(
+                            || "application/octet-stream".to_string(),
+                            |k| k.mime_type().to_string(),
+                        );
+                        Ok((filename, content_type, data.to_vec()))
+                    }
+                    FileId::Hmc(hmc) => {
+                        let resp = http_client
+                            .get(format!(
+                                "https://{}:{}/_harmony/media/download/{}",
+                                hmc.server(),
+                                hmc.port(),
+                                hmc.id()
+                            ))
+                            .send()
+                            .await
+                            .map_err(map_reqwest_err)?
+                            .error_for_status()
+                            .map_err(map_reqwest_err)?;
+                        let (name, mimetype, _) =
+                            harmony_rust_sdk::api::rest::extract_file_info_from_download_response(
+                                resp.headers(),
+                            )
+                            .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
+                        let data = resp.bytes().await.map_err(map_reqwest_err)?;
+                        Ok((name, mimetype, data.to_vec()))
+                    }
+                    FileId::Id(_) => get_file(media_root.as_ref(), &id)
+                        .await
+                        .map_err(|err| reject(ServerError::IoError(err))),
+                }
             }
         })
         .map(

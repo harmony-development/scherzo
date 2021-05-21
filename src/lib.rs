@@ -84,6 +84,9 @@ pub enum ServerError {
     TooManyFiles,
     WarpError(warp::Error),
     IoError(std::io::Error),
+    InvalidFileId,
+    ReqwestError(reqwest::Error),
+    Unexpected(String),
 }
 
 impl Display for ServerError {
@@ -185,6 +188,9 @@ impl Display for ServerError {
             ServerError::MissingFiles => write!(f, "must upload at least one file"),
             ServerError::WarpError(err) => write!(f, "error occured in warp: {}", err),
             ServerError::IoError(err) => write!(f, "io error occured: {}", err),
+            ServerError::ReqwestError(err) => write!(f, "error occured in reqwest: {}", err),
+            ServerError::Unexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
+            ServerError::InvalidFileId => write!(f, "invalid file id"),
         }
     }
 }
@@ -218,11 +224,14 @@ impl CustomError for ServerError {
             | ServerError::NoSuchRole { .. }
             | ServerError::NoPermissionsSpecified
             | ServerError::TooManyFiles
-            | ServerError::MissingFiles => StatusCode::BAD_REQUEST,
+            | ServerError::MissingFiles
+            | ServerError::InvalidFileId => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
-            | ServerError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::InternalServerError
+            | ServerError::ReqwestError(_)
+            | ServerError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
@@ -230,7 +239,9 @@ impl CustomError for ServerError {
         let i18n_code = match self {
             ServerError::InternalServerError
             | ServerError::WarpError(_)
-            | ServerError::IoError(_) => "h.internal-server-error",
+            | ServerError::IoError(_)
+            | ServerError::ReqwestError(_)
+            | ServerError::Unexpected(_) => "h.internal-server-error",
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
@@ -266,6 +277,7 @@ impl CustomError for ServerError {
             ServerError::NoSuchRole { .. } => "h.bad-role-id",
             ServerError::NoRoleSpecified => "h.missing-role",
             ServerError::NoPermissionsSpecified => "h.missing-permissions",
+            ServerError::InvalidFileId => "h.bad-file-id",
             ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
         };
