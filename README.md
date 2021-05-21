@@ -6,11 +6,8 @@ Harmony server implemented in Rust.
 
 - Auth service: (partially done)
     - dynamic auth is implemented (login and register by email)
-- Chat service: (partially done)
-    - create / delete / get guilds, channels, messages
-    - get / update user profile, add to / remove from user guild list
-    - create / delete invites, join guilds
-    - typing
+- Chat service: (almost done)
+    - everything except emote APIs are implemented
 - Mediaproxy service: (not started)
 - Voice service: (not started)
-- Rest APIs: (not started)
+- Rest APIs: implemented
