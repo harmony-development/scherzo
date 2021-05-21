@@ -4,7 +4,7 @@ use std::fmt::{self, Display, Formatter};
 
 use harmony_rust_sdk::api::exports::hrpc::{
     server::{CustomError, StatusCode},
-    warp::reply::Response,
+    warp::{self, reply::Response},
 };
 
 pub mod config;
@@ -80,6 +80,10 @@ pub enum ServerError {
     },
     NoRoleSpecified,
     NoPermissionsSpecified,
+    MissingFiles,
+    TooManyFiles,
+    WarpError(warp::Error),
+    IoError(std::io::Error),
 }
 
 impl Display for ServerError {
@@ -177,6 +181,10 @@ impl Display for ServerError {
                 f,
                 "no permissions specified when there must have been some specified"
             ),
+            ServerError::TooManyFiles => write!(f, "uploaded too many files"),
+            ServerError::MissingFiles => write!(f, "must upload at least one file"),
+            ServerError::WarpError(err) => write!(f, "error occured in warp: {}", err),
+            ServerError::IoError(err) => write!(f, "io error occured: {}", err),
         }
     }
 }
@@ -208,16 +216,21 @@ impl CustomError for ServerError {
             | ServerError::EmptyPermissionQuery
             | ServerError::NoRoleSpecified
             | ServerError::NoSuchRole { .. }
-            | ServerError::NoPermissionsSpecified => StatusCode::BAD_REQUEST,
-            ServerError::NotImplemented | ServerError::InternalServerError => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
+            | ServerError::NoPermissionsSpecified
+            | ServerError::TooManyFiles
+            | ServerError::MissingFiles => StatusCode::BAD_REQUEST,
+            ServerError::WarpError(_)
+            | ServerError::IoError(_)
+            | ServerError::NotImplemented
+            | ServerError::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
     fn message(&self) -> Vec<u8> {
         let i18n_code = match self {
-            ServerError::InternalServerError => "h.internal-server-error",
+            ServerError::InternalServerError
+            | ServerError::WarpError(_)
+            | ServerError::IoError(_) => "h.internal-server-error",
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
@@ -253,6 +266,8 @@ impl CustomError for ServerError {
             ServerError::NoSuchRole { .. } => "h.bad-role-id",
             ServerError::NoRoleSpecified => "h.missing-role",
             ServerError::NoPermissionsSpecified => "h.missing-permissions",
+            ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
+            ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }

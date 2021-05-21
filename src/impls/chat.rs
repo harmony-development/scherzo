@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, convert::TryInto};
 
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
@@ -36,7 +36,7 @@ pub struct ChatServer {
 }
 
 impl ChatServer {
-    pub fn new(chat_tree: Tree, valid_sessions: Arc<Mutex<HashMap<String, u64>>>) -> Self {
+    pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
         Self {
             valid_sessions,
             chat_tree,

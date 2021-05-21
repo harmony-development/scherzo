@@ -3,3 +3,7 @@ port = 2289
 [tls]
 cert_file = "./cert"
 key_file = "./key"
+
+[media]
+max_upload_length = 100_000_000
+media_root = "./media"

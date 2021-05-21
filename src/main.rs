@@ -15,7 +15,7 @@ use hrpc::warp;
 use parking_lot::Mutex;
 use scherzo::{
     db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
-    impls::{auth::AuthServer, chat::ChatServer},
+    impls::{auth::AuthServer, chat::ChatServer, rest::RestConfig},
     ServerError,
 };
 use tracing::{level_filters::LevelFilter, Level};
@@ -186,7 +186,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     let chat_tree = db.open_tree("chat").unwrap();
 
     let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
-    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions);
+    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
 
     match command {
         Command::RunServer => {
@@ -204,9 +204,17 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 def
             };
             tracing::debug!("Config: {:?}", config);
+            tokio::fs::create_dir_all(&config.media.media_root)
+                .await
+                .expect("could not create media root dir");
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
+            let rest = scherzo::impls::rest::rest(RestConfig {
+                max_length: config.media.max_upload_length,
+                media_root: Arc::new(config.media.media_root),
+                sessions: valid_sessions,
+            });
 
             std::thread::spawn(move || {
                 let mut last = Instant::now();
@@ -231,6 +239,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
             let serve = hrpc::warp::serve(
                 auth.or(chat)
+                    .or(rest)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>),
             );

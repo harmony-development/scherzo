@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod rest;
 
 use rand::Rng;
 
