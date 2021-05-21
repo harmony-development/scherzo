@@ -46,6 +46,7 @@ systems = ["x86_64-linux"]
 app = true
 build = true
 library = true
+devshell.packages = ["cargo-deny"]
 
 [package.metadata.nix.cachix]
 name = "harmony"

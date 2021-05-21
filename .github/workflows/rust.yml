@@ -36,6 +36,12 @@ jobs:
     - name: Cache rust
       uses: Swatinem/rust-cache@v1
 
+    - name: Install Cargo Deny
+      run: cargo install --locked cargo-deny
+
+    - name: Cargo Deny
+      run: cargo deny check
+
     - name: Clippy
       uses: actions-rs/clippy-check@v1
       with:

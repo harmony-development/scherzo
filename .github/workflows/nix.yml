@@ -1,9 +1,19 @@
 name: "Nix"
 on:
-  pull_request:
-    branches: [ master ]
   push:
     branches: [ master ]
+    paths-ignore:
+      - 'README.md'
+      - '**/*.nix'
+      - 'nix/envrc'
+      - 'flake.lock'
+  pull_request:
+    branches: [ master ]
+    paths-ignore:
+      - 'README.md'
+      - '**/*.nix'
+      - 'nix/envrc'
+      - 'flake.lock'
 jobs:
   tests:
     runs-on: ubuntu-latest
