@@ -1488,15 +1488,15 @@ impl chat_service_server::ChatService for ChatServer {
         self.check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
 
-        let (message_id, key) = {
-            let mut message_id = gen_rand_u64();
-            let mut key = make_msg_key(guild_id, channel_id, message_id);
-            while self.chat_tree.contains_key(key).unwrap() {
-                message_id = gen_rand_u64();
-                key = make_msg_key(guild_id, channel_id, message_id);
-            }
-            (message_id, key)
-        };
+        let msg_prefix = make_msg_prefix(guild_id, channel_id);
+        let message_id = self
+            .chat_tree
+            .scan_prefix(msg_prefix)
+            .last()
+            .map_or(0, |res| {
+                u64::from_be_bytes(res.unwrap().0.split_at(18).1.try_into().unwrap()) + 1
+            });
+        let key = make_msg_key(guild_id, channel_id, message_id);
 
         let created_at = Some(std::time::SystemTime::now().into());
         let edited_at = None;
