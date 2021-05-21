@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
+use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Duration};
 
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
@@ -217,22 +217,19 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             });
 
             std::thread::spawn(move || {
-                let mut last = Instant::now();
                 let span = tracing::info_span!("db_validate");
                 let _guard = span.enter();
                 tracing::info!("database integrity verification task is running");
                 loop {
-                    if last.elapsed().as_secs() > INTEGRITY_VERIFICATION_PERIOD {
-                        if let Err(err) = chat_tree
-                            .verify_integrity()
-                            .and_then(|_| auth_tree.verify_integrity())
-                        {
-                            tracing::error!("database integrity check failed: {}", err);
-                            break;
-                        } else {
-                            tracing::info!("database integrity check successful");
-                        }
-                        last = Instant::now();
+                    std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
+                    if let Err(err) = chat_tree
+                        .verify_integrity()
+                        .and_then(|_| auth_tree.verify_integrity())
+                    {
+                        tracing::error!("database integrity check failed: {}", err);
+                        break;
+                    } else {
+                        tracing::info!("database integrity check successful");
                     }
                 }
             });

@@ -1,4 +1,9 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use harmony_rust_sdk::api::{
     auth::*,
@@ -122,43 +127,37 @@ impl AuthServer {
 
         std::thread::spawn(move || {
             tracing::info!("starting auth session expiration check thread");
-            let mut since = Instant::now();
             loop {
-                if since.elapsed().as_secs() > 60 * 5 {
-                    let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
-                    let atimes = scan_tree_for(&att, &ATIME_PREFIX);
+                std::thread::sleep(Duration::from_secs(60 * 5));
+                let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
+                let atimes = scan_tree_for(&att, &ATIME_PREFIX);
 
-                    let mut batch = sled::Batch::default();
-                    let mut vs = vs.lock();
-                    for (id, token) in tokens {
-                        if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
-                            let profile = db::deser_profile(profile);
-                            if !profile.is_bot {
-                                for (oid, atime) in &atimes {
-                                    if &id == oid {
-                                        let secs =
-                                            u64::from_be_bytes(atime.as_ref().try_into().unwrap());
-                                        let auth_how_old =
-                                            Instant::now().elapsed().as_secs() - secs;
+                let mut batch = sled::Batch::default();
+                let mut vs = vs.lock();
+                for (id, token) in tokens {
+                    if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
+                        let profile = db::deser_profile(profile);
+                        if !profile.is_bot {
+                            for (oid, atime) in &atimes {
+                                if &id == oid {
+                                    let secs =
+                                        u64::from_be_bytes(atime.as_ref().try_into().unwrap());
+                                    let auth_how_old = Instant::now().elapsed().as_secs() - secs;
 
-                                        if auth_how_old >= SESSION_EXPIRE {
-                                            tracing::info!("user {} session has expired", id);
-                                            batch.remove(&token_key(id));
-                                            batch.remove(&atime_key(id));
-                                            let token =
-                                                std::str::from_utf8(token.as_ref()).unwrap();
-                                            vs.remove(token);
-                                        }
+                                    if auth_how_old >= SESSION_EXPIRE {
+                                        tracing::info!("user {} session has expired", id);
+                                        batch.remove(&token_key(id));
+                                        batch.remove(&atime_key(id));
+                                        let token = std::str::from_utf8(token.as_ref()).unwrap();
+                                        vs.remove(token);
                                     }
                                 }
                             }
                         }
                     }
-                    drop(vs);
-                    att.apply_batch(batch).unwrap();
-
-                    since = Instant::now();
                 }
+                drop(vs);
+                att.apply_batch(batch).unwrap();
             }
         });
 
