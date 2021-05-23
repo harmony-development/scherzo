@@ -1,6 +1,9 @@
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
-use std::fmt::{self, Display, Formatter};
+use std::{
+    fmt::{self, Display, Formatter},
+    time::Duration,
+};
 
 use harmony_rust_sdk::api::exports::hrpc::{
     server::{CustomError, StatusCode},
@@ -87,11 +90,13 @@ pub enum ServerError {
     InvalidFileId,
     ReqwestError(reqwest::Error),
     Unexpected(String),
+    TooFast(Duration),
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ServerError::TooFast(rem) => write!(f, "too fast, try again in {}", rem.as_secs_f64()),
             ServerError::InvalidAuthId => write!(f, "invalid auth id"),
             ServerError::NoFieldSpecified => write!(f, "expected field in response"),
             ServerError::NoSuchField => write!(f, "no such field"),
@@ -232,6 +237,7 @@ impl CustomError for ServerError {
             | ServerError::InternalServerError
             | ServerError::ReqwestError(_)
             | ServerError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
         }
     }
 
@@ -280,6 +286,7 @@ impl CustomError for ServerError {
             ServerError::InvalidFileId => "h.bad-file-id",
             ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
+            ServerError::TooFast(_) => "h.rate-limited",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }
