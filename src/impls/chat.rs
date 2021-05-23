@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, time::Duration};
+use std::{collections::HashMap, convert::TryInto};
 
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
@@ -7,7 +7,6 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             encode_protobuf_message,
-            server::filters::{rate::Rate, rate_limit},
             warp::{filters::BoxedFilter, reply::Response},
             Request,
         },
@@ -18,19 +17,12 @@ use harmony_rust_sdk::api::{
 use parking_lot::Mutex;
 use sled::Tree;
 
-use super::gen_rand_u64;
+use super::{gen_rand_u64, rate};
 use crate::{
     db::{self, chat::*},
     impls::auth,
     set_proto_name, ServerError,
 };
-
-fn rate(num: u64, dur: u64) -> BoxedFilter<(Result<(), ServerError>,)> {
-    rate_limit(
-        Rate::new(num, Duration::from_secs(dur)),
-        ServerError::TooFast,
-    )
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventSub {

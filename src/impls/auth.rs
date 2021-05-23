@@ -9,7 +9,11 @@ use harmony_rust_sdk::api::{
     auth::*,
     chat::GetUserResponse,
     exports::{
-        hrpc::{encode_protobuf_message, warp::reply::Response, Request},
+        hrpc::{
+            encode_protobuf_message,
+            warp::{filters::BoxedFilter, reply::Response},
+            Request,
+        },
         prost::bytes::BytesMut,
     },
 };
@@ -17,7 +21,7 @@ use parking_lot::Mutex;
 use sha3::Digest;
 use sled::{IVec, Tree};
 
-use super::{gen_rand_str, gen_rand_u64};
+use super::{gen_rand_str, gen_rand_u64, rate};
 use crate::{
     db::{
         self,
@@ -179,12 +183,24 @@ impl AuthServer {
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
+    fn check_logged_in_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(20, 5)
+    }
+
     async fn check_logged_in(&self, request: Request<()>) -> Result<(), Self::Error> {
         self.auth(&request).map(|_| ())
     }
 
+    fn federate_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(3, 1)
+    }
+
     async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
         Err(ServerError::NotImplemented)
+    }
+
+    fn login_federated_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(1, 5)
     }
 
     async fn login_federated(
@@ -194,12 +210,20 @@ impl auth_service_server::AuthService for AuthServer {
         Err(ServerError::NotImplemented)
     }
 
+    fn key_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(1, 5)
+    }
+
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
         Err(ServerError::NotImplemented)
     }
 
     fn stream_steps_on_upgrade(&self, response: Response) -> Response {
         set_proto_name(response)
+    }
+
+    fn stream_steps_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(2, 5)
     }
 
     async fn stream_steps(
@@ -213,6 +237,10 @@ impl auth_service_server::AuthService for AuthServer {
         }
 
         Ok(self.send_step.lock().remove(auth_id))
+    }
+
+    fn begin_auth_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(2, 5)
     }
 
     async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
@@ -241,6 +269,10 @@ impl auth_service_server::AuthService for AuthServer {
         tracing::debug!("new auth session {}", auth_id);
 
         Ok(BeginAuthResponse { auth_id })
+    }
+
+    fn next_step_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(10, 5)
     }
 
     async fn next_step(&self, req: Request<NextStepRequest>) -> Result<AuthStep, Self::Error> {
@@ -566,6 +598,10 @@ impl auth_service_server::AuthService for AuthServer {
         self.send_step.lock().insert(auth_id, next_step.clone());
 
         Ok(next_step)
+    }
+
+    fn step_back_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+        rate(10, 5)
     }
 
     async fn step_back(&self, req: Request<StepBackRequest>) -> Result<AuthStep, Self::Error> {

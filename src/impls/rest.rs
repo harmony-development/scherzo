@@ -1,4 +1,4 @@
-use super::{auth::SessionMap, gen_rand_str};
+use super::{auth::SessionMap, gen_rand_str, rate};
 use crate::ServerError;
 
 use std::{
@@ -35,8 +35,11 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
     warp::path("_harmony")
         .and(warp::path("media"))
         .and(warp::path("download"))
+        .and(warp::path::end())
+        .and(rate(10, 5))
+        .and_then(|res: Result<(), ServerError>| async move { res.map_err(reject) })
         .and(warp::path::param::<String>())
-        .and_then(move |id: String| {
+        .and_then(move |_, id: String| {
             let id = urlencoding::decode(&id).unwrap_or(id);
             let media_root = media_root.clone();
             let http_client = http_client.clone();
@@ -117,10 +120,13 @@ pub fn upload(
     media_root: Arc<PathBuf>,
     max_length: u64,
 ) -> BoxedFilter<(impl Reply,)> {
-    warp::path("_harmony")
+    warp::post()
+        .and(warp::path("_harmony"))
         .and(warp::path("media"))
         .and(warp::path("upload"))
-        .and(warp::post())
+        .and(warp::path::end())
+        .and(rate(5, 5))
+        .and_then(|res: Result<(), ServerError>| async move { res.map_err(reject) })
         .and(
             warp::filters::header::header("Authorization").map(move |token: String| {
                 if !sessions.lock().contains_key(&token) {
@@ -133,7 +139,7 @@ pub fn upload(
         .and(warp::query::<HashMap<String, String>>())
         .and(form().max_length(max_length))
         .and_then(
-            move |_, param: HashMap<String, String>, mut form: FormData| {
+            move |_, _, param: HashMap<String, String>, mut form: FormData| {
                 let media_root = media_root.clone();
                 async move {
                     if let Some(res) = form.next().await {
