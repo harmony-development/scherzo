@@ -444,10 +444,13 @@ impl ChatServer {
             })
             .collect::<Vec<_>>();
 
-        let before_msg_pos = msgs
-            .iter()
-            .position(|(id, _)| *id == before_message)
-            .unwrap_or_else(|| msgs.len());
+        let before_msg_pos = if before_message == 0 {
+            msgs.len()
+        } else {
+            msgs.iter()
+                .position(|(id, _)| *id == before_message)
+                .unwrap_or_else(|| msgs.len())
+        };
 
         let from = before_msg_pos.saturating_sub(25);
         let to = before_msg_pos;
@@ -1629,8 +1632,15 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .scan_prefix(msg_prefix)
             .last()
-            .map_or(0, |res| {
-                u64::from_be_bytes(res.unwrap().0.split_at(18).1.try_into().unwrap()) + 1
+            .map_or(1, |res| {
+                u64::from_be_bytes(
+                    res.unwrap()
+                        .0
+                        .split_at(msg_prefix.len())
+                        .1
+                        .try_into()
+                        .unwrap(),
+                ) + 1
             });
         let key = make_msg_key(guild_id, channel_id, message_id);
 
