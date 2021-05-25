@@ -32,6 +32,13 @@ enum EventSub {
     Actions,
 }
 
+struct PermCheck<'a> {
+    guild_id: u64,
+    channel_id: u64,
+    check_for: &'a str,
+    must_be_guild_owner: bool,
+}
+
 #[derive(Debug)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
@@ -50,9 +57,33 @@ impl ChatServer {
         }
     }
 
-    fn send_event_through_chan(&self, sub: EventSub, event: event::Event) {
+    fn send_event_through_chan(
+        &self,
+        sub: EventSub,
+        event: event::Event,
+        perm_check: Option<PermCheck<'_>>,
+    ) {
         for mut chan in self.event_chans.iter_mut() {
-            for subbed_to in self.subbed_to.iter() {
+            let user_id = chan.key();
+            if let Some(subbed_to) = self.subbed_to.get(user_id) {
+                if let Some(PermCheck {
+                    guild_id,
+                    channel_id,
+                    check_for,
+                    must_be_guild_owner,
+                }) = perm_check
+                {
+                    let perm = self.check_perms(
+                        guild_id,
+                        channel_id,
+                        *user_id,
+                        check_for,
+                        must_be_guild_owner,
+                    );
+                    if !matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery)) {
+                        continue;
+                    }
+                }
                 if subbed_to.contains(&sub) {
                     chan.push(event.clone());
                 }
@@ -663,9 +694,9 @@ impl ChatServer {
         let key = make_chan_key(guild_id, channel_id);
 
         let channel = Channel {
-            metadata: metadata.clone(),
+            metadata,
             channel_id,
-            channel_name: channel_name.clone(),
+            channel_name,
             is_category,
         };
         let mut buf = BytesMut::new();
@@ -675,19 +706,6 @@ impl ChatServer {
 
         // Add from ordering list
         self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
-
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            event::Event::CreatedChannel(event::ChannelCreated {
-                guild_id,
-                channel_id,
-                name: channel_name,
-                previous_id,
-                next_id,
-                is_category,
-                metadata,
-            }),
-        );
 
         Ok(channel_id)
     }
@@ -707,11 +725,14 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<CreateGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let CreateGuildRequest {
-            metadata,
-            guild_name,
-            picture_url,
-        } = request.into_parts().0;
+        let (
+            CreateGuildRequest {
+                metadata,
+                guild_name,
+                picture_url,
+            },
+            headers,
+        ) = request.into_parts();
 
         let guild_id = {
             let mut guild_id = gen_rand_u64();
@@ -754,21 +775,28 @@ impl chat_service_server::ChatService for ChatServer {
             )
             .unwrap();
         self.add_default_role_to(guild_id, user_id)?;
-        self.set_permissions_logic(
-            guild_id,
-            0,
-            everyone_role_id,
-            PermissionList {
-                permissions: ["messages.send", "messages.view"]
-                    .iter()
-                    .map(|m| Permission {
-                        matches: m.to_string(),
-                        mode: permission::Mode::Allow.into(),
-                    })
-                    .collect(),
-            },
-        );
-        self.create_channel_logic(guild_id, "general".to_string(), false, None, 0, 0)?;
+        let def_perms = PermissionList {
+            permissions: ["messages.send", "messages.view"]
+                .iter()
+                .map(|m| Permission {
+                    matches: m.to_string(),
+                    mode: permission::Mode::Allow.into(),
+                })
+                .collect(),
+        };
+        self.set_permissions_logic(guild_id, 0, everyone_role_id, def_perms.clone());
+        let channel_id = self
+            .create_channel(Request::from_parts((
+                CreateChannelRequest {
+                    guild_id,
+                    channel_name: "general".to_string(),
+                    ..Default::default()
+                },
+                headers,
+            )))
+            .await?
+            .channel_id;
+        self.set_permissions_logic(guild_id, channel_id, everyone_role_id, def_perms);
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -836,12 +864,31 @@ impl chat_service_server::ChatService for ChatServer {
 
         let channel_id = self.create_channel_logic(
             guild_id,
-            channel_name,
+            channel_name.clone(),
             is_category,
-            metadata,
+            metadata.clone(),
             previous_id,
             next_id,
         )?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::CreatedChannel(event::ChannelCreated {
+                guild_id,
+                channel_id,
+                name: channel_name,
+                previous_id,
+                next_id,
+                is_category,
+                metadata,
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id,
+                check_for: "messages.view",
+                must_be_guild_owner: false,
+            }),
+        );
 
         Ok(CreateChannelResponse { channel_id })
     }
@@ -927,6 +974,7 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 homeserver,
             }),
+            None,
         );
 
         Ok(AddGuildToGuildListResponse {})
@@ -959,6 +1007,7 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 homeserver,
             }),
+            None,
         );
 
         Ok(RemoveGuildFromGuildListResponse {})
@@ -1285,6 +1334,12 @@ impl chat_service_server::ChatService for ChatServer {
                 edited_at,
                 content: new_content,
             })),
+            Some(PermCheck {
+                guild_id,
+                channel_id,
+                check_for: "messages.view",
+                must_be_guild_owner: false,
+            }),
         );
 
         Ok(())
@@ -1334,6 +1389,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
+            None,
         );
 
         Ok(())
@@ -1418,6 +1474,7 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 channel_id,
             }),
+            None,
         );
 
         Ok(())
@@ -1465,6 +1522,12 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 channel_id,
                 message_id,
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id,
+                check_for: "messages.view",
+                must_be_guild_owner: false,
             }),
         );
 
@@ -1544,6 +1607,7 @@ impl chat_service_server::ChatService for ChatServer {
                     guild_id,
                     member_id: user_id,
                 }),
+                None,
             );
 
             let mut buf = BytesMut::new();
@@ -1581,6 +1645,7 @@ impl chat_service_server::ChatService for ChatServer {
                 member_id: user_id,
                 leave_reason: LeaveReason::Willingly.into(),
             }),
+            None,
         );
 
         Ok(())
@@ -1663,6 +1728,12 @@ impl chat_service_server::ChatService for ChatServer {
                 echo_id,
                 message: Some(message),
             })),
+            Some(PermCheck {
+                guild_id,
+                channel_id,
+                check_for: "messages.view",
+                must_be_guild_owner: false,
+            }),
         );
 
         Ok(SendMessageResponse { message_id })
@@ -2170,6 +2241,7 @@ impl chat_service_server::ChatService for ChatServer {
                 is_bot,
                 update_is_bot,
             }),
+            None,
         );
 
         Ok(())
@@ -2196,6 +2268,12 @@ impl chat_service_server::ChatService for ChatServer {
                 user_id,
                 guild_id,
                 channel_id,
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id,
+                check_for: "messages.view",
+                must_be_guild_owner: false,
             }),
         );
 
@@ -2275,6 +2353,7 @@ impl chat_service_server::ChatService for ChatServer {
                 member_id: user_to_ban,
                 leave_reason: LeaveReason::Banned.into(),
             }),
+            None,
         );
 
         Ok(())
@@ -2310,6 +2389,7 @@ impl chat_service_server::ChatService for ChatServer {
                 member_id: user_to_kick,
                 leave_reason: LeaveReason::Kicked.into(),
             }),
+            None,
         );
 
         Ok(())
