@@ -1,5 +1,7 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::convert::TryInto;
 
+use ahash::RandomState;
+use dashmap::DashMap;
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
@@ -14,7 +16,6 @@ use harmony_rust_sdk::api::{
     },
     harmonytypes::{content, Content, ContentText, Message as HarmonyMessage, Metadata},
 };
-use parking_lot::Mutex;
 use sled::Tree;
 
 use super::{gen_rand_u64, rate};
@@ -35,8 +36,8 @@ enum EventSub {
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     chat_tree: Tree,
-    subbed_to: Mutex<HashMap<u64, Vec<EventSub>>>,
-    event_chans: Mutex<HashMap<u64, Vec<event::Event>>>,
+    subbed_to: DashMap<u64, Vec<EventSub>, RandomState>,
+    event_chans: DashMap<u64, Vec<event::Event>, RandomState>,
 }
 
 impl ChatServer {
@@ -44,14 +45,14 @@ impl ChatServer {
         Self {
             valid_sessions,
             chat_tree,
-            subbed_to: Mutex::new(HashMap::new()),
-            event_chans: Mutex::new(HashMap::new()),
+            subbed_to: DashMap::default(),
+            event_chans: DashMap::default(),
         }
     }
 
     fn send_event_through_chan(&self, sub: EventSub, event: event::Event) {
-        for chan in self.event_chans.lock().values_mut() {
-            for subbed_to in self.subbed_to.lock().values() {
+        for mut chan in self.event_chans.iter_mut() {
+            for subbed_to in self.subbed_to.iter() {
                 if subbed_to.contains(&sub) {
                     chan.push(event.clone());
                 }
@@ -2032,12 +2033,11 @@ impl chat_service_server::ChatService for ChatServer {
                 }
             };
 
-            self.subbed_to.lock().entry(user_id).or_default().push(sub);
+            self.subbed_to.entry(user_id).or_default().push(sub);
         }
 
         let event = self
             .event_chans
-            .lock()
             .entry(user_id)
             .or_default()
             .pop()

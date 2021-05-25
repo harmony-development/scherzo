@@ -1,5 +1,6 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc, time::Duration};
+use std::{convert::TryInto, sync::Arc, time::Duration};
 
+use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     chat::{
@@ -12,7 +13,6 @@ use harmony_rust_sdk::api::{
     },
 };
 use hrpc::warp;
-use parking_lot::Mutex;
 use scherzo::{
     db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
     impls::{auth::AuthServer, chat::ChatServer, rest::RestConfig},
@@ -180,7 +180,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     });
     drop(span);
 
-    let valid_sessions = Arc::new(Mutex::new(HashMap::new()));
+    let valid_sessions = Arc::new(DashMap::default());
 
     let auth_tree = db.open_tree("auth").unwrap();
     let chat_tree = db.open_tree("chat").unwrap();

@@ -1,10 +1,11 @@
 use std::{
-    collections::HashMap,
     convert::TryInto,
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use ahash::RandomState;
+use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::*,
     chat::GetUserResponse,
@@ -17,7 +18,6 @@ use harmony_rust_sdk::api::{
         prost::bytes::BytesMut,
     },
 };
-use parking_lot::Mutex;
 use sha3::Digest;
 use sled::{IVec, Tree};
 
@@ -33,7 +33,7 @@ use crate::{
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
-pub type SessionMap = Arc<Mutex<HashMap<String, u64>>>;
+pub type SessionMap = Arc<DashMap<String, u64, RandomState>>;
 
 pub fn check_auth<T>(
     valid_sessions: &SessionMap,
@@ -61,27 +61,23 @@ pub fn check_auth<T>(
         );
 
     valid_sessions
-        .lock()
         .get(&auth_id)
-        .cloned()
+        .as_deref()
+        .copied()
         .map_or(Err(ServerError::Unauthenticated), Ok)
 }
 
 #[derive(Debug)]
 pub struct AuthServer {
     valid_sessions: SessionMap,
-    step_map: Mutex<HashMap<String, Vec<AuthStep>>>,
-    send_step: Mutex<HashMap<String, AuthStep>>,
+    step_map: DashMap<String, Vec<AuthStep>, RandomState>,
+    send_step: DashMap<String, AuthStep, RandomState>,
     auth_tree: Tree,
     chat_tree: Tree,
 }
 
 impl AuthServer {
-    pub fn new(
-        chat_tree: Tree,
-        auth_tree: Tree,
-        valid_sessions: Arc<Mutex<HashMap<String, u64>>>,
-    ) -> Self {
+    pub fn new(chat_tree: Tree, auth_tree: Tree, valid_sessions: SessionMap) -> Self {
         fn scan_tree_for(auth_tree: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
             auth_tree
                 .scan_prefix(prefix)
@@ -99,7 +95,6 @@ impl AuthServer {
         let atimes = scan_tree_for(&auth_tree, &ATIME_PREFIX);
 
         let mut batch = sled::Batch::default();
-        let mut vs = valid_sessions.lock();
         for (id, token) in tokens {
             if let Some(profile) = chat_tree.get(chatdb::make_user_profile_key(id)).unwrap() {
                 let profile = db::deser_profile(profile);
@@ -115,14 +110,13 @@ impl AuthServer {
                                 batch.remove(&atime_key(id));
                             } else {
                                 let token = std::str::from_utf8(token.as_ref()).unwrap();
-                                vs.insert(token.to_string(), id);
+                                valid_sessions.insert(token.to_string(), id);
                             }
                         }
                     }
                 }
             }
         }
-        drop(vs);
         auth_tree.apply_batch(batch).unwrap();
 
         let att = auth_tree.clone();
@@ -137,7 +131,6 @@ impl AuthServer {
                 let atimes = scan_tree_for(&att, &ATIME_PREFIX);
 
                 let mut batch = sled::Batch::default();
-                let mut vs = vs.lock();
                 for (id, token) in tokens {
                     if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
                         let profile = db::deser_profile(profile);
@@ -160,15 +153,14 @@ impl AuthServer {
                         }
                     }
                 }
-                drop(vs);
                 att.apply_batch(batch).unwrap();
             }
         });
 
         Self {
             valid_sessions,
-            step_map: Mutex::new(HashMap::new()),
-            send_step: Mutex::new(HashMap::new()),
+            step_map: DashMap::default(),
+            send_step: DashMap::default(),
             auth_tree,
             chat_tree,
         }
@@ -232,11 +224,11 @@ impl auth_service_server::AuthService for AuthServer {
     ) -> Result<Option<AuthStep>, Self::Error> {
         let auth_id = &validation_request.get_message().auth_id;
 
-        if !self.step_map.lock().contains_key(auth_id) {
+        if !self.step_map.contains_key(auth_id) {
             return Err(ServerError::InvalidAuthId);
         }
 
-        Ok(self.send_step.lock().remove(auth_id))
+        Ok(self.send_step.remove(auth_id).map(|(_, step)| step))
     }
 
     fn begin_auth_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
@@ -259,12 +251,11 @@ impl auth_service_server::AuthService for AuthServer {
         let auth_id: String = gen_rand_str(30);
 
         self.step_map
-            .lock()
             .entry(auth_id.clone())
             .and_modify(|s| *s = vec![initial_step.clone()])
             .or_insert_with(|| vec![initial_step.clone()]);
 
-        self.send_step.lock().insert(auth_id.clone(), initial_step);
+        self.send_step.insert(auth_id.clone(), initial_step);
 
         tracing::debug!("new auth session {}", auth_id);
 
@@ -283,7 +274,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let next_step;
 
-        if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
+        if let Some(mut step_stack) = self.step_map.get_mut(&auth_id) {
             if let Some(step) = maybe_step {
                 let current_step = step_stack.last().unwrap().step.as_ref().unwrap().clone();
                 tracing::debug!("current auth step for session {}", auth_id);
@@ -488,7 +479,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         })),
                                     };
 
-                                    self.valid_sessions.lock().insert(session_token, user_id);
+                                    self.valid_sessions.insert(session_token, user_id);
                                 }
                                 "register" => {
                                     let password_raw =
@@ -567,7 +558,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         })),
                                     };
 
-                                    self.valid_sessions.lock().insert(session_token, user_id);
+                                    self.valid_sessions.insert(session_token, user_id);
                                 }
                                 _ => unreachable!(),
                             }
@@ -592,10 +583,10 @@ impl auth_service_server::AuthService for AuthServer {
                 auth_id,
                 session
             );
-            self.step_map.lock().remove(&auth_id);
+            self.step_map.remove(&auth_id);
         }
 
-        self.send_step.lock().insert(auth_id, next_step.clone());
+        self.send_step.insert(auth_id, next_step.clone());
 
         Ok(next_step)
     }
@@ -610,7 +601,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let prev_step;
 
-        if let Some(step_stack) = self.step_map.lock().get_mut(&auth_id) {
+        if let Some(mut step_stack) = self.step_map.get_mut(&auth_id) {
             if step_stack.last().unwrap().can_go_back {
                 step_stack.pop();
                 tracing::debug!("auth session {} went to previous step", auth_id);
@@ -621,7 +612,7 @@ impl auth_service_server::AuthService for AuthServer {
                 );
             }
             prev_step = step_stack.last().unwrap().clone();
-            self.send_step.lock().insert(auth_id, prev_step.clone());
+            self.send_step.insert(auth_id, prev_step.clone());
         } else {
             return Err(ServerError::InvalidAuthId);
         }

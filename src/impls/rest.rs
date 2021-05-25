@@ -129,7 +129,7 @@ pub fn upload(
         .and_then(|res: Result<(), ServerError>| async move { res.map_err(reject) })
         .and(
             warp::filters::header::header("Authorization").map(move |token: String| {
-                if !sessions.lock().contains_key(&token) {
+                if !sessions.contains_key(&token) {
                     Err(reject(ServerError::Unauthenticated))
                 } else {
                     Ok(())
