@@ -32,11 +32,37 @@ enum EventSub {
     Actions,
 }
 
+#[derive(Default)]
 struct PermCheck<'a> {
     guild_id: u64,
     channel_id: u64,
     check_for: &'a str,
     must_be_guild_owner: bool,
+}
+
+impl<'a> PermCheck<'a> {
+    fn new(guild_id: u64, channel_id: u64, check_for: &'a str, must_be_guild_owner: bool) -> Self {
+        Self {
+            guild_id,
+            channel_id,
+            check_for,
+            must_be_guild_owner,
+        }
+    }
+}
+
+struct EventContext {
+    user_ids: Vec<u64>,
+}
+
+impl EventContext {
+    fn new(user_ids: Vec<u64>) -> Self {
+        Self { user_ids }
+    }
+
+    fn empty() -> Self {
+        Self::new(vec![])
+    }
 }
 
 #[derive(Debug)]
@@ -62,10 +88,10 @@ impl ChatServer {
         sub: EventSub,
         event: event::Event,
         perm_check: Option<PermCheck<'_>>,
+        context: EventContext,
     ) {
-        for mut chan in self.event_chans.iter_mut() {
-            let user_id = chan.key();
-            if let Some(subbed_to) = self.subbed_to.get(user_id) {
+        let send_event = |chan: &mut Vec<event::Event>, user_id| {
+            if let Some(subbed_to) = self.subbed_to.get(&user_id) {
                 if let Some(PermCheck {
                     guild_id,
                     channel_id,
@@ -76,17 +102,32 @@ impl ChatServer {
                     let perm = self.check_perms(
                         guild_id,
                         channel_id,
-                        *user_id,
+                        user_id,
                         check_for,
                         must_be_guild_owner,
                     );
                     if !matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery)) {
-                        continue;
+                        return;
                     }
                 }
                 if subbed_to.contains(&sub) {
                     chan.push(event.clone());
                 }
+            }
+        };
+        if !context.user_ids.is_empty() {
+            for mut chan in self
+                .event_chans
+                .iter_mut()
+                .filter(|chan| context.user_ids.contains(chan.key()))
+            {
+                let user_id = *chan.key();
+                send_event(chan.as_mut(), user_id);
+            }
+        } else {
+            for mut chan in self.event_chans.iter_mut() {
+                let user_id = *chan.key();
+                send_event(chan.as_mut(), user_id);
             }
         }
     }
@@ -709,6 +750,19 @@ impl ChatServer {
 
         Ok(channel_id)
     }
+
+    pub fn calculate_users_seeing_user(&self, user_id: u64) -> Vec<u64> {
+        self.chat_tree
+            .scan_prefix(make_guild_list_key_prefix(user_id))
+            .map(|res| {
+                let (_, guild_id_raw) = res.unwrap();
+                let (id_raw, _) = guild_id_raw.split_at(std::mem::size_of::<u64>());
+                let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                self.get_guild_members_logic(guild_id).members
+            })
+            .flatten()
+            .collect()
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -882,12 +936,8 @@ impl chat_service_server::ChatService for ChatServer {
                 is_category,
                 metadata,
             }),
-            Some(PermCheck {
-                guild_id,
-                channel_id,
-                check_for: "messages.view",
-                must_be_guild_owner: false,
-            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
         );
 
         Ok(CreateChannelResponse { channel_id })
@@ -964,7 +1014,7 @@ impl chat_service_server::ChatService for ChatServer {
                     serialized.as_slice(),
                 ]
                 .concat(),
-                serialized,
+                [].as_ref(),
             )
             .unwrap();
 
@@ -975,6 +1025,7 @@ impl chat_service_server::ChatService for ChatServer {
                 homeserver,
             }),
             None,
+            EventContext::new(vec![user_id]),
         );
 
         Ok(AddGuildToGuildListResponse {})
@@ -1008,6 +1059,7 @@ impl chat_service_server::ChatService for ChatServer {
                 homeserver,
             }),
             None,
+            EventContext::new(vec![user_id]),
         );
 
         Ok(RemoveGuildFromGuildListResponse {})
@@ -1334,12 +1386,8 @@ impl chat_service_server::ChatService for ChatServer {
                 edited_at,
                 content: new_content,
             })),
-            Some(PermCheck {
-                guild_id,
-                channel_id,
-                check_for: "messages.view",
-                must_be_guild_owner: false,
-            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
         );
 
         Ok(())
@@ -1390,6 +1438,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventSub::Guild(guild_id),
             event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
             None,
+            EventContext::empty(),
         );
 
         Ok(())
@@ -1475,6 +1524,7 @@ impl chat_service_server::ChatService for ChatServer {
                 channel_id,
             }),
             None,
+            EventContext::empty(),
         );
 
         Ok(())
@@ -1523,12 +1573,8 @@ impl chat_service_server::ChatService for ChatServer {
                 channel_id,
                 message_id,
             }),
-            Some(PermCheck {
-                guild_id,
-                channel_id,
-                check_for: "messages.view",
-                must_be_guild_owner: false,
-            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
         );
 
         Ok(())
@@ -1608,6 +1654,7 @@ impl chat_service_server::ChatService for ChatServer {
                     member_id: user_id,
                 }),
                 None,
+                EventContext::empty(),
             );
 
             let mut buf = BytesMut::new();
@@ -1646,6 +1693,7 @@ impl chat_service_server::ChatService for ChatServer {
                 leave_reason: LeaveReason::Willingly.into(),
             }),
             None,
+            EventContext::empty(),
         );
 
         Ok(())
@@ -1728,12 +1776,8 @@ impl chat_service_server::ChatService for ChatServer {
                 echo_id,
                 message: Some(message),
             })),
-            Some(PermCheck {
-                guild_id,
-                channel_id,
-                check_for: "messages.view",
-                must_be_guild_owner: false,
-            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
         );
 
         Ok(SendMessageResponse { message_id })
@@ -2242,6 +2286,7 @@ impl chat_service_server::ChatService for ChatServer {
                 update_is_bot,
             }),
             None,
+            EventContext::new(self.calculate_users_seeing_user(user_id)),
         );
 
         Ok(())
@@ -2269,12 +2314,8 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 channel_id,
             }),
-            Some(PermCheck {
-                guild_id,
-                channel_id,
-                check_for: "messages.view",
-                must_be_guild_owner: false,
-            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
         );
 
         Ok(())
@@ -2354,6 +2395,7 @@ impl chat_service_server::ChatService for ChatServer {
                 leave_reason: LeaveReason::Banned.into(),
             }),
             None,
+            EventContext::empty(),
         );
 
         Ok(())
@@ -2390,6 +2432,7 @@ impl chat_service_server::ChatService for ChatServer {
                 leave_reason: LeaveReason::Kicked.into(),
             }),
             None,
+            EventContext::empty(),
         );
 
         Ok(())
