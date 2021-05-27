@@ -11,3 +11,12 @@ Harmony server implemented in Rust.
 - Mediaproxy service: (not started)
 - Voice service: (not started)
 - Rest APIs: implemented
+
+## Build
+
+- Clone this repo
+- Run `cargo build`
+
+If you have Nix, you can do:
+- Flakes: `nix build`
+- Non-flake: `nix-build`
