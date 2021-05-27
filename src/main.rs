@@ -18,7 +18,7 @@ use scherzo::{
     impls::{auth::AuthServer, chat::ChatServer, rest::RestConfig},
     ServerError,
 };
-use tracing::{level_filters::LevelFilter, Level};
+use tracing::Level;
 use tracing_subscriber::{fmt, prelude::*};
 
 #[derive(Debug)]
@@ -146,16 +146,33 @@ async fn main() {
 
 pub async fn run_command(command: Command, filter_level: Level, db_path: String) {
     let term_logger = fmt::layer();
-
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
+    let filter =
+        tracing_subscriber::EnvFilter::from_default_env().add_directive(filter_level.into());
+    #[cfg(feature = "console")]
+    let filter = filter.add_directive("tokio=trace".parse().unwrap());
+    #[cfg(feature = "console")]
+    let (console_layer, console_server) = console_subscriber::TasksLayer::new();
 
-    tracing_subscriber::registry()
-        .with(LevelFilter::from_level(filter_level))
+    #[cfg(not(feature = "console"))]
+    let base_loggers = tracing_subscriber::registry()
+        .with(filter)
         .with(term_logger)
-        .with(file_logger)
-        .init();
+        .with(file_logger);
+
+    #[cfg(feature = "console")]
+    let base_loggers = tracing_subscriber::registry()
+        .with(filter)
+        .with(console_layer)
+        .with(term_logger)
+        .with(file_logger);
+
+    base_loggers.init();
+
+    #[cfg(feature = "console")]
+    tokio::spawn(console_server.serve());
 
     tracing::info!("logging initialized");
 
