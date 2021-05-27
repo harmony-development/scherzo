@@ -964,12 +964,16 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<GetGuildListResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
+        let prefix = make_guild_list_key_prefix(user_id);
         let guilds = self
             .chat_tree
-            .scan_prefix(make_guild_list_key_prefix(user_id))
+            .scan_prefix(prefix)
             .map(|res| {
-                let (_, guild_id_raw) = res.unwrap();
-                let (id_raw, host_raw) = guild_id_raw.split_at(std::mem::size_of::<u64>());
+                let (guild_id_raw, _) = res.unwrap();
+                let (id_raw, host_raw) = guild_id_raw
+                    .split_at(prefix.len())
+                    .1
+                    .split_at(std::mem::size_of::<u64>());
 
                 let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 let host = std::str::from_utf8(host_raw).unwrap();
