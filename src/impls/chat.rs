@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -70,8 +70,8 @@ impl EventContext {
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     chat_tree: Tree,
-    subbed_to: DashMap<u64, Vec<EventSub>, RandomState>,
-    event_chans: DashMap<u64, Vec<event::Event>, RandomState>,
+    subbed_to: DashMap<u64, HashMap<u64, Vec<EventSub>, RandomState>, RandomState>, // user id -> stream id -> event sub list
+    event_chans: DashMap<u64, Vec<event::Event>, RandomState>, // stream id -> event list
 }
 
 impl ChatServer {
@@ -91,44 +91,46 @@ impl ChatServer {
         perm_check: Option<PermCheck<'_>>,
         context: EventContext,
     ) {
-        let send_event = |chan: &mut Vec<event::Event>, user_id| {
+        let send_event = |user_id| {
+            let mut send_to_streams = Vec::new();
             if let Some(subbed_to) = self.subbed_to.get(&user_id) {
-                if let Some(PermCheck {
-                    guild_id,
-                    channel_id,
-                    check_for,
-                    must_be_guild_owner,
-                }) = perm_check
-                {
-                    let perm = self.check_perms(
+                for (stream_id, subbed_to) in subbed_to.iter() {
+                    if let Some(PermCheck {
                         guild_id,
                         channel_id,
-                        user_id,
                         check_for,
                         must_be_guild_owner,
-                    );
-                    if !matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery)) {
-                        return;
+                    }) = perm_check
+                    {
+                        let perm = self.check_perms(
+                            guild_id,
+                            channel_id,
+                            user_id,
+                            check_for,
+                            must_be_guild_owner,
+                        );
+                        if !matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery)) {
+                            continue;
+                        }
+                    }
+                    if subbed_to.contains(&sub) {
+                        send_to_streams.push(*stream_id);
                     }
                 }
-                if subbed_to.contains(&sub) {
+            }
+            for stream_id in send_to_streams {
+                if let Some(mut chan) = self.event_chans.get_mut(&stream_id) {
                     chan.push(event.clone());
                 }
             }
         };
         if !context.user_ids.is_empty() {
-            for mut chan in self
-                .event_chans
-                .iter_mut()
-                .filter(|chan| context.user_ids.contains(chan.key()))
-            {
-                let user_id = *chan.key();
-                send_event(chan.as_mut(), user_id);
+            for user_id in context.user_ids {
+                send_event(user_id);
             }
         } else {
-            for mut chan in self.event_chans.iter_mut() {
-                let user_id = *chan.key();
-                send_event(chan.as_mut(), user_id);
+            for subbed_to in self.subbed_to.iter() {
+                send_event(*subbed_to.key());
             }
         }
     }
@@ -2139,10 +2141,11 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     async fn stream_events(&self, user_id: u64, mut socket: Socket<StreamEventsRequest, Event>) {
+        let stream_id = gen_rand_u64();
         loop {
             if let Some(event) = self
                 .event_chans
-                .entry(user_id)
+                .entry(stream_id)
                 .or_default()
                 .pop()
                 .map(|event| Event { event: Some(event) })
@@ -2170,7 +2173,12 @@ impl chat_service_server::ChatService for ChatServer {
                         }
                     };
 
-                    self.subbed_to.entry(user_id).or_default().push(sub);
+                    self.subbed_to
+                        .entry(user_id)
+                        .or_default()
+                        .entry(stream_id)
+                        .or_default()
+                        .push(sub);
                 }
             });
         }
