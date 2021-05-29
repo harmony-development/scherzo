@@ -113,9 +113,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.6.1"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63396b8a4b9de3f4fdfb320ab6080762242f66a8ef174c49d8e19b674db4cdbe"
+checksum = "9c59e7af012c713f529e7a3ee57ce9b31ddd858d4b512923602f74608b009631"
 
 [[package]]
 name = "byteorder"
@@ -194,7 +194,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#38adbd97aefc53d06e509c7b33c98b4dcfa7a970"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#e45fca08102cefec7494d28f80863990cfb24160"
 dependencies = [
  "prost",
  "prost-types",
@@ -206,7 +206,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#38adbd97aefc53d06e509c7b33c98b4dcfa7a970"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#e45fca08102cefec7494d28f80863990cfb24160"
 dependencies = [
  "console-api",
  "futures",
@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#a2fd0bbe0b73346509a03b25af493cb6dfcd4872"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#a263333c314bf0036265742830ef829cc54d8002"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -610,7 +610,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.5.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#a2fd0bbe0b73346509a03b25af493cb6dfcd4872"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=workaround/tls-fix#a263333c314bf0036265742830ef829cc54d8002"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -674,7 +674,7 @@ dependencies = [
 [[package]]
 name = "hrpc"
 version = "0.6.6"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=workaround/tls-fix#92e43b36c313ac06c6dc92fbd9445009f4c2ed8f"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=workaround/tls-fix#f9ea862109b9cd2c12f09eb78e3116a627c93c07"
 dependencies = [
  "ahash",
  "async-trait",
@@ -682,6 +682,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "http",
+ "parking_lot",
  "prost",
  "tokio",
  "tracing",
@@ -692,7 +693,7 @@ dependencies = [
 [[package]]
 name = "hrpc-build"
 version = "0.3.6"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=workaround/tls-fix#92e43b36c313ac06c6dc92fbd9445009f4c2ed8f"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=workaround/tls-fix#f9ea862109b9cd2c12f09eb78e3116a627c93c07"
 dependencies = [
  "proc-macro2",
  "prost",
@@ -923,9 +924,9 @@ checksum = "b16bd47d9e329435e309c58469fe0791c2d0d1ba96ec0954152a5ae2b04387dc"
 
 [[package]]
 name = "memoffset"
-version = "0.6.3"
+version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83fb6581e8ed1f85fd45c116db8405483899489e38406156c25eb743554361d"
+checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
 dependencies = [
  "autocfg",
 ]
@@ -1719,9 +1720,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.6.0"
+version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd3076b5c8cc18138b8f8814895c11eb4de37114a5d127bafdc5e55798ceef37"
+checksum = "0a38d31d7831c6ed7aad00aa4c12d9375fd225a6dd77da1d25b707346319a975"
 dependencies = [
  "autocfg",
  "bytes",
@@ -1847,9 +1848,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf0aa6dfc29148c3826708dabbfa83c121eeb84df4d1468220825e3a33651687"
+checksum = "f60422bc7fefa2f3ec70359b8ff1caff59d785877eb70595904605bcc412470f"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -2034,9 +2035,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-normalization"
-version = "0.1.17"
+version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07fbfce1c8a97d547e8b5334978438d9d6ec8c20e38f56d4a4374d181493eaef"
+checksum = "33717dca7ac877f497014e10d73f3acf948c342bee31b5ca7892faf94ccc6b49"
 dependencies = [
  "tinyvec",
 ]

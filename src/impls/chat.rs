@@ -8,7 +8,8 @@ use harmony_rust_sdk::api::{
     chat::{event::LeaveReason, *},
     exports::{
         hrpc::{
-            encode_protobuf_message,
+            encode_protobuf_message, return_print,
+            server::Socket,
             warp::{filters::BoxedFilter, reply::Response},
             Request,
         },
@@ -2131,38 +2132,48 @@ impl chat_service_server::ChatService for ChatServer {
         set_proto_name(response)
     }
 
-    async fn stream_events(
-        &self,
-        validation_request: &Request<()>,
-        request: Option<StreamEventsRequest>,
-    ) -> Result<Option<Event>, Self::Error> {
-        let user_id = self.auth(validation_request)?;
+    type StreamEventsValidationType = u64;
 
-        if let Some(req) = request.map(|r| r.request).flatten() {
-            use stream_events_request::*;
+    async fn stream_events_validation(&self, request: Request<()>) -> Result<u64, Self::Error> {
+        self.auth(&request)
+    }
 
-            let sub = match req {
-                Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
-                    self.check_guild_user(guild_id, user_id)?;
-                    EventSub::Guild(guild_id)
+    async fn stream_events(&self, user_id: u64, mut socket: Socket<StreamEventsRequest, Event>) {
+        loop {
+            if let Some(event) = self
+                .event_chans
+                .entry(user_id)
+                .or_default()
+                .pop()
+                .map(|event| Event { event: Some(event) })
+            {
+                return_print!(socket.send_message(event).await);
+            }
+
+            return_print!(socket.receive_message().await, |maybe_req| {
+                if let Some(req) = maybe_req.map(|r| r.request).flatten() {
+                    use stream_events_request::*;
+
+                    let sub = match req {
+                        Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
+                            match self.check_guild_user(guild_id, user_id) {
+                                Ok(_) => EventSub::Guild(guild_id),
+                                Err(err) => {
+                                    tracing::error!("{}", err);
+                                    continue;
+                                }
+                            }
+                        }
+                        Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
+                        Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
+                            EventSub::Homeserver
+                        }
+                    };
+
+                    self.subbed_to.entry(user_id).or_default().push(sub);
                 }
-                Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
-                Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
-                    EventSub::Homeserver
-                }
-            };
-
-            self.subbed_to.entry(user_id).or_default().push(sub);
+            });
         }
-
-        let event = self
-            .event_chans
-            .entry(user_id)
-            .or_default()
-            .pop()
-            .map(|event| Event { event: Some(event) });
-
-        Ok(event)
     }
 
     fn get_user_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {

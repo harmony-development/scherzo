@@ -11,7 +11,8 @@ use harmony_rust_sdk::api::{
     chat::GetUserResponse,
     exports::{
         hrpc::{
-            encode_protobuf_message,
+            encode_protobuf_message, return_print,
+            server::WriteSocket,
             warp::{filters::BoxedFilter, reply::Response},
             Request,
         },
@@ -218,17 +219,31 @@ impl auth_service_server::AuthService for AuthServer {
         rate(2, 5)
     }
 
-    async fn stream_steps(
+    type StreamStepsValidationType = String;
+
+    async fn stream_steps_validation(
         &self,
-        validation_request: &Request<StreamStepsRequest>,
-    ) -> Result<Option<AuthStep>, Self::Error> {
-        let auth_id = &validation_request.get_message().auth_id;
+        request: Request<Option<StreamStepsRequest>>,
+    ) -> Result<String, Self::Error> {
+        if let Some(msg) = request.into_parts().0 {
+            let auth_id = msg.auth_id;
 
-        if !self.step_map.contains_key(auth_id) {
-            return Err(ServerError::InvalidAuthId);
+            if self.step_map.contains_key(&auth_id) {
+                Ok(auth_id)
+            } else {
+                Err(ServerError::InvalidAuthId)
+            }
+        } else {
+            Ok(String::default())
         }
+    }
 
-        Ok(self.send_step.remove(auth_id).map(|(_, step)| step))
+    async fn stream_steps(&self, auth_id: String, mut socket: WriteSocket<AuthStep>) {
+        loop {
+            if let Some(step) = self.send_step.remove(&auth_id).map(|(_, step)| step) {
+                return_print!(socket.send_message(step).await);
+            }
+        }
     }
 
     fn begin_auth_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
