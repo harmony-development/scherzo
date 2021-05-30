@@ -755,10 +755,12 @@ impl ChatServer {
     }
 
     pub fn calculate_users_seeing_user(&self, user_id: u64) -> Vec<u64> {
+        let prefix = make_guild_list_key_prefix(user_id);
         self.chat_tree
-            .scan_prefix(make_guild_list_key_prefix(user_id))
+            .scan_prefix(prefix)
             .map(|res| {
-                let (_, guild_id_raw) = res.unwrap();
+                let (key, _) = res.unwrap();
+                let (_, guild_id_raw) = key.split_at(prefix.len());
                 let (id_raw, _) = guild_id_raw.split_at(std::mem::size_of::<u64>());
                 let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 self.get_guild_members_logic(guild_id).members
