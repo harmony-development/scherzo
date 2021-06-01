@@ -1,7 +1,7 @@
 use std::{
     convert::TryInto,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use ahash::RandomState;
@@ -92,34 +92,6 @@ impl AuthServer {
                 .collect()
         }
 
-        let tokens = scan_tree_for(&auth_tree, &TOKEN_PREFIX);
-        let atimes = scan_tree_for(&auth_tree, &ATIME_PREFIX);
-
-        let mut batch = sled::Batch::default();
-        for (id, token) in tokens {
-            if let Some(profile) = chat_tree.get(chatdb::make_user_profile_key(id)).unwrap() {
-                let profile = db::deser_profile(profile);
-                if !profile.is_bot {
-                    for (oid, atime) in &atimes {
-                        if &id == oid {
-                            let secs = u64::from_be_bytes(atime.as_ref().try_into().unwrap());
-                            let auth_how_old = Instant::now().elapsed().as_secs() - secs;
-
-                            if auth_how_old >= SESSION_EXPIRE {
-                                tracing::info!("user {} session has expired", id);
-                                batch.remove(&token_key(id));
-                                batch.remove(&atime_key(id));
-                            } else {
-                                let token = std::str::from_utf8(token.as_ref()).unwrap();
-                                valid_sessions.insert(token.to_string(), id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        auth_tree.apply_batch(batch).unwrap();
-
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
         let vs = valid_sessions.clone();
@@ -127,34 +99,38 @@ impl AuthServer {
         std::thread::spawn(move || {
             tracing::info!("starting auth session expiration check thread");
             loop {
-                std::thread::sleep(Duration::from_secs(60 * 5));
                 let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
                 let atimes = scan_tree_for(&att, &ATIME_PREFIX);
 
                 let mut batch = sled::Batch::default();
-                for (id, token) in tokens {
+                for (id, raw_token) in tokens {
                     if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
                         let profile = db::deser_profile(profile);
-                        if !profile.is_bot {
-                            for (oid, atime) in &atimes {
-                                if &id == oid {
-                                    let secs =
-                                        u64::from_be_bytes(atime.as_ref().try_into().unwrap());
-                                    let auth_how_old = Instant::now().elapsed().as_secs() - secs;
+                        for (oid, raw_atime) in &atimes {
+                            if id.eq(oid) {
+                                let secs =
+                                    u64::from_be_bytes(raw_atime.as_ref().try_into().unwrap());
+                                let auth_how_old = UNIX_EPOCH
+                                    .elapsed()
+                                    .expect("time is before unix epoch")
+                                    .as_secs()
+                                    - secs;
+                                let token = std::str::from_utf8(raw_token.as_ref()).unwrap();
 
-                                    if auth_how_old >= SESSION_EXPIRE {
-                                        tracing::info!("user {} session has expired", id);
-                                        batch.remove(&token_key(id));
-                                        batch.remove(&atime_key(id));
-                                        let token = std::str::from_utf8(token.as_ref()).unwrap();
-                                        vs.remove(token);
-                                    }
+                                if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
+                                    tracing::info!("user {} session has expired", id);
+                                    batch.remove(&token_key(id));
+                                    batch.remove(&atime_key(id));
+                                    vs.remove(token);
+                                } else if vs.contains_key(token) {
+                                    vs.insert(token.to_string(), id);
                                 }
                             }
                         }
                     }
                 }
                 att.apply_batch(batch).unwrap();
+                std::thread::sleep(Duration::from_secs(60 * 5));
             }
         });
 
