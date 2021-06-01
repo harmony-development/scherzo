@@ -122,7 +122,7 @@ impl AuthServer {
                                     batch.remove(&token_key(id));
                                     batch.remove(&atime_key(id));
                                     vs.remove(token);
-                                } else if vs.contains_key(token) {
+                                } else if !vs.contains_key(token) {
                                     vs.insert(token.to_string(), id);
                                 }
                             }
