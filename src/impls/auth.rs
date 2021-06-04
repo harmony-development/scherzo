@@ -1,7 +1,7 @@
 use std::{
     convert::TryInto,
     sync::Arc,
-    time::{Duration, Instant, UNIX_EPOCH},
+    time::{Duration, UNIX_EPOCH},
 };
 
 use ahash::RandomState;
