@@ -68,6 +68,13 @@ pub fn check_auth<T>(
         .map_or(Err(ServerError::Unauthenticated), Ok)
 }
 
+fn get_time_secs() -> u64 {
+    UNIX_EPOCH
+        .elapsed()
+        .expect("time is before unix epoch")
+        .as_secs()
+}
+
 #[derive(Debug)]
 pub struct AuthServer {
     valid_sessions: SessionMap,
@@ -110,19 +117,17 @@ impl AuthServer {
                             if id.eq(oid) {
                                 let secs =
                                     u64::from_be_bytes(raw_atime.as_ref().try_into().unwrap());
-                                let auth_how_old = UNIX_EPOCH
-                                    .elapsed()
-                                    .expect("time is before unix epoch")
-                                    .as_secs()
-                                    - secs;
+                                let auth_how_old = get_time_secs() - secs;
                                 let token = std::str::from_utf8(raw_token.as_ref()).unwrap();
 
-                                if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
+                                if vs.contains_key(token) {
+                                    batch.insert(&atime_key(id), &get_time_secs().to_be_bytes());
+                                } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
                                     tracing::info!("user {} session has expired", id);
                                     batch.remove(&token_key(id));
                                     batch.remove(&atime_key(id));
                                     vs.remove(token);
-                                } else if !vs.contains_key(token) {
+                                } else {
                                     vs.insert(token.to_string(), id);
                                 }
                             }
@@ -451,7 +456,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
                                         &atime_key(user_id),
-                                        &Instant::now().elapsed().as_secs().to_be_bytes(),
+                                        &get_time_secs().to_be_bytes(),
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
 
@@ -516,7 +521,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
                                         &atime_key(user_id),
-                                        &Instant::now().elapsed().as_secs().to_be_bytes(),
+                                        &get_time_secs().to_be_bytes(),
                                     );
                                     self.auth_tree
                                         .apply_batch(batch)
