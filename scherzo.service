@@ -1,0 +1,15 @@
+[Unit]
+Description=Scherzo Harmony Homeserver
+After=network.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=scherzo
+WorkingDirectory=/var/lib/scherzo
+ExecStart=/usr/bin/env scherzo
+
+[Install]
+WantedBy=multi-user.target
