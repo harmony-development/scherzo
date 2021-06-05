@@ -574,6 +574,12 @@ impl auth_service_server::AuthService for AuthServer {
             return Err(ServerError::InvalidAuthId);
         }
 
+        if let Some(chan) = self.send_step.get(&auth_id) {
+            if let Err(err) = chan.send(next_step.clone()).await {
+                tracing::error!("failed to send auth step to {}: {}", auth_id, err);
+            }
+        }
+
         if let Some(auth_step::Step::Session(session)) = &next_step.step {
             tracing::debug!(
                 "auth session {} complete with session {:#?}",
@@ -581,12 +587,7 @@ impl auth_service_server::AuthService for AuthServer {
                 session
             );
             self.step_map.remove(&auth_id);
-        }
-
-        if let Some(chan) = self.send_step.get(&auth_id) {
-            if let Err(err) = chan.send(next_step.clone()).await {
-                tracing::error!("failed to send auth step to {}: {}", auth_id, err);
-            }
+            self.send_step.remove(&auth_id);
         }
 
         Ok(next_step)
