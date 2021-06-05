@@ -60,7 +60,7 @@ jobs:
           ./pyuploadtool-x86_64.AppImage target/release/scherzo
 
   update:
-    depends: build
+    needs: build
     name: Update Scherzo at harmonyapp.io
     runs-on: ubuntu-latest
     steps:
