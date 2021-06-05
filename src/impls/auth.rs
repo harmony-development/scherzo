@@ -157,7 +157,7 @@ impl AuthServer {
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
-    fn check_logged_in_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn check_logged_in_pre(&self) -> BoxedFilter<()> {
         rate(20, 5)
     }
 
@@ -165,7 +165,7 @@ impl auth_service_server::AuthService for AuthServer {
         self.auth(&request).map(|_| ())
     }
 
-    fn federate_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn federate_pre(&self) -> BoxedFilter<()> {
         rate(3, 1)
     }
 
@@ -173,7 +173,7 @@ impl auth_service_server::AuthService for AuthServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn login_federated_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn login_federated_pre(&self) -> BoxedFilter<()> {
         rate(1, 5)
     }
 
@@ -184,7 +184,7 @@ impl auth_service_server::AuthService for AuthServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn key_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn key_pre(&self) -> BoxedFilter<()> {
         rate(1, 5)
     }
 
@@ -196,7 +196,7 @@ impl auth_service_server::AuthService for AuthServer {
         set_proto_name(response)
     }
 
-    fn stream_steps_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn stream_steps_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -227,7 +227,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
     }
 
-    fn begin_auth_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn begin_auth_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -258,7 +258,7 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(BeginAuthResponse { auth_id })
     }
 
-    fn next_step_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn next_step_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -587,7 +587,7 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(next_step)
     }
 
-    fn step_back_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn step_back_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 

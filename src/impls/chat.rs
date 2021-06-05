@@ -774,7 +774,7 @@ impl ChatServer {
 impl chat_service_server::ChatService for ChatServer {
     type Error = ServerError;
 
-    fn create_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn create_guild_pre(&self) -> BoxedFilter<()> {
         rate(1, 5)
     }
 
@@ -860,7 +860,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(CreateGuildResponse { guild_id })
     }
 
-    fn create_invite_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn create_invite_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -899,7 +899,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(CreateInviteResponse { name })
     }
 
-    fn create_channel_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn create_channel_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -948,7 +948,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(CreateChannelResponse { channel_id })
     }
 
-    fn create_emote_pack_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn create_emote_pack_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -959,7 +959,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn get_guild_list_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_list_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
 
@@ -993,7 +993,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetGuildListResponse { guilds })
     }
 
-    fn add_guild_to_guild_list_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn add_guild_to_guild_list_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1040,7 +1040,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(AddGuildToGuildListResponse {})
     }
 
-    fn remove_guild_from_guild_list_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn remove_guild_from_guild_list_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1074,7 +1074,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(RemoveGuildFromGuildListResponse {})
     }
 
-    fn get_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
 
@@ -1091,7 +1091,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.get_guild_logic(guild_id)
     }
 
-    fn get_guild_invites_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_invites_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
 
@@ -1109,7 +1109,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(self.get_guild_invites_logic(guild_id))
     }
 
-    fn get_guild_members_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_members_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
 
@@ -1126,7 +1126,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(self.get_guild_members_logic(guild_id))
     }
 
-    fn get_guild_channels_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_channels_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
 
@@ -1143,7 +1143,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(self.get_guild_channels_logic(guild_id, user_id))
     }
 
-    fn get_channel_messages_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_channel_messages_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1165,7 +1165,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(self.get_channel_messages_logic(guild_id, channel_id, before_message))
     }
 
-    fn get_message_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_message_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1191,7 +1191,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetMessageResponse { message })
     }
 
-    fn get_emote_packs_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_emote_packs_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1202,7 +1202,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn get_emote_pack_emotes_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_emote_pack_emotes_pre(&self) -> BoxedFilter<()> {
         rate(20, 5)
     }
 
@@ -1213,7 +1213,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn update_guild_information_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn update_guild_information_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -1269,7 +1269,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn update_channel_information_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn update_channel_information_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -1321,7 +1321,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn update_channel_order_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn update_channel_order_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -1344,7 +1344,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)
     }
 
-    fn update_message_text_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn update_message_text_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -1402,7 +1402,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn add_emote_to_pack_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn add_emote_to_pack_pre(&self) -> BoxedFilter<()> {
         rate(20, 5)
     }
 
@@ -1413,7 +1413,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn delete_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_guild_pre(&self) -> BoxedFilter<()> {
         rate(1, 15)
     }
 
@@ -1453,7 +1453,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn delete_invite_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_invite_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1478,7 +1478,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn delete_channel_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_channel_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1539,7 +1539,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn delete_message_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_message_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1589,7 +1589,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn delete_emote_from_pack_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_emote_from_pack_pre(&self) -> BoxedFilter<()> {
         rate(20, 5)
     }
 
@@ -1600,7 +1600,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn delete_emote_pack_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_emote_pack_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1611,7 +1611,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn dequip_emote_pack_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn dequip_emote_pack_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1622,7 +1622,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn join_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn join_guild_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1679,7 +1679,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(JoinGuildResponse { guild_id })
     }
 
-    fn leave_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn leave_guild_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -1708,7 +1708,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn trigger_action_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn trigger_action_pre(&self) -> BoxedFilter<()> {
         rate(20, 5)
     }
 
@@ -1719,7 +1719,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn send_message_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn send_message_pre(&self) -> BoxedFilter<()> {
         rate(50, 10)
     }
 
@@ -1792,7 +1792,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(SendMessageResponse { message_id })
     }
 
-    fn query_has_permission_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn query_has_permission_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1827,7 +1827,7 @@ impl chat_service_server::ChatService for ChatServer {
         })
     }
 
-    fn set_permissions_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn set_permissions_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1861,7 +1861,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
     }
 
-    fn get_permissions_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_permissions_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1895,7 +1895,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetPermissionsResponse { perms })
     }
 
-    fn move_role_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn move_role_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1924,7 +1924,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(MoveRoleResponse {})
     }
 
-    fn get_guild_roles_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_guild_roles_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1955,7 +1955,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetGuildRolesResponse { roles })
     }
 
-    fn add_guild_role_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn add_guild_role_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -1978,7 +1978,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
     }
 
-    fn modify_guild_role_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn modify_guild_role_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -2031,7 +2031,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
     }
 
-    fn delete_guild_role_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn delete_guild_role_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -2058,7 +2058,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
     }
 
-    fn manage_user_roles_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn manage_user_roles_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -2092,7 +2092,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.manage_user_roles_logic(guild_id, user_to_manage, give_role_ids, take_role_ids)
     }
 
-    fn get_user_roles_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_user_roles_pre(&self) -> BoxedFilter<()> {
         rate(10, 5)
     }
 
@@ -2128,7 +2128,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetUserRolesResponse { roles })
     }
 
-    fn stream_events_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn stream_events_pre(&self) -> BoxedFilter<()> {
         rate(1, 5)
     }
 
@@ -2186,7 +2186,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
     }
 
-    fn get_user_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_user_pre(&self) -> BoxedFilter<()> {
         rate(32, 10)
     }
 
@@ -2201,7 +2201,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.get_user_logic(user_id)
     }
 
-    fn get_user_bulk_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_user_bulk_pre(&self) -> BoxedFilter<()> {
         rate(5, 5)
     }
 
@@ -2229,7 +2229,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetUserBulkResponse { users: profiles })
     }
 
-    fn get_user_metadata_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn get_user_metadata_pre(&self) -> BoxedFilter<()> {
         rate(4, 1)
     }
 
@@ -2251,7 +2251,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetUserMetadataResponse { metadata })
     }
 
-    fn profile_update_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn profile_update_pre(&self) -> BoxedFilter<()> {
         rate(4, 5)
     }
 
@@ -2317,7 +2317,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn typing_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn typing_pre(&self) -> BoxedFilter<()> {
         rate(4, 5)
     }
 
@@ -2346,7 +2346,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn preview_guild_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn preview_guild_pre(&self) -> BoxedFilter<()> {
         rate(2, 5)
     }
 
@@ -2378,7 +2378,7 @@ impl chat_service_server::ChatService for ChatServer {
         })
     }
 
-    fn ban_user_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn ban_user_pre(&self) -> BoxedFilter<()> {
         rate(4, 5)
     }
 
@@ -2426,7 +2426,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn kick_user_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn kick_user_pre(&self) -> BoxedFilter<()> {
         rate(4, 5)
     }
 
@@ -2463,7 +2463,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    fn unban_user_pre(&self) -> BoxedFilter<(Result<(), Self::Error>,)> {
+    fn unban_user_pre(&self) -> BoxedFilter<()> {
         rate(4, 5)
     }
 
