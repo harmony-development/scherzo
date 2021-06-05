@@ -1,7 +1,6 @@
 [Unit]
 Description=Scherzo Harmony Homeserver
 After=network.target
-Requires=postgresql.service
 
 [Service]
 Type=simple
