@@ -14,7 +14,7 @@ use harmony_rust_sdk::api::{
         hrpc::{futures_util, server::ServerError as HrpcError, warp},
         prost::bytes::Buf,
     },
-    rest::FileId,
+    rest::{extract_file_info_from_download_response, FileId},
 };
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
@@ -83,10 +83,8 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                             .error_for_status()
                             .map_err(map_reqwest_err)?;
                         let (name, mimetype, _) =
-                            harmony_rust_sdk::api::rest::extract_file_info_from_download_response(
-                                resp.headers(),
-                            )
-                            .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
+                            extract_file_info_from_download_response(resp.headers())
+                                .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
                         let data = resp.bytes().await.map_err(map_reqwest_err)?;
                         Ok((name, mimetype, data.to_vec()))
                     }
@@ -141,9 +139,7 @@ pub fn upload(
                 let media_root = media_root.clone();
                 async move {
                     if let Some(res) = form.next().await {
-                        let mut part = res.map_err(|err| {
-                            warp::reject::custom(HrpcError::Custom(ServerError::WarpError(err)))
-                        })?;
+                        let mut part = res.map_err(|err| reject(ServerError::WarpError(err)))?;
                         let data = part
                             .data()
                             .await
@@ -176,6 +172,7 @@ pub fn upload(
         .boxed()
 }
 
+#[inline(always)]
 fn reject(err: ServerError) -> warp::Rejection {
     warp::reject::custom(HrpcError::Custom(err))
 }
