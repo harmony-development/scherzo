@@ -58,3 +58,21 @@ jobs:
           wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
           chmod +x pyuploadtool-x86_64.AppImage
           ./pyuploadtool-x86_64.AppImage target/release/scherzo
+
+  update:
+    depends: build
+    name: Update Scherzo at harmonyapp.io
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "$SSH_KEY" > key && chmod 600 key'
+        shell: bash
+        env:
+          SSH_KEY: ${{secrets.ACTIONS_SSH_KEY}}
+      - run: 'echo "$KNOWN_HOSTS" > known_hosts && chmod 600 known_hosts'
+        shell: bash
+        env:
+          KNOWN_HOSTS: ${{secrets.ACTIONS_SSH_KNOWN_HOSTS}}
+      - run: 'ssh -i key -o UserKnownHostsFile=known_hosts "root@$SSH_HOST" update-scherzo'
+        shell: bash
+        env:
+          SSH_HOST: ${{secrets.ACTIONS_SSH_HOST}}
