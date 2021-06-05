@@ -312,11 +312,11 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
         }
         Command::GetGuildInvites(id) => {
-            let invites = chat_server.get_guild_invites_logic(id);
+            let invites = chat_server.chat_tree.get_guild_invites_logic(id);
             println!("{:#?}", invites.invites)
         }
         Command::GetGuildChannels(id) => {
-            let channels = chat_server.get_guild_channels_logic(id, 0);
+            let channels = chat_server.chat_tree.get_guild_channels_logic(id, 0);
             println!("{:#?}", channels.channels)
         }
         Command::GetInvite(id) => {
@@ -330,7 +330,9 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             message_id,
         } => {
-            let message = chat_server.get_message_logic(guild_id, channel_id, message_id);
+            let message = chat_server
+                .chat_tree
+                .get_message_logic(guild_id, channel_id, message_id);
             println!("{:#?}", message);
         }
         Command::GetChannelMessages {
@@ -338,7 +340,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             before_message_id,
         } => {
-            let messages = chat_server.get_channel_messages_logic(
+            let messages = chat_server.chat_tree.get_channel_messages_logic(
                 guild_id,
                 channel_id,
                 before_message_id.unwrap_or(0),
@@ -348,15 +350,15 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
         }
         Command::GetGuild(id) => {
-            let guild = chat_server.get_guild_logic(id);
+            let guild = chat_server.chat_tree.get_guild_logic(id);
             println!("{:#?}", guild);
         }
         Command::GetMember(id) => {
-            let member = chat_server.get_user_logic(id);
+            let member = chat_server.chat_tree.get_user_logic(id);
             println!("{:#?}", member);
         }
         Command::GetGuildMembers(id) => {
-            let members = chat_server.get_guild_members_logic(id);
+            let members = chat_server.chat_tree.get_guild_members_logic(id);
             println!("{:?}", members.members);
         }
     }

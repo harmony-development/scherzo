@@ -21,6 +21,7 @@ use harmony_rust_sdk::api::{
 };
 use sha3::Digest;
 use sled::{IVec, Tree};
+use tokio::sync::mpsc::{self, Sender};
 
 use super::{gen_rand_str, gen_rand_u64, rate};
 use crate::{
@@ -79,7 +80,7 @@ fn get_time_secs() -> u64 {
 pub struct AuthServer {
     valid_sessions: SessionMap,
     step_map: DashMap<String, Vec<AuthStep>, RandomState>,
-    send_step: DashMap<String, AuthStep, RandomState>,
+    send_step: DashMap<String, Sender<AuthStep>, RandomState>,
     auth_tree: Tree,
     chat_tree: Tree,
 }
@@ -220,8 +221,10 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     async fn stream_steps(&self, auth_id: String, mut socket: WriteSocket<AuthStep>) {
+        let (tx, mut rx) = mpsc::channel(64);
+        self.send_step.insert(auth_id, tx);
         loop {
-            if let Some(step) = self.send_step.remove(&auth_id).map(|(_, step)| step) {
+            if let Some(step) = rx.recv().await {
                 return_print!(socket.send_message(step).await);
             }
         }
@@ -250,8 +253,6 @@ impl auth_service_server::AuthService for AuthServer {
             .entry(auth_id.clone())
             .and_modify(|s| *s = vec![initial_step.clone()])
             .or_insert_with(|| vec![initial_step.clone()]);
-
-        self.send_step.insert(auth_id.clone(), initial_step);
 
         tracing::debug!("new auth session {}", auth_id);
 
@@ -582,7 +583,11 @@ impl auth_service_server::AuthService for AuthServer {
             self.step_map.remove(&auth_id);
         }
 
-        self.send_step.insert(auth_id, next_step.clone());
+        if let Some(chan) = self.send_step.get(&auth_id) {
+            if let Err(err) = chan.send(next_step.clone()).await {
+                tracing::error!("failed to send auth step to {}: {}", auth_id, err);
+            }
+        }
 
         Ok(next_step)
     }
@@ -608,7 +613,11 @@ impl auth_service_server::AuthService for AuthServer {
                 );
             }
             prev_step = step_stack.last().unwrap().clone();
-            self.send_step.insert(auth_id, prev_step.clone());
+            if let Some(chan) = self.send_step.get(&auth_id) {
+                if let Err(err) = chan.send(prev_step.clone()).await {
+                    tracing::error!("failed to send auth step to {}: {}", auth_id, err);
+                }
+            }
         } else {
             return Err(ServerError::InvalidAuthId);
         }
