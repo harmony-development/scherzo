@@ -90,6 +90,7 @@ pub enum ServerError {
     InvalidFileId,
     ReqwestError(reqwest::Error),
     Unexpected(String),
+    NotAnImage,
     TooFast(Duration),
 }
 
@@ -196,6 +197,7 @@ impl Display for ServerError {
             ServerError::ReqwestError(err) => write!(f, "error occured in reqwest: {}", err),
             ServerError::Unexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
             ServerError::InvalidFileId => write!(f, "invalid file id"),
+            ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
         }
     }
 }
@@ -230,7 +232,8 @@ impl CustomError for ServerError {
             | ServerError::NoPermissionsSpecified
             | ServerError::TooManyFiles
             | ServerError::MissingFiles
-            | ServerError::InvalidFileId => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidFileId
+            | ServerError::NotAnImage => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
@@ -287,6 +290,7 @@ impl CustomError for ServerError {
             ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
             ServerError::TooFast(_) => "h.rate-limited",
+            ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }
