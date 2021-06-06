@@ -32,7 +32,8 @@ pub fn rest(data: RestConfig) -> BoxedFilter<(impl Reply,)> {
 
 pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
     let http_client = reqwest::Client::new();
-    warp::path("_harmony")
+    warp::get()
+        .and(warp::path("_harmony"))
         .and(warp::path("media"))
         .and(warp::path("download"))
         .and(warp::path::param::<String>())
