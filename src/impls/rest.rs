@@ -35,9 +35,9 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
     warp::path("_harmony")
         .and(warp::path("media"))
         .and(warp::path("download"))
+        .and(warp::path::param::<String>())
         .and(warp::path::end())
         .and(rate(10, 5))
-        .and(warp::path::param::<String>())
         .and_then(move |id: String| {
             let id = urlencoding::decode(&id).unwrap_or(id);
             let media_root = media_root.clone();
