@@ -88,7 +88,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         let data = resp.bytes().await.map_err(map_reqwest_err)?;
                         Ok((name, mimetype, data.to_vec()))
                     }
-                    FileId::Id(_) => get_file(media_root.as_ref(), &id)
+                    FileId::Id(id) => get_file(media_root.as_ref(), &id)
                         .await
                         .map_err(|err| reject(ServerError::IoError(err))),
                 }
@@ -180,23 +180,16 @@ fn reject(err: ServerError) -> warp::Rejection {
 async fn get_file(media_root: &Path, id: &str) -> std::io::Result<(String, String, Vec<u8>)> {
     let mut dir = tokio::fs::read_dir(media_root).await?;
     while let Some(entry) = dir.next_entry().await? {
-        if entry
-            .file_name()
-            .to_str()
-            .expect("all media names must be utf-8")
-            .starts_with(id)
-        {
-            let entry_name = entry.file_name();
-            let mut split = entry_name
-                .to_str()
-                .expect("all media names must be utf-8")
-                .split('#');
+        let name = entry.file_name();
+        let name = name.to_str().expect("all media names must be utf-8");
+        if name.starts_with(id) {
+            let mut split = name.split('#');
             split.next();
             let file_name = split.next().unwrap();
             let content_type = split.next().unwrap();
             return Ok((
-                file_name.to_string(),
-                content_type.to_string(),
+                urlencoding::decode(file_name).expect("cant be encoded wrong"),
+                urlencoding::decode(content_type).expect("cant be encoded wrong"),
                 tokio::fs::read(entry.path()).await?,
             ));
         }
