@@ -16,6 +16,7 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
+use reqwest::StatusCode;
 use tracing::info;
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
@@ -47,6 +48,13 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
             async move {
                 let file_id =
                     FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId))?;
+                let reqwest_or_404 = |err: reqwest::Error| {
+                    if err.status().unwrap() == StatusCode::NOT_FOUND {
+                        reject(ServerError::MediaNotFound)
+                    } else {
+                        reject(err)
+                    }
+                };
                 info!("Serving file id {} ({:?})", file_id, file_id);
                 match file_id {
                     FileId::External(url) => {
@@ -54,9 +62,9 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                             .get(url)
                             .send()
                             .await
-                            .map_err(map_reqwest_err)?
+                            .map_err(reject)?
                             .error_for_status()
-                            .map_err(map_reqwest_err)?;
+                            .map_err(reqwest_or_404)?;
                         let filename = resp
                             .url()
                             .path_segments()
@@ -64,7 +72,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                             .last()
                             .unwrap_or("unknown")
                             .to_string();
-                        let data = resp.bytes().await.map_err(map_reqwest_err)?;
+                        let data = resp.bytes().await.map_err(reject)?;
                         if let Some(content_type) = infer::get(&data)
                             .map(|t| {
                                 t.mime_type()
@@ -88,18 +96,16 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                             ))
                             .send()
                             .await
-                            .map_err(map_reqwest_err)?
+                            .map_err(reject)?
                             .error_for_status()
-                            .map_err(map_reqwest_err)?;
+                            .map_err(reqwest_or_404)?;
                         let (name, mimetype, _) =
                             extract_file_info_from_download_response(resp.headers())
                                 .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
-                        let data = resp.bytes().await.map_err(map_reqwest_err)?;
+                        let data = resp.bytes().await.map_err(reject)?;
                         Ok((name, mimetype, data.to_vec()))
                     }
-                    FileId::Id(id) => get_file(media_root.as_ref(), &id)
-                        .await
-                        .map_err(|err| reject(ServerError::IoError(err))),
+                    FileId::Id(id) => get_file(media_root.as_ref(), &id).await.map_err(reject),
                 }
             }
         })
@@ -149,12 +155,12 @@ pub fn upload(
             let media_root = media_root.clone();
             async move {
                 if let Some(res) = form.next().await {
-                    let mut part = res.map_err(|err| reject(ServerError::WarpError(err)))?;
+                    let mut part = res.map_err(reject)?;
                     let data = part
                         .data()
                         .await
                         .ok_or_else(|| reject(ServerError::MissingFiles))?
-                        .map_err(|err| reject(ServerError::WarpError(err)))?;
+                        .map_err(reject)?;
                     let name = param.get("filename").map_or("unknown", |a| a.as_str());
                     let content_type = param
                         .get("contentType")
@@ -170,7 +176,7 @@ pub fn upload(
 
                     tokio::fs::write(media_root.clone().join(filename), data.chunk())
                         .await
-                        .map_err(|err| reject(ServerError::IoError(err)))?;
+                        .map_err(reject)?;
 
                     Ok(format!("{{ \"id\": \"{}\" }}", id))
                 } else {
@@ -182,16 +188,11 @@ pub fn upload(
 }
 
 #[inline(always)]
-fn reject(err: ServerError) -> warp::Rejection {
-    warp::reject::custom(HrpcError::Custom(err))
+fn reject(err: impl Into<ServerError>) -> warp::Rejection {
+    warp::reject::custom(HrpcError::Custom(err.into()))
 }
 
-#[inline(always)]
-fn map_reqwest_err(err: reqwest::Error) -> warp::Rejection {
-    reject(ServerError::ReqwestError(err))
-}
-
-async fn get_file(media_root: &Path, id: &str) -> std::io::Result<(String, String, Vec<u8>)> {
+async fn get_file(media_root: &Path, id: &str) -> Result<(String, String, Vec<u8>), ServerError> {
     let mut dir = tokio::fs::read_dir(media_root).await?;
     while let Some(entry) = dir.next_entry().await? {
         let name = entry.file_name();
@@ -208,5 +209,5 @@ async fn get_file(media_root: &Path, id: &str) -> std::io::Result<(String, Strin
             ));
         }
     }
-    unreachable!("media root must have id")
+    Err(ServerError::MediaNotFound)
 }

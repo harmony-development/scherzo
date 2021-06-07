@@ -2,6 +2,7 @@
 
 use std::{
     fmt::{self, Display, Formatter},
+    io::Error as IoError,
     time::Duration,
 };
 
@@ -86,12 +87,13 @@ pub enum ServerError {
     MissingFiles,
     TooManyFiles,
     WarpError(warp::Error),
-    IoError(std::io::Error),
+    IoError(IoError),
     InvalidFileId,
     ReqwestError(reqwest::Error),
     Unexpected(String),
     NotAnImage,
     TooFast(Duration),
+    MediaNotFound,
 }
 
 impl Display for ServerError {
@@ -198,6 +200,7 @@ impl Display for ServerError {
             ServerError::Unexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
             ServerError::InvalidFileId => write!(f, "invalid file id"),
             ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
+            ServerError::MediaNotFound => write!(f, "requested media is not found"),
         }
     }
 }
@@ -241,6 +244,7 @@ impl CustomError for ServerError {
             | ServerError::ReqwestError(_)
             | ServerError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
+            ServerError::MediaNotFound => StatusCode::NOT_FOUND,
         }
     }
 
@@ -291,7 +295,26 @@ impl CustomError for ServerError {
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
+            ServerError::MediaNotFound => return Self::not_found_error().1,
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
+    }
+}
+
+impl From<IoError> for ServerError {
+    fn from(err: IoError) -> Self {
+        ServerError::IoError(err)
+    }
+}
+
+impl From<warp::Error> for ServerError {
+    fn from(err: warp::Error) -> Self {
+        ServerError::WarpError(err)
+    }
+}
+
+impl From<reqwest::Error> for ServerError {
+    fn from(err: reqwest::Error) -> Self {
+        ServerError::ReqwestError(err)
     }
 }
