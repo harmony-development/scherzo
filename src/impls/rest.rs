@@ -55,9 +55,9 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         reject(err)
                     }
                 };
-                info!("Serving file id {} ({:?})", file_id, file_id);
                 match file_id {
                     FileId::External(url) => {
+                        info!("Serving external image from {}", url);
                         let resp = http_client
                             .get(url)
                             .send()
@@ -87,6 +87,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         }
                     }
                     FileId::Hmc(hmc) => {
+                        info!("Serving HMC from {}", hmc);
                         let resp = http_client
                             .get(format!(
                                 "https://{}:{}/_harmony/media/download/{}",
@@ -105,7 +106,10 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         let data = resp.bytes().await.map_err(reject)?;
                         Ok((name, mimetype, data.to_vec()))
                     }
-                    FileId::Id(id) => get_file(media_root.as_ref(), &id).await.map_err(reject),
+                    FileId::Id(id) => {
+                        info!("Serving local media with id {}", id);
+                        get_file(media_root.as_ref(), &id).await.map_err(reject)
+                    }
                 }
             }
         })

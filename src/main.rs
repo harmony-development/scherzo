@@ -62,70 +62,64 @@ async fn main() {
     let mut command = Command::RunServer;
 
     for (index, arg) in std::env::args().enumerate() {
-        if index == 1 && !arg.starts_with('-') {
-            match arg.as_str() {
-                "get_invites" => command = Command::GetInvites,
-                "get_guilds" => command = Command::GetGuilds,
-                "get_members" => command = Command::GetMembers,
-                "get_guild" => {
-                    if let Some(id) = get_arg_as_u64(index + 1) {
-                        command = Command::GetGuild(id);
-                    }
-                }
-                "get_guild_members" => {
-                    if let Some(id) = get_arg_as_u64(index + 1) {
-                        command = Command::GetGuildMembers(id);
-                    }
-                }
-                "get_guild_channels" => {
-                    if let Some(id) = get_arg_as_u64(index + 1) {
-                        command = Command::GetGuildChannels(id);
-                    }
-                }
-                "get_guild_invites" => {
-                    if let Some(id) = get_arg_as_u64(index + 1) {
-                        command = Command::GetGuildInvites(id);
-                    }
-                }
-                "get_channel_messages" => {
-                    if let (Some(guild_id), Some(channel_id)) =
-                        (get_arg_as_u64(index + 1), get_arg_as_u64(index + 2))
-                    {
-                        command = Command::GetChannelMessages {
-                            guild_id,
-                            channel_id,
-                            before_message_id: get_arg_as_u64(index + 3),
-                        };
-                    }
-                }
-                "get_message" => {
-                    if let (Some(guild_id), Some(channel_id), Some(message_id)) = (
-                        get_arg_as_u64(index + 1),
-                        get_arg_as_u64(index + 2),
-                        get_arg_as_u64(index + 3),
-                    ) {
-                        command = Command::GetMessage {
-                            guild_id,
-                            channel_id,
-                            message_id,
-                        };
-                    }
-                }
-                "get_member" => {
-                    if let Some(id) = get_arg_as_u64(index + 1) {
-                        command = Command::GetMember(id);
-                    }
-                }
-                "get_invite" => {
-                    if let Some(id) = std::env::args().nth(index + 1) {
-                        command = Command::GetInvite(id);
-                    }
-                }
-                _ => {}
-            }
-        }
-
         match arg.as_str() {
+            "get_invites" => command = Command::GetInvites,
+            "get_guilds" => command = Command::GetGuilds,
+            "get_members" => command = Command::GetMembers,
+            "get_guild" => {
+                if let Some(id) = get_arg_as_u64(index + 1) {
+                    command = Command::GetGuild(id);
+                }
+            }
+            "get_guild_members" => {
+                if let Some(id) = get_arg_as_u64(index + 1) {
+                    command = Command::GetGuildMembers(id);
+                }
+            }
+            "get_guild_channels" => {
+                if let Some(id) = get_arg_as_u64(index + 1) {
+                    command = Command::GetGuildChannels(id);
+                }
+            }
+            "get_guild_invites" => {
+                if let Some(id) = get_arg_as_u64(index + 1) {
+                    command = Command::GetGuildInvites(id);
+                }
+            }
+            "get_channel_messages" => {
+                if let (Some(guild_id), Some(channel_id)) =
+                    (get_arg_as_u64(index + 1), get_arg_as_u64(index + 2))
+                {
+                    command = Command::GetChannelMessages {
+                        guild_id,
+                        channel_id,
+                        before_message_id: get_arg_as_u64(index + 3),
+                    };
+                }
+            }
+            "get_message" => {
+                if let (Some(guild_id), Some(channel_id), Some(message_id)) = (
+                    get_arg_as_u64(index + 1),
+                    get_arg_as_u64(index + 2),
+                    get_arg_as_u64(index + 3),
+                ) {
+                    command = Command::GetMessage {
+                        guild_id,
+                        channel_id,
+                        message_id,
+                    };
+                }
+            }
+            "get_member" => {
+                if let Some(id) = get_arg_as_u64(index + 1) {
+                    command = Command::GetMember(id);
+                }
+            }
+            "get_invite" => {
+                if let Some(id) = std::env::args().nth(index + 1) {
+                    command = Command::GetInvite(id);
+                }
+            }
             "-v" | "--verbose" => filter_level = Level::TRACE,
             "-d" | "--debug" => filter_level = Level::DEBUG,
             "--db" => {
@@ -220,7 +214,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                     .expect("failed to write default config file");
                 def
             };
-            tracing::debug!("Config: {:?}", config);
+            tracing::debug!("running with {:?}", config);
             tokio::fs::create_dir_all(&config.media.media_root)
                 .await
                 .expect("could not create media root dir");
@@ -246,7 +240,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                         tracing::error!("database integrity check failed: {}", err);
                         break;
                     } else {
-                        tracing::info!("database integrity check successful");
+                        tracing::debug!("database integrity check successful");
                     }
                 }
             });
@@ -255,7 +249,8 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 auth.or(chat)
                     .or(rest)
                     .with(warp::trace::request())
-                    .recover(hrpc::server::handle_rejection::<ServerError>),
+                    .recover(hrpc::server::handle_rejection::<ServerError>)
+                    .boxed(),
             );
 
             if let Some(tls_config) = config.tls {

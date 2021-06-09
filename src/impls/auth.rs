@@ -105,6 +105,7 @@ impl AuthServer {
         let vs = valid_sessions.clone();
 
         std::thread::spawn(move || {
+            let _guard = tracing::info_span!("auth_session_check").entered();
             tracing::info!("starting auth session expiration check thread");
             loop {
                 let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
@@ -124,7 +125,7 @@ impl AuthServer {
                                 if vs.contains_key(token) {
                                     batch.insert(&atime_key(id), &get_time_secs().to_be_bytes());
                                 } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
-                                    tracing::info!("user {} session has expired", id);
+                                    tracing::debug!("user {} session has expired", id);
                                     batch.remove(&token_key(id));
                                     batch.remove(&atime_key(id));
                                     vs.remove(token);
