@@ -6,12 +6,15 @@ use webpage::HTML;
 use std::time::Instant;
 
 use crate::{
-    impls::auth::{self, SessionMap},
+    impls::{
+        auth::{self, SessionMap},
+        rate,
+    },
     ServerError,
 };
 
 use harmony_rust_sdk::api::{
-    exports::hrpc::Request,
+    exports::hrpc::{warp::filters::BoxedFilter, Request},
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 
@@ -123,6 +126,10 @@ impl MediaproxyServer {
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     type Error = ServerError;
 
+    fn fetch_link_metadata_pre(&self) -> BoxedFilter<()> {
+        rate(2, 1)
+    }
+
     async fn fetch_link_metadata(
         &self,
         request: Request<FetchLinkMetadataRequest>,
@@ -144,6 +151,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         };
 
         Ok(FetchLinkMetadataResponse { data: Some(data) })
+    }
+
+    fn instant_view_pre(&self) -> BoxedFilter<()> {
+        rate(1, 5)
     }
 
     async fn instant_view(
@@ -172,6 +183,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         } else {
             Ok(InstantViewResponse::default())
         }
+    }
+
+    fn can_instant_view_pre(&self) -> BoxedFilter<()> {
+        rate(20, 5)
     }
 
     async fn can_instant_view(
