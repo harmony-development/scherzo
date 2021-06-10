@@ -11,11 +11,12 @@ use harmony_rust_sdk::api::{
         hrpc::{self, warp::Filter},
         prost::Message,
     },
+    mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
 };
 use hrpc::warp;
 use scherzo::{
     db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
-    impls::{auth::AuthServer, chat::ChatServer, rest::RestConfig},
+    impls::{auth::AuthServer, chat::ChatServer, mediaproxy::MediaproxyServer, rest::RestConfig},
     ServerError,
 };
 use tracing::Level;
@@ -198,6 +199,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
     let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
+    let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
 
     match command {
         Command::RunServer => {
@@ -226,6 +228,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 media_root: Arc::new(config.media.media_root),
                 sessions: valid_sessions,
             });
+            let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
 
             std::thread::spawn(move || {
                 let span = tracing::info_span!("db_validate");
@@ -248,6 +251,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             let serve = hrpc::warp::serve(
                 auth.or(chat)
                     .or(rest)
+                    .or(mediaproxy)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>)
                     .boxed(),

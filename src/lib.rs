@@ -8,6 +8,7 @@ use std::{
 
 use harmony_rust_sdk::api::exports::hrpc::{
     server::{CustomError, StatusCode},
+    url::ParseError as UrlParseError,
     warp::{self, reply::Response},
 };
 
@@ -27,6 +28,7 @@ pub fn set_proto_name(mut response: Response) -> Response {
 
 #[derive(Debug)]
 pub enum ServerError {
+    InvalidUrl(UrlParseError),
     InvalidAuthId,
     NoFieldSpecified,
     NoSuchField,
@@ -99,6 +101,7 @@ pub enum ServerError {
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ServerError::InvalidUrl(err) => write!(f, "invalid URL: {}", err),
             ServerError::TooFast(rem) => write!(f, "too fast, try again in {}", rem.as_secs_f64()),
             ServerError::InvalidAuthId => write!(f, "invalid auth id"),
             ServerError::NoFieldSpecified => write!(f, "expected field in response"),
@@ -236,7 +239,8 @@ impl CustomError for ServerError {
             | ServerError::TooManyFiles
             | ServerError::MissingFiles
             | ServerError::InvalidFileId
-            | ServerError::NotAnImage => StatusCode::BAD_REQUEST,
+            | ServerError::NotAnImage
+            | ServerError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
@@ -296,6 +300,7 @@ impl CustomError for ServerError {
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
             ServerError::MediaNotFound => return Self::not_found_error().1,
+            ServerError::InvalidUrl(_) => "h.invalid-url",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }
