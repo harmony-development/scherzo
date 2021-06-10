@@ -22,6 +22,8 @@ use reqwest::StatusCode;
 use tracing::info;
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
+const SEPERATOR: u8 = b'\n';
+
 pub struct RestConfig {
     pub media_root: Arc<PathBuf>,
     pub sessions: SessionMap,
@@ -171,19 +173,19 @@ pub fn upload(
                     let content_type = param
                         .get("contentType")
                         .map_or("application/octet-stream", |a| a.as_str());
-                    // TODO: check if id already exists (though will be expensive)
-                    // ideally keep them in db?
                     let id_arr = gen_rand_arr::<64>();
                     // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
                     let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
-                    let filename = format!(
-                        "{}#{}#{}",
-                        id,
-                        urlencoding::encode(name),
-                        urlencoding::encode(content_type)
-                    );
+                    let data = [
+                        name.as_bytes(),
+                        &[SEPERATOR],
+                        content_type.as_bytes(),
+                        &[SEPERATOR],
+                        data.chunk(),
+                    ]
+                    .concat();
 
-                    tokio::fs::write(media_root.clone().join(filename), data.chunk())
+                    tokio::fs::write(media_root.join(id), data)
                         .await
                         .map_err(reject)?;
 
@@ -202,21 +204,32 @@ fn reject(err: impl Into<ServerError>) -> warp::Rejection {
 }
 
 async fn get_file(media_root: &Path, id: &str) -> Result<(String, String, Vec<u8>), ServerError> {
-    let mut dir = tokio::fs::read_dir(media_root).await?;
-    while let Some(entry) = dir.next_entry().await? {
-        let name = entry.file_name();
-        let name = name.to_str().expect("all media names must be utf-8");
-        if name.starts_with(id) {
-            let mut split = name.split('#');
-            split.next();
-            let file_name = split.next().unwrap();
-            let content_type = split.next().unwrap();
-            return Ok((
-                urlencoding::decode(file_name).expect("cant be encoded wrong"),
-                urlencoding::decode(content_type).expect("cant be encoded wrong"),
-                tokio::fs::read(entry.path()).await?,
-            ));
+    match tokio::fs::read(media_root.join(id)).await {
+        Ok(mut raw) => {
+            let mut pos = raw.iter().enumerate().filter(|(_, b)| **b == SEPERATOR);
+            let filename_sep = pos.next().unwrap().0;
+            let mimetype_sep = pos.next().unwrap().0 - filename_sep - 1;
+            drop(pos);
+
+            let filename = raw
+                .drain(0..=filename_sep)
+                .take(filename_sep)
+                .map(char::from)
+                .collect::<String>();
+            let mimetype = raw
+                .drain(0..=mimetype_sep)
+                .take(mimetype_sep)
+                .map(char::from)
+                .collect::<String>();
+
+            Ok((filename, mimetype, raw))
+        }
+        Err(err) => {
+            if let std::io::ErrorKind::NotFound = err.kind() {
+                Err(ServerError::MediaNotFound)
+            } else {
+                Err(err.into())
+            }
         }
     }
-    Err(ServerError::MediaNotFound)
 }
