@@ -3,7 +3,7 @@ pub mod chat;
 pub mod mediaproxy;
 pub mod rest;
 
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use harmony_rust_sdk::api::exports::hrpc::{
     server::filters::{rate::Rate, rate_limit},
@@ -12,6 +12,13 @@ use harmony_rust_sdk::api::exports::hrpc::{
 use rand::Rng;
 
 use crate::ServerError;
+
+fn get_time_secs() -> u64 {
+    UNIX_EPOCH
+        .elapsed()
+        .expect("time is before unix epoch")
+        .as_secs()
+}
 
 fn gen_rand_str(len: usize) -> String {
     rand::thread_rng()

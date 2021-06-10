@@ -1,8 +1,4 @@
-use std::{
-    convert::TryInto,
-    sync::Arc,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::{convert::TryInto, sync::Arc, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -30,6 +26,7 @@ use crate::{
         auth::*,
         chat::{self as chatdb, make_user_profile_key},
     },
+    impls::get_time_secs,
     set_proto_name, ServerError, WS_PROTO_HEADER,
 };
 
@@ -67,13 +64,6 @@ pub fn check_auth<T>(
         .as_deref()
         .copied()
         .map_or(Err(ServerError::Unauthenticated), Ok)
-}
-
-fn get_time_secs() -> u64 {
-    UNIX_EPOCH
-        .elapsed()
-        .expect("time is before unix epoch")
-        .as_secs()
 }
 
 #[derive(Debug)]

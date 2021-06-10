@@ -1711,6 +1711,7 @@ dependencies = [
  "flume",
  "harmony_rust_sdk",
  "infer",
+ "lazy_static",
  "parking_lot",
  "paste",
  "rand 0.8.3",
@@ -2541,7 +2542,7 @@ dependencies = [
 [[package]]
 name = "webpage"
 version = "1.2.0"
-source = "git+https://github.com/yusdacra/webpage-rs.git?branch=master#3ca04a1de3c8c9e1b297f16b4f21a1cb0e1f4e16"
+source = "git+https://github.com/yusdacra/webpage-rs.git?branch=master#ddfbf9e92b9c4aa526cceb081d6270330e0f690e"
 dependencies = [
  "html5ever",
  "serde_json",
