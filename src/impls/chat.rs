@@ -143,6 +143,7 @@ impl ChatServer {
         }
     }
 
+    #[inline(always)]
     fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
         auth::check_auth(&self.valid_sessions, request)
     }
