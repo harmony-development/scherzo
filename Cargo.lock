@@ -22,9 +22,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.40"
+version = "1.0.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b2cd92db5cbd74e8e5028f7e27dd7aa3090e89e4f2a197cc7c8dfb69c7063b"
+checksum = "15af2628f6890fe2609a3b91bef4c83450512802e59489f9c1cb1fa5df064a61"
 
 [[package]]
 name = "async-mutex"
@@ -630,7 +630,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#fe84329f32d1fe3d01c401c92a80ff901ebbd064"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#eb4d9253c7b83da97e62924ba7557eef89a8a1b1"
 dependencies = [
  "proc-macro2 1.0.27",
  "quote 1.0.9",
@@ -640,7 +640,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#fe84329f32d1fe3d01c401c92a80ff901ebbd064"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#eb4d9253c7b83da97e62924ba7557eef89a8a1b1"
 dependencies = [
  "derive-new",
  "derive_more",
