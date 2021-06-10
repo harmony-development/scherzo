@@ -43,7 +43,6 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
         .and(warp::path("media"))
         .and(warp::path("download"))
         .and(warp::path::param::<String>())
-        .and(warp::path::end())
         .and(rate(10, 5))
         .and_then(move |id: String| {
             let id = urlencoding::decode(&id).unwrap_or(id);
@@ -138,7 +137,6 @@ pub fn upload(
         .and(warp::path("_harmony"))
         .and(warp::path("media"))
         .and(warp::path("upload"))
-        .and(warp::path::end())
         .and(rate(5, 5))
         .and(
             warp::filters::header::header("Authorization").and_then(move |token: String| {
