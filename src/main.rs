@@ -250,8 +250,8 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
             let serve = hrpc::warp::serve(
                 auth.or(chat)
-                    .or(rest)
                     .or(mediaproxy)
+                    .or(rest)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>)
                     .boxed(),
