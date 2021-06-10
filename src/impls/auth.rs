@@ -17,22 +17,22 @@ use harmony_rust_sdk::api::{
 };
 use sha3::Digest;
 use sled::{IVec, Tree};
+use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 
-use super::{gen_rand_str, gen_rand_u64, rate};
 use crate::{
     db::{
         self,
         auth::*,
         chat::{self as chatdb, make_user_profile_key},
     },
-    impls::get_time_secs,
+    impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs, rate},
     set_proto_name, ServerError, WS_PROTO_HEADER,
 };
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
-pub type SessionMap = Arc<DashMap<String, u64, RandomState>>;
+pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
 
 pub fn check_auth<T>(
     valid_sessions: &SessionMap,
@@ -45,18 +45,15 @@ pub fn check_auth<T>(
                 // Specific handling for web clients
                 request
                     .get_header(&WS_PROTO_HEADER.parse().unwrap())
-                    .map_or_else(String::default, |val| {
+                    .map_or_else(SmolStr::default, |val| {
                         val.to_str()
                             .unwrap_or("")
                             .split(',')
                             .nth(1)
-                            .map_or_else(String::default, |auth| auth.trim().to_string())
+                            .map_or_else(SmolStr::default, |auth| auth.trim().into())
                     })
             },
-            |val| {
-                val.to_str()
-                    .map_or_else(|_| String::default(), ToString::to_string)
-            },
+            |val| val.to_str().map_or_else(|_| SmolStr::default(), Into::into),
         );
 
     valid_sessions
@@ -69,8 +66,8 @@ pub fn check_auth<T>(
 #[derive(Debug)]
 pub struct AuthServer {
     valid_sessions: SessionMap,
-    step_map: DashMap<String, Vec<AuthStep>, RandomState>,
-    send_step: DashMap<String, Sender<AuthStep>, RandomState>,
+    step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
+    send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     auth_tree: Tree,
     chat_tree: Tree,
 }
@@ -110,7 +107,9 @@ impl AuthServer {
                                 let secs =
                                     u64::from_be_bytes(raw_atime.as_ref().try_into().unwrap());
                                 let auth_how_old = get_time_secs() - secs;
-                                let token = std::str::from_utf8(raw_token.as_ref()).unwrap();
+                                // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
+                                let token =
+                                    unsafe { std::str::from_utf8_unchecked(raw_token.as_ref()) };
 
                                 if vs.contains_key(token) {
                                     batch.insert(&atime_key(id), &get_time_secs().to_be_bytes());
@@ -120,7 +119,8 @@ impl AuthServer {
                                     batch.remove(&atime_key(id));
                                     vs.remove(token);
                                 } else {
-                                    vs.insert(token.to_string(), id);
+                                    // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
+                                    vs.insert(SmolStr::new_inline(token), id);
                                 }
                             }
                         }
@@ -193,26 +193,26 @@ impl auth_service_server::AuthService for AuthServer {
         rate(2, 5)
     }
 
-    type StreamStepsValidationType = String;
+    type StreamStepsValidationType = SmolStr;
 
     async fn stream_steps_validation(
         &self,
         request: Request<Option<StreamStepsRequest>>,
-    ) -> Result<String, Self::Error> {
+    ) -> Result<SmolStr, Self::Error> {
         if let Some(msg) = request.into_parts().0 {
             let auth_id = msg.auth_id;
 
-            if self.step_map.contains_key(&auth_id) {
-                Ok(auth_id)
+            if self.step_map.contains_key(auth_id.as_str()) {
+                Ok(auth_id.into())
             } else {
                 Err(ServerError::InvalidAuthId)
             }
         } else {
-            Ok(String::default())
+            Ok(SmolStr::default())
         }
     }
 
-    async fn stream_steps(&self, auth_id: String, mut socket: WriteSocket<AuthStep>) {
+    async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<AuthStep>) {
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id, tx);
         loop {
@@ -239,7 +239,7 @@ impl auth_service_server::AuthService for AuthServer {
             })),
         };
 
-        let auth_id: String = gen_rand_str(30);
+        let auth_id = gen_rand_inline_str();
 
         self.step_map
             .entry(auth_id.clone())
@@ -248,7 +248,9 @@ impl auth_service_server::AuthService for AuthServer {
 
         tracing::debug!("new auth session {}", auth_id);
 
-        Ok(BeginAuthResponse { auth_id })
+        Ok(BeginAuthResponse {
+            auth_id: auth_id.into(),
+        })
     }
 
     fn next_step_pre(&self) -> BoxedFilter<()> {
@@ -263,7 +265,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let next_step;
 
-        if let Some(mut step_stack) = self.step_map.get_mut(&auth_id) {
+        if let Some(mut step_stack) = self.step_map.get_mut(auth_id.as_str()) {
             if let Some(step) = maybe_step {
                 let current_step = step_stack.last().unwrap().step.as_ref().unwrap().clone();
                 tracing::debug!("current auth step for session {}", auth_id);
@@ -444,7 +446,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         return Err(ServerError::WrongUserOrPassword { email });
                                     }
 
-                                    let session_token = gen_rand_str(30);
+                                    let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
                                     let mut batch = sled::Batch::default();
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
@@ -464,7 +466,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         fallback_url: String::default(),
                                         step: Some(auth_step::Step::Session(Session {
                                             user_id,
-                                            session_token: session_token.clone(),
+                                            session_token: session_token.clone().into(),
                                         })),
                                     };
 
@@ -506,7 +508,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     }
 
                                     let user_id = gen_rand_u64();
-                                    let session_token = gen_rand_str(30);
+                                    let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
                                     let mut batch = sled::Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
@@ -543,7 +545,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         fallback_url: String::default(),
                                         step: Some(auth_step::Step::Session(Session {
                                             user_id,
-                                            session_token: session_token.clone(),
+                                            session_token: session_token.clone().into(),
                                         })),
                                     };
 
@@ -566,7 +568,7 @@ impl auth_service_server::AuthService for AuthServer {
             return Err(ServerError::InvalidAuthId);
         }
 
-        if let Some(chan) = self.send_step.get(&auth_id) {
+        if let Some(chan) = self.send_step.get(auth_id.as_str()) {
             if let Err(err) = chan.send(next_step.clone()).await {
                 tracing::error!("failed to send auth step to {}: {}", auth_id, err);
             }
@@ -578,8 +580,8 @@ impl auth_service_server::AuthService for AuthServer {
                 auth_id,
                 session
             );
-            self.step_map.remove(&auth_id);
-            self.send_step.remove(&auth_id);
+            self.step_map.remove(auth_id.as_str());
+            self.send_step.remove(auth_id.as_str());
         }
 
         Ok(next_step)
@@ -595,7 +597,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let prev_step;
 
-        if let Some(mut step_stack) = self.step_map.get_mut(&auth_id) {
+        if let Some(mut step_stack) = self.step_map.get_mut(auth_id.as_str()) {
             if step_stack.last().unwrap().can_go_back {
                 step_stack.pop();
                 tracing::debug!("auth session {} went to previous step", auth_id);
@@ -606,7 +608,7 @@ impl auth_service_server::AuthService for AuthServer {
                 );
             }
             prev_step = step_stack.last().unwrap().clone();
-            if let Some(chan) = self.send_step.get(&auth_id) {
+            if let Some(chan) = self.send_step.get(auth_id.as_str()) {
                 if let Err(err) = chan.send(prev_step.clone()).await {
                     tracing::error!("failed to send auth step to {}: {}", auth_id, err);
                 }
@@ -623,4 +625,10 @@ fn hash_password(raw: Vec<u8>) -> impl AsRef<[u8]> {
     let mut sh = sha3::Sha3_512::new();
     sh.update(raw);
     sh.finalize()
+}
+
+#[inline(always)]
+fn gen_auth_token() -> SmolStr {
+    // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
+    gen_rand_inline_str() // generates 22 chars long inlined SmolStr [ref:inlined_smol_str_gen]
 }

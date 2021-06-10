@@ -1,5 +1,7 @@
-use super::{auth::SessionMap, gen_rand_str, rate};
-use crate::ServerError;
+use crate::{
+    impls::{auth::SessionMap, gen_rand_arr, rate},
+    ServerError,
+};
 
 use std::{
     collections::HashMap,
@@ -144,7 +146,7 @@ pub fn upload(
         .and(rate(5, 5))
         .and(
             warp::filters::header::header("Authorization").and_then(move |token: String| {
-                let res = if !sessions.contains_key(&token) {
+                let res = if !sessions.contains_key(token.as_str()) {
                     Err(reject(ServerError::Unauthenticated))
                 } else {
                     Ok(())
@@ -170,7 +172,10 @@ pub fn upload(
                         .get("contentType")
                         .map_or("application/octet-stream", |a| a.as_str());
                     // TODO: check if id already exists (though will be expensive)
-                    let id = gen_rand_str(64);
+                    // ideally keep them in db?
+                    let id_arr = gen_rand_arr::<64>();
+                    // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
+                    let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
                     let filename = format!(
                         "{}#{}#{}",
                         id,

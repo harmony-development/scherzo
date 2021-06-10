@@ -1,6 +1,7 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use reqwest::{Client, Response, Url};
+use smol_str::SmolStr;
 use webpage::HTML;
 
 use std::time::Instant;
@@ -21,7 +22,10 @@ use harmony_rust_sdk::api::{
 #[derive(Debug, Clone)]
 enum Metadata {
     Site(HTML),
-    Media { filename: String, mimetype: String },
+    Media {
+        filename: SmolStr,
+        mimetype: SmolStr,
+    },
 }
 
 struct TimedCacheValue<T> {
@@ -103,10 +107,10 @@ impl MediaproxyServer {
                 .flatten()
                 .or_else(|| Some(url.path_segments()?.last()).flatten())
                 .unwrap_or("unknown")
-                .to_string();
+                .into();
             Metadata::Media {
                 filename,
-                mimetype: mimetype.to_string(),
+                mimetype: mimetype.into(),
             }
         };
 
@@ -146,9 +150,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
                 url: html.url.unwrap_or_default(),
                 ..Default::default()
             }),
-            Metadata::Media { filename, mimetype } => {
-                Data::IsMedia(MediaMetadata { mimetype, filename })
-            }
+            Metadata::Media { filename, mimetype } => Data::IsMedia(MediaMetadata {
+                mimetype: mimetype.into(),
+                filename: filename.into(),
+            }),
         };
 
         Ok(FetchLinkMetadataResponse { data: Some(data) })
