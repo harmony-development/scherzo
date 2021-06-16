@@ -7,6 +7,7 @@ use std::{
 };
 
 use harmony_rust_sdk::api::exports::hrpc::{
+    http,
     server::{CustomError, StatusCode},
     url::ParseError as UrlParseError,
     warp::{self, reply::Response},
@@ -16,13 +17,14 @@ pub mod config;
 pub mod db;
 pub mod impls;
 
-pub const WS_PROTO_HEADER: &str = "Sec-WebSocket-Protocol";
 pub const HARMONY_PROTO_NAME: &str = "harmony";
 
 pub fn set_proto_name(mut response: Response) -> Response {
     response
         .headers_mut()
-        .insert(WS_PROTO_HEADER, HARMONY_PROTO_NAME.parse().unwrap());
+        .insert(http::header::SEC_WEBSOCKET_PROTOCOL, unsafe {
+            http::HeaderValue::from_maybe_shared_unchecked(HARMONY_PROTO_NAME)
+        });
     response
 }
 

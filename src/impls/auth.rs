@@ -26,8 +26,9 @@ use crate::{
         auth::*,
         chat::{self as chatdb, make_user_profile_key},
     },
+    http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs, rate},
-    set_proto_name, ServerError, WS_PROTO_HEADER,
+    set_proto_name, ServerError,
 };
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
@@ -39,12 +40,12 @@ pub fn check_auth<T>(
     request: &Request<T>,
 ) -> Result<u64, ServerError> {
     let auth_id = request
-        .get_header(&"Authorization".parse().unwrap())
+        .get_header(&http::header::AUTHORIZATION)
         .map_or_else(
             || {
                 // Specific handling for web clients
                 request
-                    .get_header(&WS_PROTO_HEADER.parse().unwrap())
+                    .get_header(&http::header::SEC_WEBSOCKET_PROTOCOL)
                     .map_or_else(SmolStr::default, |val| {
                         val.to_str()
                             .unwrap_or("")

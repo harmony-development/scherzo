@@ -1,4 +1,5 @@
 use crate::{
+    http,
     impls::{auth::SessionMap, gen_rand_arr, rate},
     ServerError,
 };
@@ -118,10 +119,11 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
         .map(
             |(disposition, content_type, data): (HeaderValue, HeaderValue, Vec<u8>)| {
                 let mut resp = Response::new(data.into());
-                resp.headers_mut().insert("Content-Type", content_type);
+                resp.headers_mut()
+                    .insert(http::header::CONTENT_TYPE, content_type);
                 // TODO: content disposition attachment thingy?
                 resp.headers_mut()
-                    .insert("Content-Disposition", disposition);
+                    .insert(http::header::CONTENT_DISPOSITION, disposition);
                 resp
             },
         )
@@ -139,7 +141,7 @@ pub fn upload(
         .and(warp::path("upload"))
         .and(rate(5, 5))
         .and(
-            warp::filters::header::header("Authorization").and_then(move |token: String| {
+            warp::filters::header::header("authorization").and_then(move |token: String| {
                 let res = if !sessions.contains_key(token.as_str()) {
                     Err(reject(ServerError::Unauthenticated))
                 } else {
