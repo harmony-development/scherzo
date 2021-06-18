@@ -5,7 +5,10 @@ use dashmap::DashMap;
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
-    chat::{event::LeaveReason, *},
+    chat::{
+        event::{ChannelUpdated, GuildUpdated, LeaveReason},
+        *,
+    },
     exports::{
         hrpc::{
             encode_protobuf_message, return_print,
@@ -662,18 +665,34 @@ impl chat_service_server::ChatService for ChatServer {
         )?;
 
         if update_guild_name {
-            guild_info.guild_name = new_guild_name;
+            guild_info.guild_name = new_guild_name.clone();
         }
         if update_guild_picture {
-            guild_info.guild_picture = new_guild_picture;
+            guild_info.guild_picture = new_guild_picture.clone();
         }
         if update_metadata {
-            guild_info.metadata = metadata;
+            guild_info.metadata = metadata.clone();
         }
 
         let mut buf = BytesMut::new();
         encode_protobuf_message(&mut buf, guild_info);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::EditedGuild(GuildUpdated {
+                guild_id,
+                update_picture: update_guild_picture,
+                picture: new_guild_picture,
+                update_name: update_guild_name,
+                name: new_guild_name,
+                update_metadata,
+                metadata,
+            }),
+            None,
+            EventContext::empty(),
+        )
+        .await;
 
         Ok(())
     }
@@ -717,15 +736,31 @@ impl chat_service_server::ChatService for ChatServer {
         };
 
         if update_name {
-            chan_info.channel_name = name;
+            chan_info.channel_name = name.clone();
         }
         if update_metadata {
-            chan_info.metadata = metadata;
+            chan_info.metadata = metadata.clone();
         }
 
         let mut buf = BytesMut::new();
         encode_protobuf_message(&mut buf, chan_info);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::EditedChannel(ChannelUpdated {
+                guild_id,
+                channel_id,
+                name,
+                update_name,
+                metadata,
+                update_metadata,
+                ..Default::default()
+            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
+        )
+        .await;
 
         Ok(())
     }
@@ -753,7 +788,24 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, channel_id, user_id, "channels.manage.move", false)?;
 
         self.chat_tree
-            .update_channel_order_logic(guild_id, channel_id, previous_id, next_id)
+            .update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::EditedChannel(ChannelUpdated {
+                guild_id,
+                channel_id,
+                previous_id,
+                next_id,
+                update_order: true,
+                ..Default::default()
+            }),
+            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            EventContext::empty(),
+        )
+        .await;
+
+        Ok(())
     }
 
     fn update_message_text_pre(&self) -> BoxedFilter<()> {
