@@ -1,0 +1,37 @@
+{
+    http_port 2288
+    https_port 2289
+}
+
+(cors) {
+    @origin{args.0} header Origin {args.0}
+    header Access-Control-Allow-Methods "GET,POST,OPTIONS,PUT,DELETE,PATCH"
+    header Access-Control-Allow-Origin "*"
+    header Access-Control-Allow-Headers "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+}
+
+(boilerplate) {
+        log {
+                format console
+        }
+
+        encode {
+                zstd
+                gzip
+        }
+}
+
+https://localhost:2289 {
+    tls ./cert.pem ./key.pem
+    import boilerplate
+    import cors https://localhost:2289
+    @options method OPTIONS
+    @notoptions not method OPTIONS
+    @websocket_auth header Sec-WebSocket-Protocol harmony*
+    respond @options 200
+    reverse_proxy @notoptions https://localhost:2222 {
+        transport http {
+            tls_trusted_ca_certs ./cert.pem ./key.pem
+        }
+    }
+}
