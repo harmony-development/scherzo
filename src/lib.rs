@@ -301,7 +301,7 @@ impl CustomError for ServerError {
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
-            ServerError::MediaNotFound => return Self::not_found_error().1,
+            ServerError::MediaNotFound => return Self::NOT_FOUND_ERROR.1.to_vec(),
             ServerError::InvalidUrl(_) => "h.invalid-url",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
