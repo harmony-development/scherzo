@@ -3,7 +3,11 @@ pub mod chat;
 pub mod mediaproxy;
 pub mod rest;
 
-use std::time::{Duration, UNIX_EPOCH};
+use std::{
+    convert::TryInto,
+    mem::size_of,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use harmony_rust_sdk::api::exports::{
     hrpc::{
@@ -88,4 +92,10 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         .unwrap_or_else(|| unsafe {
             http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
         })
+}
+
+#[inline(always)]
+fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
+    raw.chunks_exact(size_of::<u64>())
+        .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
 }

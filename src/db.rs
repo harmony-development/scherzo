@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 use cached::proc_macro::cached;
 use harmony_rust_sdk::api::{
     chat::{
@@ -174,14 +176,14 @@ crate::impl_deser! {
 pub fn deser_invite_entry_guild_id(data: &sled::IVec) -> u64 {
     use std::convert::TryInto;
 
-    let (id_raw, _) = data.split_at(std::mem::size_of::<u64>());
+    let (id_raw, _) = data.split_at(size_of::<u64>());
     u64::from_be_bytes(id_raw.try_into().unwrap())
 }
 
 #[cached(size = 1024)]
 pub fn deser_invite_entry(data: sled::IVec) -> (u64, Invite) {
     let guild_id = deser_invite_entry_guild_id(&data);
-    let (_, invite_raw) = data.split_at(std::mem::size_of::<u64>());
+    let (_, invite_raw) = data.split_at(size_of::<u64>());
     let invite = deser_invite(invite_raw.into());
 
     (guild_id, invite)

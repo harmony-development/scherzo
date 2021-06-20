@@ -1,4 +1,4 @@
-use std::{convert::TryInto, sync::Arc, time::Duration};
+use std::{convert::TryInto, mem::size_of, sync::Arc, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -429,7 +429,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
                                             u64::from_be_bytes(
                                                 user_id
-                                                    .split_at(std::mem::size_of::<u64>())
+                                                    .split_at(size_of::<u64>())
                                                     .0
                                                     .try_into()
                                                     .unwrap(),

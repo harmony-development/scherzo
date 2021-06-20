@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, mem::size_of, sync::Arc};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -24,7 +24,7 @@ use parking_lot::RwLock;
 use sled::Tree;
 use tokio::sync::mpsc::{self, Sender};
 
-use super::{gen_rand_u64, rate};
+use super::{gen_rand_u64, make_u64_iter_logic, rate};
 use crate::{
     db::{self, chat::*},
     impls::auth,
@@ -375,7 +375,7 @@ impl chat_service_server::ChatService for ChatServer {
                 let (id_raw, host_raw) = guild_id_raw
                     .split_at(prefix.len())
                     .1
-                    .split_at(std::mem::size_of::<u64>());
+                    .split_at(size_of::<u64>());
 
                 let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 let host = std::str::from_utf8(host_raw).unwrap();
@@ -1440,17 +1440,14 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.get", false)?;
 
+        let prefix = make_guild_role_prefix(guild_id);
         let roles = self
             .chat_tree
             .chat_tree
-            .scan_prefix(make_guild_role_prefix(guild_id))
+            .scan_prefix(prefix)
             .flat_map(|res| {
                 let (key, val) = res.unwrap();
-                if key.len() == 17 {
-                    Some(db::deser_role(val))
-                } else {
-                    None
-                }
+                (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
             })
             .collect();
 
@@ -2185,7 +2182,7 @@ impl ChatTree {
             .scan_prefix("invite_")
             .map(|res| {
                 let (_, value) = res.unwrap();
-                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                let (id_raw, invite_raw) = value.split_at(size_of::<u64>());
                 let id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 let invite = db::deser_invite(invite_raw.into());
                 (id, invite)
@@ -2216,40 +2213,61 @@ impl ChatTree {
         user_id: u64,
     ) -> GetGuildChannelsResponse {
         let prefix = make_guild_chan_prefix(guild_id);
-        let channels = self
+        let mut channels = self
             .chat_tree
             .scan_prefix(prefix)
             .flat_map(|res| {
                 let (key, value) = res.unwrap();
-                if key.len() == 17 {
-                    let channel_id = u64::from_be_bytes(key.split_at(9).1.try_into().unwrap());
-                    let channel_permitted = user_id == 0
-                        || self
-                            .check_perms(guild_id, channel_id, user_id, "messages.view", false)
-                            .is_ok();
-                    if channel_permitted {
-                        Some(Channel::decode(value.as_ref()).unwrap())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+                (key.len() == prefix.len() + size_of::<u64>())
+                    .then(|| {
+                        (user_id == 0
+                            || self
+                                .check_perms(
+                                    guild_id,
+                                    u64::from_be_bytes(
+                                        key.split_at(prefix.len()).1.try_into().unwrap(),
+                                    ),
+                                    user_id,
+                                    "messages.view",
+                                    false,
+                                )
+                                .is_ok())
+                        .then(|| Channel::decode(value.as_ref()).unwrap())
+                    })
+                    .flatten()
             })
-            .collect();
+            .collect::<Vec<_>>();
+
+        if channels.is_empty() {
+            return GetGuildChannelsResponse {
+                channels: Vec::new(),
+            };
+        }
+
+        let ordering_raw = self
+            .chat_tree
+            .get(&make_guild_chan_ordering_key(guild_id))
+            .unwrap()
+            .unwrap_or_default();
+        for (order_index, order_id) in make_u64_iter_logic(ordering_raw.as_ref()).enumerate() {
+            if let Some(index) = channels.iter().position(|chan| chan.channel_id == order_id) {
+                channels.swap(order_index, index);
+            }
+        }
 
         GetGuildChannelsResponse { channels }
     }
 
     #[inline(always)]
     pub fn get_list_u64_logic(&self, key: &[u8]) -> Vec<u64> {
-        self.chat_tree
-            .get(key)
-            .unwrap()
-            .unwrap_or_default()
-            .chunks_exact(std::mem::size_of::<u64>())
-            .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
-            .collect::<Vec<_>>()
+        make_u64_iter_logic(
+            self.chat_tree
+                .get(key)
+                .unwrap()
+                .unwrap_or_default()
+                .as_ref(),
+        )
+        .collect()
     }
 
     #[inline(always)]
@@ -2405,7 +2423,7 @@ impl ChatTree {
             .get(&key)
             .unwrap()
             .map_or_else(Vec::default, |raw| {
-                raw.chunks_exact(std::mem::size_of::<u64>())
+                raw.chunks_exact(size_of::<u64>())
                     .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
                     .collect()
             })
@@ -2627,7 +2645,7 @@ impl ChatTree {
             .map(|res| {
                 let (key, _) = res.unwrap();
                 let (_, guild_id_raw) = key.split_at(prefix.len());
-                let (id_raw, _) = guild_id_raw.split_at(std::mem::size_of::<u64>());
+                let (id_raw, _) = guild_id_raw.split_at(size_of::<u64>());
                 let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
                 self.get_guild_members_logic(guild_id).members
             })
