@@ -984,7 +984,8 @@ impl chat_service_server::ChatService for ChatServer {
             .map(|res| res.unwrap().0);
 
         // Remove from ordering list
-        let mut ordering = self.chat_tree.get_channel_ordering_logic(guild_id);
+        let key = make_guild_chan_ordering_key(guild_id);
+        let mut ordering = self.chat_tree.get_list_u64_logic(&key);
         if let Some(index) = ordering.iter().position(|oid| channel_id.eq(oid)) {
             ordering.remove(index);
         } else {
@@ -996,10 +997,7 @@ impl chat_service_server::ChatService for ChatServer {
         for key in channel_data {
             batch.remove(key);
         }
-        batch.insert(
-            &make_guild_chan_ordering_key(guild_id),
-            serialized_ordering.as_slice(),
-        );
+        batch.insert(&key, serialized_ordering.as_slice());
         self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
         self.send_event_through_chan(
@@ -2243,14 +2241,7 @@ impl ChatTree {
         GetGuildChannelsResponse { channels }
     }
 
-    pub fn get_channel_ordering_logic(&self, guild_id: u64) -> Vec<u64> {
-        self.get_list_u64_logic(&make_guild_chan_ordering_key(guild_id))
-    }
-
-    pub fn get_role_ordering_logic(&self, guild_id: u64) -> Vec<u64> {
-        self.get_list_u64_logic(&make_guild_role_ordering_key(guild_id))
-    }
-
+    #[inline(always)]
     pub fn get_list_u64_logic(&self, key: &[u8]) -> Vec<u64> {
         self.chat_tree
             .get(key)
@@ -2261,6 +2252,7 @@ impl ChatTree {
             .collect::<Vec<_>>()
     }
 
+    #[inline(always)]
     pub fn serialize_list_u64_logic(&self, ordering: Vec<u64>) -> Vec<u8> {
         ordering
             .into_iter()
@@ -2276,62 +2268,17 @@ impl ChatTree {
         previous_id: u64,
         next_id: u64,
     ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
-        let ser_ord_put = |ordering| {
-            let serialized_ordering = self.serialize_list_u64_logic(ordering);
-            self.chat_tree
-                .insert(
-                    &make_guild_role_ordering_key(guild_id),
-                    serialized_ordering.as_slice(),
-                )
-                .unwrap();
-        };
-
-        if previous_id != 0 {
-            if !self.does_role_exist(guild_id, previous_id) {
-                return Err(ServerError::NoSuchRole {
-                    guild_id,
-                    role_id: previous_id,
-                });
-            }
-        } else if next_id != 0 {
-            if !self.does_role_exist(guild_id, next_id) {
-                return Err(ServerError::NoSuchRole {
-                    guild_id,
-                    role_id: next_id,
-                });
-            }
-        } else {
-            let mut ordering = self.get_role_ordering_logic(guild_id);
-            ordering.push(role_id);
-            ser_ord_put(ordering);
-            return Ok(());
-        }
-
-        // [1, 2, 3, 4, ...]
-        // is equal to
-        // 1
-        // 2
-        // 3
-        // 4
-        // ...
-        let mut ordering = self.get_role_ordering_logic(guild_id);
-
-        let maybe_role_index = ordering.iter().position(|oid| role_id.eq(oid));
-        if let Some(index) = ordering.iter().position(|oid| previous_id.eq(oid)) {
-            if let Some(role_index) = maybe_role_index {
-                ordering.remove(role_index);
-            }
-            ordering.insert(index + 1, role_id);
-        } else if let Some(index) = ordering.iter().position(|oid| next_id.eq(oid)) {
-            if let Some(role_index) = maybe_role_index {
-                ordering.remove(role_index);
-            }
-            ordering.insert(index, role_id);
-        }
-
-        ser_ord_put(ordering);
-
-        Ok(())
+        self.update_order_logic(
+            role_id,
+            previous_id,
+            next_id,
+            |role_id| {
+                self.does_role_exist(guild_id, role_id)
+                    .then(|| ())
+                    .ok_or(ServerError::NoSuchRole { guild_id, role_id })
+            },
+            &make_guild_role_ordering_key(guild_id),
+        )
     }
 
     pub fn update_channel_order_logic(
@@ -2341,57 +2288,64 @@ impl ChatTree {
         previous_id: u64,
         next_id: u64,
     ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+        self.update_order_logic(
+            channel_id,
+            previous_id,
+            next_id,
+            |channel_id| {
+                self.does_channel_exist(guild_id, channel_id)
+                    .then(|| ())
+                    .ok_or(ServerError::NoSuchChannel {
+                        guild_id,
+                        channel_id,
+                    })
+            },
+            &make_guild_chan_ordering_key(guild_id),
+        )
+    }
+
+    #[inline(always)]
+    pub fn update_order_logic(
+        &self,
+        id: u64,
+        previous_id: u64,
+        next_id: u64,
+        check_exists: impl Fn(u64) -> Result<(), ServerError>,
+        key: &[u8],
+    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
         let ser_ord_put = |ordering| {
             let serialized_ordering = self.serialize_list_u64_logic(ordering);
             self.chat_tree
-                .insert(
-                    &make_guild_chan_ordering_key(guild_id),
-                    serialized_ordering.as_slice(),
-                )
+                .insert(key, serialized_ordering.as_slice())
                 .unwrap();
         };
 
         if previous_id != 0 {
-            if !self.does_channel_exist(guild_id, previous_id) {
-                return Err(ServerError::NoSuchChannel {
-                    guild_id,
-                    channel_id: previous_id,
-                });
-            }
+            check_exists(previous_id)?;
         } else if next_id != 0 {
-            if !self.does_channel_exist(guild_id, next_id) {
-                return Err(ServerError::NoSuchChannel {
-                    guild_id,
-                    channel_id: next_id,
-                });
-            }
+            check_exists(next_id)?;
         } else {
-            let mut ordering = self.get_channel_ordering_logic(guild_id);
-            ordering.push(channel_id);
+            let mut ordering = self.get_list_u64_logic(key);
+            ordering.push(id);
             ser_ord_put(ordering);
             return Ok(());
         }
 
-        // [1, 2, 3, 4, ...]
-        // is equal to
-        // 1
-        // 2
-        // 3
-        // 4
-        // ...
-        let mut ordering = self.get_channel_ordering_logic(guild_id);
+        let mut ordering = self.get_list_u64_logic(key);
 
-        let maybe_channel_index = ordering.iter().position(|oid| channel_id.eq(oid));
-        if let Some(index) = ordering.iter().position(|oid| previous_id.eq(oid)) {
-            if let Some(channel_index) = maybe_channel_index {
-                ordering.remove(channel_index);
+        let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
+        let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
+            if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
+                ordering.swap(channel_index, index);
+            } else {
+                ordering.insert(index, id);
             }
-            ordering.insert(index + 1, channel_id);
-        } else if let Some(index) = ordering.iter().position(|oid| next_id.eq(oid)) {
-            if let Some(channel_index) = maybe_channel_index {
-                ordering.remove(channel_index);
-            }
-            ordering.insert(index, channel_id);
+        };
+
+        if let Some(index) = maybe_ord_index(previous_id) {
+            maybe_replace_with(&mut ordering, index + 1);
+        } else if let Some(index) = maybe_ord_index(next_id) {
+            maybe_replace_with(&mut ordering, index);
         }
 
         ser_ord_put(ordering);
