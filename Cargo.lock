@@ -1722,6 +1722,7 @@ dependencies = [
  "sled",
  "smol_str",
  "tokio",
+ "tokio-util",
  "toml",
  "tracing",
  "tracing-appender",
