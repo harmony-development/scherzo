@@ -1656,7 +1656,10 @@ impl chat_service_server::ChatService for ChatServer {
 
     type StreamEventsValidationType = u64;
 
-    async fn stream_events_validation(&self, request: Request<()>) -> Result<u64, Self::Error> {
+    async fn stream_events_validation(
+        &self,
+        request: Request<Option<StreamEventsRequest>>,
+    ) -> Result<u64, Self::Error> {
         self.auth(&request)
     }
 

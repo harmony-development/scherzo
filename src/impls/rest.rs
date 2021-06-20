@@ -188,7 +188,7 @@ pub fn upload(
                     })
                     .map_err(|_| reject(ServerError::InvalidAuthId))
                     .and_then(std::convert::identity);
-                async move { res }
+                future::ready(res)
             },
         ))
         .untuple_one()
