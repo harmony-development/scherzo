@@ -32,6 +32,7 @@ use harmony_rust_sdk::api::{
     rest::{extract_file_info_from_download_response, FileId},
 };
 use reqwest::{header::HeaderValue, StatusCode, Url};
+use smol_str::SmolStr;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio_util::io::poll_read_buf;
 use tracing::info;
@@ -60,31 +61,33 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
         .and(warp::path::param::<String>())
         .and(rate(10, 5))
         .and_then(move |id: String| {
+            async fn make_request(
+                http_client: &reqwest::Client,
+                url: Url,
+            ) -> Result<reqwest::Response, warp::Rejection> {
+                http_client
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(reject)?
+                    .error_for_status()
+                    .map_err(|err| {
+                        if err.status().unwrap() == StatusCode::NOT_FOUND {
+                            reject(ServerError::MediaNotFound)
+                        } else {
+                            reject(err)
+                        }
+                    })
+            }
             let id = urlencoding::decode(&id).unwrap_or(id);
             let media_root = media_root.clone();
             let http_client = http_client.clone();
+            let file_id = FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId));
             async move {
-                let file_id =
-                    FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId))?;
-                let make_request = |url: Url| async {
-                    http_client
-                        .get(url)
-                        .send()
-                        .await
-                        .map_err(reject)?
-                        .error_for_status()
-                        .map_err(|err| {
-                            if err.status().unwrap() == StatusCode::NOT_FOUND {
-                                reject(ServerError::MediaNotFound)
-                            } else {
-                                reject(err)
-                            }
-                        })
-                };
-                match file_id {
+                match file_id? {
                     FileId::External(url) => {
                         info!("Serving external image from {}", url);
-                        let resp = make_request(url).await?;
+                        let resp = make_request(&http_client, url).await?;
                         let content_type = get_mimetype(&resp);
 
                         if let Some(content_type) = content_type
@@ -120,7 +123,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         )
                         .parse()
                         .unwrap();
-                        let resp = make_request(url).await?;
+                        let resp = make_request(&http_client, url).await?;
                         let (disposition, mimetype) =
                             extract_file_info_from_download_response(resp.headers())
                                 .map(|(name, mimetype, _)| {
@@ -173,57 +176,64 @@ pub fn upload(
         .and(warp::path("media"))
         .and(warp::path("upload"))
         .and(rate(5, 5))
-        .and(
-            warp::filters::header::header("authorization").and_then(move |token: String| {
-                let res = if !sessions.contains_key(token.as_str()) {
-                    Err(reject(ServerError::Unauthenticated))
-                } else {
-                    Ok(())
-                };
+        .and(warp::filters::header::value("authorization").and_then(
+            move |maybe_token: HeaderValue| {
+                let res = maybe_token
+                    .to_str()
+                    .map(|token| {
+                        sessions
+                            .contains_key(token)
+                            .then(|| ())
+                            .ok_or_else(|| reject(ServerError::Unauthenticated))
+                    })
+                    .map_err(|_| reject(ServerError::InvalidAuthId))
+                    .and_then(std::convert::identity);
                 async move { res }
-            }),
-        )
+            },
+        ))
         .untuple_one()
-        .and(warp::query::<HashMap<String, String>>())
+        .and(warp::query::<HashMap<SmolStr, SmolStr>>())
         .and(form().max_length(max_length))
-        .and_then(move |param: HashMap<String, String>, mut form: FormData| {
-            let media_root = media_root.clone();
-            async move {
-                if let Some(res) = form.next().await {
-                    let mut part = res.map_err(reject)?;
-                    let data = part
-                        .data()
-                        .await
-                        .ok_or_else(|| reject(ServerError::MissingFiles))?
-                        .map_err(reject)?;
-                    // [tag:ascii_filename_upload]
-                    let name = param.get("filename").map_or("unknown", |a| a.as_str());
-                    // [tag:ascii_mimetype_upload]
-                    let content_type = param
-                        .get("contentType")
-                        .map_or("application/octet-stream", |a| a.as_str());
-                    let id_arr = gen_rand_arr::<64>();
-                    // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
-                    let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
-                    let data = [
-                        name.as_bytes(),
-                        &[SEPERATOR],
-                        content_type.as_bytes(),
-                        &[SEPERATOR],
-                        data.chunk(),
-                    ]
-                    .concat();
+        .and_then(
+            move |param: HashMap<SmolStr, SmolStr>, mut form: FormData| {
+                let media_root = media_root.clone();
+                async move {
+                    if let Some(res) = form.next().await {
+                        let mut part = res.map_err(reject)?;
+                        let data = part
+                            .data()
+                            .await
+                            .ok_or_else(|| reject(ServerError::MissingFiles))?
+                            .map_err(reject)?;
+                        // [tag:ascii_filename_upload]
+                        let name = param.get("filename").map_or("unknown", |a| a.as_str());
+                        // [tag:ascii_mimetype_upload]
+                        let content_type = param
+                            .get("contentType")
+                            .map_or("application/octet-stream", |a| a.as_str());
+                        let id_arr = gen_rand_arr::<64>();
+                        // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
+                        let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
+                        let data = [
+                            name.as_bytes(),
+                            &[SEPERATOR],
+                            content_type.as_bytes(),
+                            &[SEPERATOR],
+                            data.chunk(),
+                        ]
+                        .concat();
 
-                    tokio::fs::write(media_root.join(id), data)
-                        .await
-                        .map_err(reject)?;
+                        tokio::fs::write(media_root.join(id), data)
+                            .await
+                            .map_err(reject)?;
 
-                    Ok(format!(r#"{{ "id": "{}" }}"#, id))
-                } else {
-                    Err(reject(ServerError::MissingFiles))
+                        Ok(format!(r#"{{ "id": "{}" }}"#, id))
+                    } else {
+                        Err(reject(ServerError::MissingFiles))
+                    }
                 }
-            }
-        })
+            },
+        )
         .boxed()
 }
 
