@@ -203,12 +203,12 @@ macro_rules! impl_deser {
 
 const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
     let mut new = [0_u8; LEN];
+
     let mut new_index = 0;
     let mut arr_index = 0;
-    let mut arr_from_index = 0;
-
     while arr_index < arrs.len() {
         let arr = arrs[arr_index];
+        let mut arr_from_index = 0;
         while arr_from_index < arr.len() {
             new[new_index] = arr[arr_from_index];
             new_index += 1;
