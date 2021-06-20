@@ -62,6 +62,8 @@ fn get_mimetype(response: &Response) -> &str {
         .get("Content-Type")
         .map(|val| val.to_str().ok())
         .flatten()
+        .map(|s| s.split(';').next())
+        .flatten()
         .unwrap_or("application/octet-stream")
 }
 

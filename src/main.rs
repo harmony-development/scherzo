@@ -1,4 +1,4 @@
-#![recursion_limit="256"]
+#![recursion_limit = "256"]
 
 use std::{convert::TryInto, sync::Arc, time::Duration};
 
