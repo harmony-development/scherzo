@@ -148,7 +148,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                 HeaderValue,
                 HeaderValue,
                 warp::hyper::Body,
-                u64,
+                HeaderValue,
             )| {
                 let mut resp = Response::new(data);
                 resp.headers_mut()
@@ -156,12 +156,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                 // TODO: content disposition attachment thingy?
                 resp.headers_mut()
                     .insert(http::header::CONTENT_DISPOSITION, disposition);
-                resp.headers_mut()
-                    .insert(http::header::CONTENT_LENGTH, unsafe {
-                        HeaderValue::from_maybe_shared_unchecked(Bytes::from(
-                            len.to_string().into_bytes(),
-                        ))
-                    });
+                resp.headers_mut().insert(http::header::CONTENT_LENGTH, len);
                 resp
             },
         )
@@ -223,7 +218,7 @@ pub fn upload(
                         .await
                         .map_err(reject)?;
 
-                    Ok(format!("{{ \"id\": \"{}\" }}", id))
+                    Ok(format!(r#"{{ "id": "{}" }}"#, id))
                 } else {
                     Err(reject(ServerError::MissingFiles))
                 }
@@ -247,7 +242,7 @@ unsafe fn disposition_header(name: &str) -> HeaderValue {
 async fn get_file(
     media_root: &Path,
     id: &str,
-) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, u64), ServerError> {
+) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, HeaderValue), ServerError> {
     let file_path = media_root.join(id);
     let mut file = tokio::fs::File::open(file_path).await.map_err(|err| {
         if let std::io::ErrorKind::NotFound = err.kind() {
@@ -267,6 +262,7 @@ async fn get_file(
     buf_reader.read_until(SEPERATOR, &mut mimetype_raw).await?;
     mimetype_raw.pop();
 
+    // + 2 is because we need to factor in the 2 b'\n' seperators
     let start = (filename_raw.len() + mimetype_raw.len()) as u64 + 2;
     let end = metadata.len();
     let mimetype: Bytes = mimetype_raw.into();
@@ -284,7 +280,11 @@ async fn get_file(
         disposition,
         mimetype,
         warp::hyper::Body::wrap_stream(file_stream(file, buf_size, (start, end))),
-        end - start,
+        unsafe {
+            HeaderValue::from_maybe_shared_unchecked(Bytes::from(
+                (end - start).to_string().into_bytes(),
+            ))
+        },
     ))
 }
 
@@ -296,9 +296,8 @@ fn file_stream(
     use std::io::SeekFrom;
 
     let seek = async move {
-        if start != 0 {
-            file.seek(SeekFrom::Start(start)).await?;
-        }
+        // We will always seek from a point that is non-zero
+        file.seek(SeekFrom::Start(start)).await?;
         Ok(file)
     };
 
