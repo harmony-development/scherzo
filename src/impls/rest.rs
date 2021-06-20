@@ -1,6 +1,6 @@
 use crate::{
     http,
-    impls::{auth::SessionMap, gen_rand_arr, rate},
+    impls::{auth::SessionMap, gen_rand_arr, get_mimetype, rate},
     ServerError,
 };
 
@@ -76,12 +76,17 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                             .last()
                             .unwrap_or("unknown");
                         let disposition = unsafe { disposition_header(filename) };
-                        let data = resp.bytes().await.map_err(reject)?;
-                        if let Some(content_type) = infer::get(&data)
-                            .map(|t| t.mime_type().starts_with("image").then(|| t.mime_type()))
-                            .flatten()
-                        {
-                            Ok((disposition, content_type.parse().unwrap(), data.to_vec()))
+                        let content_type = get_mimetype(&resp);
+                        let content_type = content_type
+                            .starts_with("image")
+                            .then(|| content_type.parse().unwrap());
+                        let data_stream = resp.bytes_stream();
+                        if let Some(content_type) = content_type {
+                            Ok((
+                                disposition,
+                                content_type,
+                                warp::hyper::Body::wrap_stream(data_stream),
+                            ))
                         } else {
                             Err(reject(ServerError::NotAnImage))
                         }
@@ -106,8 +111,12 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                                     (unsafe { disposition_header(name) }, mimetype.clone())
                                 })
                                 .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
-                        let data = resp.bytes().await.map_err(reject)?;
-                        Ok((disposition, mimetype, data.to_vec()))
+                        let data_stream = resp.bytes_stream();
+                        Ok((
+                            disposition,
+                            mimetype,
+                            warp::hyper::Body::wrap_stream(data_stream),
+                        ))
                     }
                     FileId::Id(id) => {
                         info!("Serving local media with id {}", id);
@@ -117,8 +126,8 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
             }
         })
         .map(
-            |(disposition, content_type, data): (HeaderValue, HeaderValue, Vec<u8>)| {
-                let mut resp = Response::new(data.into());
+            |(disposition, content_type, data): (HeaderValue, HeaderValue, warp::hyper::Body)| {
+                let mut resp = Response::new(data);
                 resp.headers_mut()
                     .insert(http::header::CONTENT_TYPE, content_type);
                 // TODO: content disposition attachment thingy?
@@ -207,7 +216,7 @@ unsafe fn disposition_header(name: &str) -> HeaderValue {
 async fn get_file(
     media_root: &Path,
     id: &str,
-) -> Result<(HeaderValue, HeaderValue, Vec<u8>), ServerError> {
+) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body), ServerError> {
     match tokio::fs::read(media_root.join(id)).await {
         Ok(mut raw) => {
             let mut pos = raw.iter().enumerate().filter(|(_, b)| **b == SEPERATOR);
@@ -233,7 +242,7 @@ async fn get_file(
             };
             drop(raw.drain(0..=mimetype_sep));
 
-            Ok((disposition, mimetype, raw))
+            Ok((disposition, mimetype, raw.into()))
         }
         Err(err) => {
             if let std::io::ErrorKind::NotFound = err.kind() {

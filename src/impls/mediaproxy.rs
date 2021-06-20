@@ -1,6 +1,6 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
-use reqwest::{Client, Response, Url};
+use reqwest::{Client, Url};
 use smol_str::SmolStr;
 use webpage::HTML;
 
@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::{
     impls::{
         auth::{self, SessionMap},
-        rate,
+        get_mimetype, rate,
     },
     ServerError,
 };
@@ -54,17 +54,6 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
         // No value available
         None => None,
     }
-}
-
-fn get_mimetype(response: &Response) -> &str {
-    response
-        .headers()
-        .get("Content-Type")
-        .map(|val| val.to_str().ok())
-        .flatten()
-        .map(|s| s.split(';').next())
-        .flatten()
-        .unwrap_or("application/octet-stream")
 }
 
 #[derive(Debug)]

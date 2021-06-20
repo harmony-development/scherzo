@@ -6,10 +6,12 @@ pub mod rest;
 use std::time::{Duration, UNIX_EPOCH};
 
 use harmony_rust_sdk::api::exports::hrpc::{
+    http,
     server::filters::{rate::Rate, rate_limit},
     warp::{filters::BoxedFilter, Filter},
 };
 use rand::Rng;
+use reqwest::Response;
 use smol_str::SmolStr;
 
 use crate::ServerError;
@@ -62,6 +64,17 @@ fn rate(num: u64, dur: u64) -> BoxedFilter<()> {
         ServerError::TooFast,
     )
     .boxed()
+}
+
+fn get_mimetype(response: &Response) -> &str {
+    response
+        .headers()
+        .get(&http::header::CONTENT_TYPE)
+        .map(|val| val.to_str().ok())
+        .flatten()
+        .map(|s| s.split(';').next())
+        .flatten()
+        .unwrap_or("application/octet-stream")
 }
 
 #[macro_export]
