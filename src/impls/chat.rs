@@ -1284,7 +1284,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     fn query_has_permission_pre(&self) -> BoxedFilter<()> {
-        rate(10, 5)
+        rate(30, 5)
     }
 
     async fn query_has_permission(
