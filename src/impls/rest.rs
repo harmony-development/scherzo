@@ -1,6 +1,6 @@
 use crate::{
     http,
-    impls::{auth::SessionMap, gen_rand_arr, get_mimetype, rate},
+    impls::{auth::SessionMap, gen_rand_arr, get_content_length, get_mimetype, rate},
     ServerError,
 };
 
@@ -31,7 +31,7 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use reqwest::{header::HeaderValue, StatusCode};
+use reqwest::{header::HeaderValue, StatusCode, Url};
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio_util::io::poll_read_buf;
 use tracing::info;
@@ -66,23 +66,25 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
             async move {
                 let file_id =
                     FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId))?;
-                let reqwest_or_404 = |err: reqwest::Error| {
-                    if err.status().unwrap() == StatusCode::NOT_FOUND {
-                        reject(ServerError::MediaNotFound)
-                    } else {
-                        reject(err)
-                    }
+                let make_request = |url: Url| async {
+                    http_client
+                        .get(url)
+                        .send()
+                        .await
+                        .map_err(reject)?
+                        .error_for_status()
+                        .map_err(|err| {
+                            if err.status().unwrap() == StatusCode::NOT_FOUND {
+                                reject(ServerError::MediaNotFound)
+                            } else {
+                                reject(err)
+                            }
+                        })
                 };
                 match file_id {
                     FileId::External(url) => {
                         info!("Serving external image from {}", url);
-                        let resp = http_client
-                            .get(url)
-                            .send()
-                            .await
-                            .map_err(reject)?
-                            .error_for_status()
-                            .map_err(reqwest_or_404)?;
+                        let resp = make_request(url).await?;
                         let content_type = get_mimetype(&resp);
 
                         if let Some(content_type) = content_type
@@ -96,14 +98,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                                 .last()
                                 .unwrap_or("unknown");
                             let disposition = unsafe { disposition_header(filename) };
-                            let len = resp
-                                .headers()
-                                .get(&http::header::CONTENT_LENGTH)
-                                .map(|h| h.to_str().ok())
-                                .flatten()
-                                .map(|s| s.parse::<u64>().ok())
-                                .flatten()
-                                .unwrap_or(0);
+                            let len = get_content_length(&resp);
                             let data_stream = resp.bytes_stream();
                             Ok((
                                 disposition,
@@ -117,32 +112,22 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                     }
                     FileId::Hmc(hmc) => {
                         info!("Serving HMC from {}", hmc);
-                        let resp = http_client
-                            .get(format!(
-                                "https://{}:{}/_harmony/media/download/{}",
-                                hmc.server(),
-                                hmc.port(),
-                                hmc.id()
-                            ))
-                            .send()
-                            .await
-                            .map_err(reject)?
-                            .error_for_status()
-                            .map_err(reqwest_or_404)?;
+                        let url = format!(
+                            "https://{}:{}/_harmony/media/download/{}",
+                            hmc.server(),
+                            hmc.port(),
+                            hmc.id()
+                        )
+                        .parse()
+                        .unwrap();
+                        let resp = make_request(url).await?;
                         let (disposition, mimetype) =
                             extract_file_info_from_download_response(resp.headers())
                                 .map(|(name, mimetype, _)| {
                                     (unsafe { disposition_header(name) }, mimetype.clone())
                                 })
                                 .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
-                        let len = resp
-                            .headers()
-                            .get(&http::header::CONTENT_LENGTH)
-                            .map(|h| h.to_str().ok())
-                            .flatten()
-                            .map(|s| s.parse::<u64>().ok())
-                            .flatten()
-                            .unwrap_or(0);
+                        let len = get_content_length(&resp);
                         let data_stream = resp.bytes_stream();
                         Ok((
                             disposition,
@@ -385,7 +370,7 @@ fn get_block_size(metadata: &Metadata) -> usize {
 
 #[cfg(not(unix))]
 #[inline(always)]
-fn get_block_size(_metadata: &Metadata) -> usize {
+const fn get_block_size(_metadata: &Metadata) -> usize {
     DEFAULT_READ_BUF_SIZE
 }
 

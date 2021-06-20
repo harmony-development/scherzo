@@ -77,6 +77,17 @@ fn get_mimetype(response: &Response) -> &str {
         .unwrap_or("application/octet-stream")
 }
 
+fn get_content_length(response: &Response) -> u64 {
+    response
+        .headers()
+        .get(&http::header::CONTENT_LENGTH)
+        .map(|h| h.to_str().ok())
+        .flatten()
+        .map(|s| s.parse::<u64>().ok())
+        .flatten()
+        .unwrap_or(0)
+}
+
 #[macro_export]
 macro_rules! concat_static {
     ( $len:expr, $first_arr:expr, $( $array:expr ),+ ) => {
