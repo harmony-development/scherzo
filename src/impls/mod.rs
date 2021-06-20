@@ -5,10 +5,13 @@ pub mod rest;
 
 use std::time::{Duration, UNIX_EPOCH};
 
-use harmony_rust_sdk::api::exports::hrpc::{
-    http,
-    server::filters::{rate::Rate, rate_limit},
-    warp::{filters::BoxedFilter, Filter},
+use harmony_rust_sdk::api::exports::{
+    hrpc::{
+        http,
+        server::filters::{rate::Rate, rate_limit},
+        warp::{filters::BoxedFilter, Filter},
+    },
+    prost::bytes::Bytes,
 };
 use rand::Rng;
 use reqwest::Response;
@@ -82,24 +85,7 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         .headers()
         .get(&http::header::CONTENT_LENGTH)
         .cloned()
-        .unwrap_or_else(|| http::HeaderValue::from_static("0"))
-}
-
-#[macro_export]
-macro_rules! concat_static {
-    ( $len:expr, $first_arr:expr, $( $array:expr ),+ ) => {
-        {
-            let mut new = [0; $len];
-            for (to, from) in new.iter_mut().zip(
-                $first_arr
-                    .iter()
-                    $(
-                        .chain($array.iter())
-                    )+
-            ) {
-                *to = *from;
-            }
-            new
-        }
-    };
+        .unwrap_or_else(|| unsafe {
+            http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
+        })
 }

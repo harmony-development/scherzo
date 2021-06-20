@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::{
     impls::{
         auth::{self, SessionMap},
-        get_mimetype, rate,
+        get_mimetype, http, rate,
     },
     ServerError,
 };
@@ -84,16 +84,19 @@ impl MediaproxyServer {
         let url: Url = raw_url.parse().map_err(ServerError::InvalidUrl)?;
         let response = self.http.get(url.as_ref()).send().await?;
 
-        let mimetype = get_mimetype(&response);
+        let is_html = response
+            .headers()
+            .get(&http::header::CONTENT_TYPE)
+            .map_or(false, |v| v.as_bytes().eq_ignore_ascii_case(b"text/html"));
 
-        let metadata = if mimetype == "text/html" {
+        let metadata = if is_html {
             let html = response.text().await?;
             let html = webpage::HTML::from_string(html, Some(raw_url))?;
             Metadata::Site(html)
         } else {
             let filename = response
                 .headers()
-                .get("Content-Disposition")
+                .get(&http::header::CONTENT_DISPOSITION)
                 .map(|val| val.to_str().ok())
                 .flatten()
                 .or_else(|| Some(url.path_segments()?.last()).flatten())
@@ -101,7 +104,7 @@ impl MediaproxyServer {
                 .into();
             Metadata::Media {
                 filename,
-                mimetype: mimetype.into(),
+                mimetype: get_mimetype(&response).into(),
             }
         };
 

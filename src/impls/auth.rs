@@ -46,19 +46,20 @@ pub fn check_auth<T>(
                 // Specific handling for web clients
                 request
                     .get_header(&http::header::SEC_WEBSOCKET_PROTOCOL)
-                    .map_or_else(SmolStr::default, |val| {
+                    .map(|val| {
                         val.to_str()
-                            .unwrap_or("")
-                            .split(',')
-                            .nth(1)
-                            .map_or_else(SmolStr::default, |auth| auth.trim().into())
+                            .ok()
+                            .map(|v| v.split(',').nth(1).map(str::trim))
+                            .flatten()
                     })
+                    .flatten()
             },
-            |val| val.to_str().map_or_else(|_| SmolStr::default(), Into::into),
-        );
+            |val| val.to_str().ok(),
+        )
+        .unwrap_or("");
 
     valid_sessions
-        .get(&auth_id)
+        .get(auth_id)
         .as_deref()
         .copied()
         .map_or(Err(ServerError::Unauthenticated), Ok)
@@ -96,8 +97,8 @@ impl AuthServer {
             let _guard = tracing::info_span!("auth_session_check").entered();
             tracing::info!("starting auth session expiration check thread");
             loop {
-                let tokens = scan_tree_for(&att, &TOKEN_PREFIX);
-                let atimes = scan_tree_for(&att, &ATIME_PREFIX);
+                let tokens = scan_tree_for(&att, TOKEN_PREFIX);
+                let atimes = scan_tree_for(&att, ATIME_PREFIX);
 
                 let mut batch = sled::Batch::default();
                 for (id, raw_token) in tokens {

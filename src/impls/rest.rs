@@ -1,6 +1,6 @@
 use crate::{
     http,
-    impls::{auth::SessionMap, gen_rand_arr, get_content_length, get_mimetype, rate},
+    impls::{auth::SessionMap, gen_rand_arr, get_content_length, rate},
     ServerError,
 };
 
@@ -88,12 +88,21 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                     FileId::External(url) => {
                         info!("Serving external image from {}", url);
                         let resp = make_request(&http_client, url).await?;
-                        let content_type = get_mimetype(&resp);
+                        let content_type = resp
+                            .headers()
+                            .get(&http::header::CONTENT_TYPE)
+                            .map(|v| {
+                                const IMAGE: &[u8] = b"image";
+                                (v.len() > IMAGE.len()
+                                    && IMAGE
+                                        .iter()
+                                        .zip(v.as_bytes().iter().take(5))
+                                        .all(|(a, b)| a == b))
+                                .then(|| v.clone())
+                            })
+                            .flatten();
 
-                        if let Some(content_type) = content_type
-                            .starts_with("image")
-                            .then(|| content_type.parse().unwrap())
-                        {
+                        if let Some(content_type) = content_type {
                             let filename = resp
                                 .url()
                                 .path_segments()
@@ -184,10 +193,11 @@ pub fn upload(
                         sessions
                             .contains_key(token)
                             .then(|| ())
-                            .ok_or_else(|| reject(ServerError::Unauthenticated))
+                            .ok_or(ServerError::Unauthenticated)
                     })
-                    .map_err(|_| reject(ServerError::InvalidAuthId))
-                    .and_then(std::convert::identity);
+                    .map_err(|_| ServerError::InvalidAuthId)
+                    .and_then(std::convert::identity)
+                    .map_err(reject);
                 future::ready(res)
             },
         ))
