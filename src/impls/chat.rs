@@ -2359,38 +2359,44 @@ impl ChatTree {
         channel_id: u64,
         before_message: u64,
     ) -> GetChannelMessagesResponse {
-        let prefix = make_msg_prefix(guild_id, channel_id);
-        let mut msgs = self
-            .chat_tree
-            .scan_prefix(prefix)
-            .map(|res| {
-                let (key, value) = res.unwrap();
-                (
-                    u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
-                    value,
-                )
-            })
-            .collect::<Vec<_>>();
+        let get_messages = |to: u64| {
+            let from = to.saturating_sub(25);
 
-        let before_msg_pos = if before_message == 0 {
-            msgs.len()
-        } else {
-            msgs.iter()
-                .position(|(id, _)| *id == before_message)
-                .unwrap_or_else(|| msgs.len())
+            let from_key = make_msg_key(guild_id, channel_id, from);
+            let to_key = make_msg_key(guild_id, channel_id, to);
+
+            let messages = self
+                .chat_tree
+                .range(from_key..to_key)
+                .rev()
+                .map(|res| {
+                    let (_, value) = res.unwrap();
+                    db::deser_message(value)
+                })
+                .collect();
+
+            GetChannelMessagesResponse {
+                reached_top: from == 0,
+                messages,
+            }
         };
 
-        let from = before_msg_pos.saturating_sub(25);
-        let to = before_msg_pos;
-
-        GetChannelMessagesResponse {
-            reached_top: from == 0,
-            messages: msgs
-                .drain(from..to)
-                .map(|(_, msg_raw)| db::deser_message(msg_raw))
-                .rev()
-                .collect(),
-        }
+        let prefix = make_msg_prefix(guild_id, channel_id);
+        (before_message == 0)
+            .then(|| {
+                self.chat_tree.scan_prefix(prefix).last().map_or_else(
+                    || GetChannelMessagesResponse {
+                        reached_top: true,
+                        messages: Vec::new(),
+                    },
+                    |last| {
+                        get_messages(u64::from_be_bytes(
+                            last.unwrap().0.split_at(prefix.len()).1.try_into().unwrap(),
+                        ))
+                    },
+                )
+            })
+            .unwrap_or_else(|| get_messages(before_message))
     }
 
     pub fn get_user_roles_logic(&self, guild_id: u64, user_id: u64) -> Vec<u64> {
@@ -2401,7 +2407,7 @@ impl ChatTree {
             .map_or_else(Vec::default, |raw| {
                 raw.chunks_exact(std::mem::size_of::<u64>())
                     .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
-                    .collect::<Vec<_>>()
+                    .collect()
             })
     }
 
