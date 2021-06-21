@@ -28,7 +28,7 @@ use crate::{
     },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs, rate},
-    set_proto_name, ServerError,
+    set_proto_name, ServerError, ServerResult,
 };
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
@@ -327,14 +327,14 @@ impl auth_service_server::AuthService for AuthServer {
                                 }
                             } else {
                                 return Err(ServerError::NoSuchChoice {
-                                    choice,
-                                    expected_any_of: options,
+                                    choice: choice.into(),
+                                    expected_any_of: options.into_iter().map(Into::into).collect(),
                                 });
                             }
                         } else {
                             return Err(ServerError::WrongStep {
-                                expected: "form".to_string(),
-                                got: "choice".to_string(),
+                                expected: SmolStr::new_inline("form"),
+                                got: SmolStr::new_inline("choice"),
                             });
                         }
                     }
@@ -357,8 +357,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     values.push(field);
                                                 } else {
                                                     return Err(ServerError::WrongTypeForField {
-                                                        name: afield.name.clone(),
-                                                        expected: "bytes".to_string(),
+                                                        name: afield.name.as_str().into(),
+                                                        expected: SmolStr::new_inline("bytes"),
                                                     });
                                                 }
                                             }
@@ -367,8 +367,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     values.push(field);
                                                 } else {
                                                     return Err(ServerError::WrongTypeForField {
-                                                        name: afield.name.clone(),
-                                                        expected: "text".to_string(),
+                                                        name: afield.name.as_str().into(),
+                                                        expected: SmolStr::new_inline("text"),
                                                     });
                                                 }
                                             }
@@ -377,8 +377,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     values.push(field);
                                                 } else {
                                                     return Err(ServerError::WrongTypeForField {
-                                                        name: afield.name.clone(),
-                                                        expected: "number".to_string(),
+                                                        name: afield.name.as_str().into(),
+                                                        expected: SmolStr::new_inline("number"),
                                                     });
                                                 }
                                             }
@@ -388,8 +388,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     values.push(field);
                                                 } else {
                                                     return Err(ServerError::WrongTypeForField {
-                                                        name: afield.name.clone(),
-                                                        expected: "email".to_string(),
+                                                        name: afield.name.as_str().into(),
+                                                        expected: SmolStr::new_inline("email"),
                                                     });
                                                 }
                                             }
@@ -405,25 +405,9 @@ impl auth_service_server::AuthService for AuthServer {
 
                             match title.as_str() {
                                 "login" => {
-                                    let password_raw =
-                                        if let Some(Field::Bytes(value)) = values.pop() {
-                                            value
-                                        } else {
-                                            return Err(ServerError::WrongTypeForField {
-                                                name: "password".to_string(),
-                                                expected: "bytes".to_string(),
-                                            });
-                                        };
+                                    let password_raw = try_get_password(&mut values)?;
                                     let password_hashed = hash_password(password_raw);
-
-                                    let email = if let Some(Field::String(value)) = values.pop() {
-                                        value
-                                    } else {
-                                        return Err(ServerError::WrongTypeForField {
-                                            name: "email".to_string(),
-                                            expected: "string".to_string(),
-                                        });
-                                    };
+                                    let email = try_get_email(&mut values)?;
 
                                     let user_id =
                                         if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
@@ -435,17 +419,20 @@ impl auth_service_server::AuthService for AuthServer {
                                                     .unwrap(),
                                             )
                                         } else {
-                                            return Err(ServerError::WrongUserOrPassword { email });
+                                            return Err(ServerError::WrongUserOrPassword {
+                                                email: email.into(),
+                                            });
                                         };
 
-                                    if let Ok(Some(pass)) =
-                                        self.auth_tree.get(user_id.to_be_bytes())
+                                    if self
+                                        .auth_tree
+                                        .get(user_id.to_be_bytes())
+                                        .unwrap()
+                                        .map_or(true, |pass| pass != password_hashed.as_ref())
                                     {
-                                        if pass != password_hashed.as_ref() {
-                                            return Err(ServerError::WrongUserOrPassword { email });
-                                        }
-                                    } else {
-                                        return Err(ServerError::WrongUserOrPassword { email });
+                                        return Err(ServerError::WrongUserOrPassword {
+                                            email: email.into(),
+                                        });
                                     }
 
                                     let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
@@ -475,35 +462,10 @@ impl auth_service_server::AuthService for AuthServer {
                                     self.valid_sessions.insert(session_token, user_id);
                                 }
                                 "register" => {
-                                    let password_raw =
-                                        if let Some(Field::Bytes(value)) = values.pop() {
-                                            value
-                                        } else {
-                                            return Err(ServerError::WrongTypeForField {
-                                                name: "password".to_string(),
-                                                expected: "bytes".to_string(),
-                                            });
-                                        };
+                                    let password_raw = try_get_password(&mut values)?;
                                     let password_hashed = hash_password(password_raw);
-
-                                    let email = if let Some(Field::String(value)) = values.pop() {
-                                        value
-                                    } else {
-                                        return Err(ServerError::WrongTypeForField {
-                                            name: "email".to_string(),
-                                            expected: "email".to_string(),
-                                        });
-                                    };
-
-                                    let username = if let Some(Field::String(value)) = values.pop()
-                                    {
-                                        value
-                                    } else {
-                                        return Err(ServerError::WrongTypeForField {
-                                            name: "username".to_string(),
-                                            expected: "text".to_string(),
-                                        });
-                                    };
+                                    let email = try_get_email(&mut values)?;
+                                    let username = try_get_username(&mut values)?;
 
                                     if self.auth_tree.get(&email).unwrap().is_some() {
                                         return Err(ServerError::UserAlreadyExists);
@@ -557,8 +519,8 @@ impl auth_service_server::AuthService for AuthServer {
                             }
                         } else {
                             return Err(ServerError::WrongStep {
-                                expected: "choice".to_string(),
-                                got: "form".to_string(),
+                                expected: SmolStr::new_inline("choice"),
+                                got: SmolStr::new_inline("form"),
                             });
                         }
                     }
@@ -633,4 +595,54 @@ fn hash_password(raw: Vec<u8>) -> impl AsRef<[u8]> {
 fn gen_auth_token() -> SmolStr {
     // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
     gen_rand_inline_str() // generates 22 chars long inlined SmolStr [ref:inlined_smol_str_gen]
+}
+
+const PASSWORD_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
+    name: SmolStr::new_inline("password"),
+    expected: SmolStr::new_inline("bytes"),
+};
+
+const EMAIL_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
+    name: SmolStr::new_inline("email"),
+    expected: SmolStr::new_inline("email"),
+};
+
+const USERNAME_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
+    name: SmolStr::new_inline("username"),
+    expected: SmolStr::new_inline("text"),
+};
+
+use next_step_request::form_fields::Field;
+
+#[inline(always)]
+fn try_get_string(values: &mut Vec<Field>, err: ServerError) -> ServerResult<String> {
+    if let Some(Field::String(value)) = values.pop() {
+        Ok(value)
+    } else {
+        Err(err)
+    }
+}
+
+#[inline(always)]
+fn try_get_bytes(values: &mut Vec<Field>, err: ServerError) -> ServerResult<Vec<u8>> {
+    if let Some(Field::Bytes(value)) = values.pop() {
+        Ok(value)
+    } else {
+        Err(err)
+    }
+}
+
+#[inline(always)]
+fn try_get_email(values: &mut Vec<Field>) -> ServerResult<String> {
+    try_get_string(values, EMAIL_FIELD_ERR)
+}
+
+#[inline(always)]
+fn try_get_username(values: &mut Vec<Field>) -> ServerResult<String> {
+    try_get_string(values, USERNAME_FIELD_ERR)
+}
+
+#[inline(always)]
+fn try_get_password(values: &mut Vec<Field>) -> ServerResult<Vec<u8>> {
+    try_get_bytes(values, PASSWORD_FIELD_ERR)
 }

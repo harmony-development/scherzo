@@ -138,7 +138,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                                 .map(|(name, mimetype, _)| {
                                     (unsafe { disposition_header(name) }, mimetype.clone())
                                 })
-                                .map_err(|e| reject(ServerError::Unexpected(e.to_string())))?;
+                                .map_err(|e| reject(ServerError::Unexpected(e.into())))?;
                         let len = get_content_length(&resp);
                         let data_stream = resp.bytes_stream();
                         Ok((

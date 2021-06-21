@@ -22,6 +22,7 @@ use harmony_rust_sdk::api::{
 };
 use parking_lot::RwLock;
 use sled::Tree;
+use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 
 use super::{gen_rand_u64, make_u64_iter_logic, rate};
@@ -898,7 +899,7 @@ impl chat_service_server::ChatService for ChatServer {
         if !self.chat_tree.is_user_guild_owner(guild_id, user_id)? {
             return Err(ServerError::NotEnoughPermissions {
                 must_be_guild_owner: true,
-                missing_permissions: vec![],
+                missing_permission: SmolStr::new_inline(""),
             });
         }
 
@@ -1118,7 +1119,7 @@ impl chat_service_server::ChatService for ChatServer {
         {
             db::deser_invite_entry(raw)
         } else {
-            return Err(ServerError::NoSuchInvite(invite_id));
+            return Err(ServerError::NoSuchInvite(invite_id.into()));
         };
 
         if self.chat_tree.is_user_banned_in_guild(guild_id, user_id) {
@@ -1902,7 +1903,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .get(&key)
             .unwrap()
-            .ok_or(ServerError::NoSuchInvite(invite_id))
+            .ok_or_else(|| ServerError::NoSuchInvite(invite_id.into()))
             .map(|raw| db::deser_invite_entry_guild_id(&raw))?;
         let guild = self.chat_tree.get_guild_logic(guild_id)?;
         let member_count = self
@@ -2488,7 +2489,7 @@ impl ChatTree {
         }
         Err(ServerError::NotEnoughPermissions {
             must_be_guild_owner,
-            missing_permissions: vec![check_for.to_string()],
+            missing_permission: check_for.into(),
         })
     }
 

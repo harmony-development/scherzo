@@ -12,6 +12,7 @@ use harmony_rust_sdk::api::exports::hrpc::{
     url::ParseError as UrlParseError,
     warp::{self, reply::Response},
 };
+use smol_str::SmolStr;
 
 pub mod config;
 pub mod db;
@@ -28,6 +29,8 @@ pub fn set_proto_name(mut response: Response) -> Response {
     response
 }
 
+pub type ServerResult<T> = Result<T, ServerError>;
+
 #[derive(Debug)]
 pub enum ServerError {
     InvalidUrl(UrlParseError),
@@ -35,19 +38,19 @@ pub enum ServerError {
     NoFieldSpecified,
     NoSuchField,
     NoSuchChoice {
-        choice: String,
-        expected_any_of: Vec<String>,
+        choice: SmolStr,
+        expected_any_of: Vec<SmolStr>,
     },
     WrongStep {
-        expected: String,
-        got: String,
+        expected: SmolStr,
+        got: SmolStr,
     },
     WrongTypeForField {
-        name: String,
-        expected: String,
+        name: SmolStr,
+        expected: SmolStr,
     },
     WrongUserOrPassword {
-        email: String,
+        email: SmolStr,
     },
     UserBanned,
     UserAlreadyInGuild,
@@ -73,13 +76,13 @@ pub enum ServerError {
         guild_id: u64,
         channel_id: u64,
     },
-    NoSuchInvite(String),
+    NoSuchInvite(SmolStr),
     NoSuchUser(u64),
     InternalServerError,
     SessionExpired,
     NotEnoughPermissions {
         must_be_guild_owner: bool,
-        missing_permissions: Vec<String>,
+        missing_permission: SmolStr,
     },
     EmptyPermissionQuery,
     NoSuchRole {
@@ -94,7 +97,7 @@ pub enum ServerError {
     IoError(IoError),
     InvalidFileId,
     ReqwestError(reqwest::Error),
-    Unexpected(String),
+    Unexpected(SmolStr),
     NotAnImage,
     TooFast(Duration),
     MediaNotFound,
@@ -174,16 +177,16 @@ impl Display for ServerError {
             ServerError::SessionExpired => write!(f, "session expired"),
             ServerError::NotEnoughPermissions {
                 must_be_guild_owner,
-                missing_permissions,
+                missing_permission,
             } => {
-                writeln!(f, "missing permissions: ")?;
+                use std::fmt::Write;
+
+                f.write_str("missing permissions: \n")?;
                 if *must_be_guild_owner {
-                    writeln!(f, "must be guild owner")?;
+                    f.write_str("must be guild owner\n")?;
                 }
-                for perm in missing_permissions {
-                    writeln!(f, "{}", perm)?;
-                }
-                Ok(())
+                f.write_str(missing_permission)?;
+                f.write_char('\n')
             }
             ServerError::EmptyPermissionQuery => write!(f, "permission query cant be empty"),
             ServerError::NoSuchRole { guild_id, role_id } => {
