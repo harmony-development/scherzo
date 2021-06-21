@@ -67,7 +67,7 @@ impl EventContext {
     }
 
     fn empty() -> Self {
-        Self::new(vec![])
+        Self::new(Vec::new())
     }
 }
 
@@ -2439,42 +2439,30 @@ impl ChatTree {
         let key = make_guild_user_roles_key(guild_id, user_id);
         let user_roles = self.get_list_u64_logic(&key);
 
+        let is_ok = |key: &[u8]| {
+            self.chat_tree.get(key).unwrap().map_or(false, |raw_perms| {
+                let perms = db::deser_perm_list(raw_perms);
+                perms
+                    .permissions
+                    .into_iter()
+                    .filter(|perm| perm.matches.contains(check_for))
+                    .any(|perm| matches!(perm.mode(), permission::Mode::Allow))
+            })
+        };
+
         if channel_id != 0 {
             for role_id in &user_roles {
-                if let Some(raw_perms) = self
-                    .chat_tree
-                    .get(&make_guild_channel_roles_key(
-                        guild_id, channel_id, *role_id,
-                    ))
-                    .unwrap()
-                {
-                    let perms = db::deser_perm_list(raw_perms);
-                    for perm in perms.permissions {
-                        if perm.matches.contains(check_for) {
-                            if let permission::Mode::Allow = perm.mode() {
-                                return true;
-                            }
-                        }
-                    }
+                let key = &make_guild_channel_roles_key(guild_id, channel_id, *role_id);
+                if is_ok(key) {
+                    return true;
                 }
             }
-            // TODO: category permissions
         }
 
         for role_id in user_roles {
-            if let Some(raw_perms) = self
-                .chat_tree
-                .get(&make_guild_role_perms_key(guild_id, role_id))
-                .unwrap()
-            {
-                let perms = db::deser_perm_list(raw_perms);
-                for perm in perms.permissions {
-                    if perm.matches.contains(check_for) {
-                        if let permission::Mode::Allow = perm.mode() {
-                            return true;
-                        }
-                    }
-                }
+            let key = &make_guild_role_perms_key(guild_id, role_id);
+            if is_ok(key) {
+                return true;
             }
         }
 
