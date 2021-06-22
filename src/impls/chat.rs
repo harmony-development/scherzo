@@ -174,6 +174,7 @@ impl chat_service_server::ChatService for ChatServer {
                 picture_url,
             },
             headers,
+            addr,
         ) = request.into_parts();
 
         let guild_id = {
@@ -244,6 +245,7 @@ impl chat_service_server::ChatService for ChatServer {
                     ..Default::default()
                 },
                 headers,
+                addr,
             )))
             .await?
             .channel_id;
@@ -1027,7 +1029,7 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<JoinGuildResponse, Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let (JoinGuildRequest { invite_id }, _) = request.into_parts();
+        let JoinGuildRequest { invite_id } = request.into_parts().0;
         let key = make_invite_key(invite_id.as_str());
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap()
@@ -1085,7 +1087,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
         let user_id = self.auth(&request)?;
 
-        let (LeaveGuildRequest { guild_id }, _) = request.into_parts();
+        let LeaveGuildRequest { guild_id } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 

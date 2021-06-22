@@ -206,7 +206,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
     let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
     let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-    let sync_server = SyncServer;
+    let sync_server = SyncServer::new();
 
     match command {
         Command::RunServer => {

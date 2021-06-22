@@ -9,7 +9,7 @@ default = []
 console = ["console-subscriber", "tokio/tracing"]
 
 [dependencies]
-harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = ["gen_server"] }
+harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = ["gen_server", "gen_client"] }
 sled = { version = "0.34.6", features = ["compression"] }
 parking_lot = "0.11"
 rand = "0.8"
