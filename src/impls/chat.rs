@@ -2305,7 +2305,7 @@ impl ChatTree {
 
             let messages = self
                 .chat_tree
-                .range(from_key..to_key)
+                .range(from_key..=to_key)
                 .rev()
                 .map(|res| {
                     let (_, value) = res.unwrap();
