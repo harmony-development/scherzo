@@ -11,6 +11,7 @@ Harmony server implemented in Rust.
 - Mediaproxy service: (implemented)
 - Voice service: (not started)
 - Rest APIs: (implemented)
+- Federation: (not implemented)
 
 ## Build
 

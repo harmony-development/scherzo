@@ -391,91 +391,6 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetGuildListResponse { guilds })
     }
 
-    fn add_guild_to_guild_list_pre(&self) -> BoxedFilter<()> {
-        rate(10, 5)
-    }
-
-    async fn add_guild_to_guild_list(
-        &self,
-        request: Request<AddGuildToGuildListRequest>,
-    ) -> Result<AddGuildToGuildListResponse, Self::Error> {
-        let user_id = self.auth(&request)?;
-
-        let AddGuildToGuildListRequest {
-            guild_id,
-            homeserver,
-        } = request.into_parts().0;
-
-        self.chat_tree.check_guild_user(guild_id, user_id)?;
-
-        let serialized = [
-            guild_id.to_be_bytes().as_ref(),
-            homeserver.as_str().as_bytes(),
-        ]
-        .concat();
-
-        self.chat_tree
-            .chat_tree
-            .insert(
-                [
-                    make_guild_list_key_prefix(user_id).as_ref(),
-                    serialized.as_slice(),
-                ]
-                .concat(),
-                [].as_ref(),
-            )
-            .unwrap();
-
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::GuildAddedToList(event::GuildAddedToList {
-                guild_id,
-                homeserver,
-            }),
-            None,
-            EventContext::new(vec![user_id]),
-        )
-        .await;
-
-        Ok(AddGuildToGuildListResponse {})
-    }
-
-    fn remove_guild_from_guild_list_pre(&self) -> BoxedFilter<()> {
-        rate(10, 5)
-    }
-
-    async fn remove_guild_from_guild_list(
-        &self,
-        request: Request<RemoveGuildFromGuildListRequest>,
-    ) -> Result<RemoveGuildFromGuildListResponse, Self::Error> {
-        let user_id = self.auth(&request)?;
-
-        let RemoveGuildFromGuildListRequest {
-            guild_id,
-            homeserver,
-        } = request.into_parts().0;
-
-        self.chat_tree.check_guild(guild_id)?;
-
-        self.chat_tree
-            .chat_tree
-            .remove(make_guild_list_key(user_id, guild_id, homeserver.as_str()))
-            .unwrap();
-
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
-                guild_id,
-                homeserver,
-            }),
-            None,
-            EventContext::new(vec![user_id]),
-        )
-        .await;
-
-        Ok(RemoveGuildFromGuildListResponse {})
-    }
-
     fn get_guild_pre(&self) -> BoxedFilter<()> {
         rate(15, 5)
     }
@@ -2643,5 +2558,48 @@ impl ChatTree {
             })
             .flatten()
             .collect()
+    }
+
+    pub async fn add_guild_to_guild_list(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        homeserver: String,
+    ) -> Result<(), ServerError> {
+        self.check_guild_user(guild_id, user_id)?;
+
+        let serialized = [
+            guild_id.to_be_bytes().as_ref(),
+            homeserver.as_str().as_bytes(),
+        ]
+        .concat();
+
+        self.chat_tree
+            .insert(
+                [
+                    make_guild_list_key_prefix(user_id).as_ref(),
+                    serialized.as_slice(),
+                ]
+                .concat(),
+                [].as_ref(),
+            )
+            .unwrap();
+
+        Ok(())
+    }
+
+    pub async fn remove_guild_from_guild_list(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        homeserver: String,
+    ) -> Result<(), ServerError> {
+        self.check_guild(guild_id)?;
+
+        self.chat_tree
+            .remove(make_guild_list_key(user_id, guild_id, homeserver.as_str()))
+            .unwrap();
+
+        Ok(())
     }
 }

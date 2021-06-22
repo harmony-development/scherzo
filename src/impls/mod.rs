@@ -2,6 +2,7 @@ pub mod auth;
 pub mod chat;
 pub mod mediaproxy;
 pub mod rest;
+pub mod sync;
 
 use std::{
     convert::TryInto,

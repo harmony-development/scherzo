@@ -14,11 +14,15 @@ use harmony_rust_sdk::api::{
         prost::Message,
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
+    sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
 use scherzo::{
     db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
-    impls::{auth::AuthServer, chat::ChatServer, mediaproxy::MediaproxyServer, rest::RestConfig},
+    impls::{
+        auth::AuthServer, chat::ChatServer, mediaproxy::MediaproxyServer, rest::RestConfig,
+        sync::SyncServer,
+    },
     ServerError,
 };
 use tracing::Level;
@@ -202,6 +206,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
     let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
     let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
+    let sync_server = SyncServer;
 
     match command {
         Command::RunServer => {
@@ -231,6 +236,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 sessions: valid_sessions,
             });
             let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
+            let sync = PostboxServiceServer::new(sync_server).filters();
 
             std::thread::spawn(move || {
                 let span = tracing::info_span!("db_validate");
@@ -254,6 +260,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 auth.or(chat)
                     .or(mediaproxy)
                     .or(rest)
+                    .or(sync)
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>)
                     .boxed(),
