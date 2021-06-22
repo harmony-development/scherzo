@@ -1300,9 +1300,11 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
-        let check_as = if r#as != 0 { r#as } else { user_id };
 
-        if check_as != user_id {
+        let as_other = r#as != 0;
+        let check_as = if as_other { r#as } else { user_id };
+
+        if as_other {
             self.chat_tree.check_perms(
                 guild_id,
                 channel_id,
@@ -1319,7 +1321,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(QueryPermissionsResponse {
             ok: self
                 .chat_tree
-                .check_perms(guild_id, channel_id, user_id, &check_for, false)
+                .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .is_ok(),
         })
     }
@@ -2478,11 +2480,12 @@ impl ChatTree {
         check_for: &str,
         must_be_guild_owner: bool,
     ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+        let is_owner = self.is_user_guild_owner(guild_id, user_id)?;
         if must_be_guild_owner {
-            if self.is_user_guild_owner(guild_id, user_id)? {
+            if is_owner {
                 return Ok(());
             }
-        } else if self.is_user_guild_owner(guild_id, user_id)?
+        } else if is_owner
             || self.query_has_permission_logic(guild_id, channel_id, user_id, check_for)
         {
             return Ok(());
