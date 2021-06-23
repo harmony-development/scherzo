@@ -11,14 +11,14 @@
 }
 
 (boilerplate) {
-        log {
-                format console
-        }
+    log {
+        format console
+    }
 
-        encode {
-                zstd
-                gzip
-        }
+    encode {
+        zstd
+        gzip
+    }
 }
 
 https://localhost:2289 {
