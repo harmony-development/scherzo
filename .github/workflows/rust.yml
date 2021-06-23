@@ -53,6 +53,7 @@ jobs:
       run: cargo build --release
 
     - name: Upload release
+      if: github.event_name = 'push'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -64,6 +65,7 @@ jobs:
     needs: build
     name: Update Scherzo at harmonyapp.io
     runs-on: ubuntu-latest
+    if: github.event_name = 'push'
     steps:
       - run: 'echo "$SSH_KEY" > key && chmod 600 key'
         shell: bash
