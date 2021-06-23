@@ -10,7 +10,12 @@ RUN sed -i \
 
 RUN apk add --no-cache cargo protoc
 
-RUN cargo install --git "https://github.com/harmony-development/scherzo.git" --rev ${GIT_REF}
+COPY src src
+COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
+COPY .cargo .cargo
+
+RUN cargo install --path .
 
 FROM alpine:3.12
 
@@ -19,9 +24,7 @@ EXPOSE 2289
 RUN mkdir -p /srv/scherzo
 COPY --from=builder /root/.cargo/bin/scherzo /srv/scherzo/
 
-RUN apk add --no-cache \
-        ca-certificates \
-        libgcc
+RUN echo "listen_on_localhost = false" > /srv/scherzo/config.toml
 
 RUN set -x ; \
     addgroup -Sg 82 www-data 2>/dev/null ; \
@@ -29,6 +32,10 @@ RUN set -x ; \
     addgroup www-data www-data 2>/dev/null && exit 0 ; exit 1
 
 RUN chown -cR www-data:www-data /srv/scherzo
+
+RUN apk add --no-cache \
+        ca-certificates \
+        libgcc
 
 VOLUME ["/srv/scherzo/db"]
 
