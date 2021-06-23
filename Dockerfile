@@ -34,10 +34,13 @@ RUN set -x ; \
 RUN chown -cR www-data:www-data /srv/scherzo
 
 RUN apk add --no-cache \
+        curl \
         ca-certificates \
         libgcc
 
 VOLUME ["/srv/scherzo/db", "/srv/scherzo/media", "/srv/scherzo/logs"]
+
+HEALTHCHECK --start-period=2s CMD curl --fail -s http://localhost:2289/_harmony/version || curl -k --fail -s https://localhost:2289/_harmony/version || exit 1
 
 USER www-data
 WORKDIR /srv/scherzo
