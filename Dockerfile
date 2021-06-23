@@ -10,7 +10,7 @@ RUN sed -i \
 
 RUN apk add --no-cache cargo protoc
 
-RUN cargo install --git "https://gitlab.com/harmony-development/scherzo.git" --rev ${GIT_REF}
+RUN cargo install --git "https://github.com/harmony-development/scherzo.git" --rev ${GIT_REF}
 
 FROM alpine:3.12
 
