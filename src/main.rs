@@ -266,15 +266,21 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                     .boxed(),
             );
 
+            let addr = if config.listen_on_localhost {
+                ([127, 0, 0, 1], config.port)
+            } else {
+                ([0, 0, 0, 0], config.port)
+            };
+
             if let Some(tls_config) = config.tls {
                 serve
                     .tls()
                     .cert_path(tls_config.cert_file)
                     .key_path(tls_config.key_file)
-                    .run(([127, 0, 0, 1], config.port))
+                    .run(addr)
                     .await
             } else {
-                serve.run(([127, 0, 0, 1], config.port)).await
+                serve.run(addr).await
             }
         }
         Command::GetInvites => {

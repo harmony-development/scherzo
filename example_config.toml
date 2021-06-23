@@ -1,3 +1,4 @@
+listen_on_localhost = true
 port = 2289
 
 [tls]
