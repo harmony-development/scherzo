@@ -1074,6 +1074,8 @@ impl chat_service_server::ChatService for ChatServer {
         match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
             None => {
+                self.chat_tree
+                    .add_guild_to_guild_list(user_id, guild_id, "");
                 self.send_event_through_chan(
                     EventSub::Homeserver,
                     event::Event::GuildAddedToList(event::GuildAddedToList {
@@ -1131,6 +1133,8 @@ impl chat_service_server::ChatService for ChatServer {
         match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
             None => {
+                self.chat_tree
+                    .remove_guild_from_guild_list(user_id, guild_id, "");
                 self.send_event_through_chan(
                     EventSub::Homeserver,
                     event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
@@ -2598,19 +2602,8 @@ impl ChatTree {
             .collect()
     }
 
-    pub fn add_guild_to_guild_list(
-        &self,
-        user_id: u64,
-        guild_id: u64,
-        homeserver: String,
-    ) -> Result<(), ServerError> {
-        self.check_guild_user(guild_id, user_id)?;
-
-        let serialized = [
-            guild_id.to_be_bytes().as_ref(),
-            homeserver.as_str().as_bytes(),
-        ]
-        .concat();
+    pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
+        let serialized = [guild_id.to_be_bytes().as_ref(), homeserver.as_bytes()].concat();
 
         self.chat_tree
             .insert(
@@ -2622,23 +2615,12 @@ impl ChatTree {
                 [].as_ref(),
             )
             .unwrap();
-
-        Ok(())
     }
 
-    pub fn remove_guild_from_guild_list(
-        &self,
-        user_id: u64,
-        guild_id: u64,
-        homeserver: String,
-    ) -> Result<(), ServerError> {
-        self.check_guild(guild_id)?;
-
+    pub fn remove_guild_from_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
         self.chat_tree
-            .remove(make_guild_list_key(user_id, guild_id, homeserver.as_str()))
+            .remove(make_guild_list_key(user_id, guild_id, homeserver))
             .unwrap();
-
-        Ok(())
     }
 
     pub fn local_user_id_to_foreign_user_id(&self, user_id: u64) -> Option<(u64, String)> {
