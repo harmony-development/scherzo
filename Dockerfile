@@ -37,7 +37,7 @@ RUN apk add --no-cache \
         ca-certificates \
         libgcc
 
-VOLUME ["/srv/scherzo/db"]
+VOLUME ["/srv/scherzo/db", "/srv/scherzo/media", "/srv/scherzo/logs"]
 
 USER www-data
 WORKDIR /srv/scherzo
