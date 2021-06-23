@@ -22,7 +22,6 @@ use harmony_rust_sdk::api::{
 };
 use parking_lot::RwLock;
 use sled::Tree;
-use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 
 use super::{gen_rand_u64, make_u64_iter_logic, rate};
@@ -251,6 +250,24 @@ impl chat_service_server::ChatService for ChatServer {
             .channel_id;
         self.chat_tree
             .set_permissions_logic(guild_id, channel_id, everyone_role_id, def_perms);
+
+        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+            Some(_) => todo!("implement after postbox and federate"),
+            None => {
+                self.chat_tree
+                    .add_guild_to_guild_list(user_id, guild_id, "");
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    event::Event::GuildAddedToList(event::GuildAddedToList {
+                        guild_id,
+                        homeserver: String::new(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                )
+                .await;
+            }
+        }
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -813,12 +830,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "guild.manage.delete", false)?;
 
-        if !self.chat_tree.is_user_guild_owner(guild_id, user_id)? {
-            return Err(ServerError::NotEnoughPermissions {
-                must_be_guild_owner: true,
-                missing_permission: SmolStr::new_inline(""),
-            });
-        }
+        let guild_members = self.chat_tree.get_guild_members_logic(guild_id).members;
 
         let guild_data = self
             .chat_tree
@@ -837,6 +849,28 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
             None,
             EventContext::empty(),
+        )
+        .await;
+
+        let mut local_ids = Vec::new();
+        for member_id in guild_members {
+            match self.chat_tree.local_user_id_to_foreign_user_id(member_id) {
+                Some(_) => todo!("implement after postbox and federate"),
+                None => {
+                    self.chat_tree
+                        .remove_guild_from_guild_list(user_id, guild_id, "");
+                    local_ids.push(member_id);
+                }
+            }
+        }
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
+                guild_id,
+                homeserver: String::new(),
+            }),
+            None,
+            EventContext::new(local_ids),
         )
         .await;
 
@@ -1080,7 +1114,7 @@ impl chat_service_server::ChatService for ChatServer {
                     EventSub::Homeserver,
                     event::Event::GuildAddedToList(event::GuildAddedToList {
                         guild_id,
-                        homeserver: "".to_string(),
+                        homeserver: String::new(),
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -1139,7 +1173,7 @@ impl chat_service_server::ChatService for ChatServer {
                     EventSub::Homeserver,
                     event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
                         guild_id,
-                        homeserver: "".to_string(),
+                        homeserver: String::new(),
                     }),
                     None,
                     EventContext::new(vec![user_id]),
