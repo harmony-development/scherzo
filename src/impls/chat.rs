@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, mem::size_of, sync::Arc};
+use std::{collections::HashMap, convert::TryInto, mem::size_of, ops::Not, sync::Arc};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -1047,35 +1047,55 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserAlreadyInGuild);
         }
 
-        if invite.use_count < invite.possible_uses || invite.possible_uses == -1 {
-            self.chat_tree
-                .chat_tree
-                .insert(&make_member_key(guild_id, user_id), &[])
-                .unwrap();
-            self.chat_tree.add_default_role_to(guild_id, user_id)?;
-            invite.use_count += 1;
+        let is_infinite = invite.possible_uses == -1;
 
-            self.send_event_through_chan(
-                EventSub::Guild(guild_id),
-                event::Event::JoinedMember(event::MemberJoined {
-                    guild_id,
-                    member_id: user_id,
-                }),
-                None,
-                EventContext::empty(),
-            )
-            .await;
-
-            let mut buf = BytesMut::new();
-            encode_protobuf_message(&mut buf, invite);
-            self.chat_tree
-                .chat_tree
-                .insert(
-                    &key,
-                    [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
-                )
-                .unwrap();
+        if is_infinite.not() && invite.use_count >= invite.possible_uses {
+            return Err(ServerError::InviteExpired);
         }
+
+        self.chat_tree
+            .chat_tree
+            .insert(&make_member_key(guild_id, user_id), &[])
+            .unwrap();
+        self.chat_tree.add_default_role_to(guild_id, user_id)?;
+        invite.use_count += 1;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::JoinedMember(event::MemberJoined {
+                guild_id,
+                member_id: user_id,
+            }),
+            None,
+            EventContext::empty(),
+        )
+        .await;
+
+        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+            Some(_) => todo!("implement this after postbox and federate"),
+            None => {
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    event::Event::GuildAddedToList(event::GuildAddedToList {
+                        guild_id,
+                        homeserver: "".to_string(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                )
+                .await;
+            }
+        }
+
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, invite);
+        self.chat_tree
+            .chat_tree
+            .insert(
+                &key,
+                [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+            )
+            .unwrap();
 
         Ok(JoinGuildResponse { guild_id })
     }
@@ -1107,6 +1127,22 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         )
         .await;
+
+        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+            Some(_) => todo!("implement this after postbox and federate"),
+            None => {
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
+                        guild_id,
+                        homeserver: "".to_string(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                )
+                .await;
+            }
+        }
 
         Ok(())
     }
@@ -2562,7 +2598,7 @@ impl ChatTree {
             .collect()
     }
 
-    pub async fn add_guild_to_guild_list(
+    pub fn add_guild_to_guild_list(
         &self,
         user_id: u64,
         guild_id: u64,
@@ -2590,7 +2626,7 @@ impl ChatTree {
         Ok(())
     }
 
-    pub async fn remove_guild_from_guild_list(
+    pub fn remove_guild_from_guild_list(
         &self,
         user_id: u64,
         guild_id: u64,
@@ -2603,5 +2639,16 @@ impl ChatTree {
             .unwrap();
 
         Ok(())
+    }
+
+    pub fn local_user_id_to_foreign_user_id(&self, user_id: u64) -> Option<(u64, String)> {
+        let key = make_foreign_user_key(user_id);
+
+        self.chat_tree.get(&key).unwrap().map(|raw| {
+            let (raw_id, raw_host) = raw.split_at(std::mem::size_of::<u64>());
+            let foreign_id = u64::from_be_bytes(raw_id.try_into().unwrap());
+            let host = std::str::from_utf8(raw_host).unwrap().to_string();
+            (foreign_id, host)
+        })
     }
 }

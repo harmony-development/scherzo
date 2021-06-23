@@ -44,6 +44,10 @@ pub mod chat {
         ])
     }
 
+    pub const fn make_foreign_user_key(local_id: u64) -> [u8; 14] {
+        concat_static(&[USER_PREFIX, &local_id.to_be_bytes(), &[2]])
+    }
+
     pub const fn make_user_profile_key(user_id: u64) -> [u8; 13] {
         concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
     }

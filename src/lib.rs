@@ -101,11 +101,13 @@ pub enum ServerError {
     NotAnImage,
     TooFast(Duration),
     MediaNotFound,
+    InviteExpired,
 }
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ServerError::InviteExpired => write!(f, "invite expired"),
             ServerError::InvalidUrl(err) => write!(f, "invalid URL: {}", err),
             ServerError::TooFast(rem) => write!(f, "too fast, try again in {}", rem.as_secs_f64()),
             ServerError::InvalidAuthId => write!(f, "invalid auth id"),
@@ -245,7 +247,8 @@ impl CustomError for ServerError {
             | ServerError::MissingFiles
             | ServerError::InvalidFileId
             | ServerError::NotAnImage
-            | ServerError::InvalidUrl(_) => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidUrl(_)
+            | ServerError::InviteExpired => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
@@ -306,6 +309,7 @@ impl CustomError for ServerError {
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
             ServerError::MediaNotFound => return Self::NOT_FOUND_ERROR.1.to_vec(),
             ServerError::InvalidUrl(_) => "h.invalid-url",
+            ServerError::InviteExpired => "h.bad-invite-id",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }
