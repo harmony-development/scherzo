@@ -261,6 +261,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                     .or(mediaproxy)
                     .or(rest)
                     .or(sync)
+                    .or(scherzo::impls::version())
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>)
                     .boxed(),

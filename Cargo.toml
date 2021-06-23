@@ -33,6 +33,7 @@ console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch =
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "master", default-features = false }
 lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
+git-version = "0.3"
 
 [profile.dev]
 opt-level = 0

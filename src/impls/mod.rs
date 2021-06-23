@@ -14,7 +14,7 @@ use harmony_rust_sdk::api::exports::{
     hrpc::{
         http,
         server::filters::{rate::Rate, rate_limit},
-        warp::{filters::BoxedFilter, Filter},
+        warp::{self, filters::BoxedFilter, Filter, Reply},
     },
     prost::bytes::Bytes,
 };
@@ -99,4 +99,17 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
 fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
     raw.chunks_exact(size_of::<u64>())
         .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
+}
+
+const SCHERZO_VERSION: &str = git_version::git_version!(
+    prefix = "git:",
+    cargo_prefix = "cargo:",
+    fallback = "unknown"
+);
+
+pub fn version() -> BoxedFilter<(impl Reply,)> {
+    warp::get()
+        .and(warp::path!("_harmony" / "version"))
+        .map(|| format!("scherzo {}\n", SCHERZO_VERSION))
+        .boxed()
 }
