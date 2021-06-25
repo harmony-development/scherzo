@@ -27,21 +27,28 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v2
 
-    - name: Install dependencies
-      run: |
-        sudo apt update -yy
-        sudo apt install -yy --no-install-recommends protobuf-compiler lld
-    - name: Install rust
-      run: rustup default 1.53.0 && rustup component add rustfmt clippy
+    - name: Install nix
+      uses: cachix/install-nix-action@v13
+      with:
+        install_url: https://github.com/numtide/nix-unstable-installer/releases/download/nix-2.4pre20210604_8e6ee1b/install
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+        nix_path: nixpkgs=channel:nixos-unstable
 
-    - name: Cache rust
-      uses: Swatinem/rust-cache@v1
+    - name: Setup cachix
+      uses: cachix/cachix-action@v10
+      with:
+        name: harmony
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-    - name: Install Cargo Deny
-      run: cargo install --locked cargo-deny
+    - name: Enter devshell
+      run: nix build .#devShell.x86_64-linux && source result 
 
     - name: Cargo Deny
       run: cargo deny check
+
+    - name: Cache rust
+      uses: Swatinem/rust-cache@v1
 
     - name: Clippy
       uses: actions-rs/clippy-check@v1
@@ -51,6 +58,9 @@ jobs:
 
     - name: Build
       run: cargo build --release
+
+    - name: Compress binary
+      run: upx target/release/scherzo
 
     - name: Upload release
       if: github.event_name == 'push'
