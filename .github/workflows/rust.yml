@@ -61,13 +61,10 @@ jobs:
       uses: Swatinem/rust-cache@v1
 
     - name: Clippy
-      uses: actions-rs/clippy-check@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy
+      run: nix develop -c cargo clippy
 
     - name: Build
-      run: cargo build --release
+      run: nix develop -c cargo build --release
       
     - name: Upload release
       if: github.event_name == 'push'
