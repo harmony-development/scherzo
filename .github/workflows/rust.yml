@@ -19,6 +19,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTC_FORCE_INCREMENTAL: 1
 
 jobs:
   build:
@@ -42,7 +43,16 @@ jobs:
         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
     - name: Enter devshell
-      run: nix build .#devShell.x86_64-linux && source result 
+      run: |
+          nix build .#devShell.x86_64-linux 
+          source result
+          echo "$DEVSHELL_DIR/bin" >> $GITHUB_PATH
+          echo "PROTOC=$PROTOC" >> $GITHUB_ENV
+          echo "PROTOC_INCLUDE=$PROTOC_INCLUDE" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "C_INCLUDE_PATH=$C_INCLUDE_PATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$LIBRARY_PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
 
     - name: Cargo Deny
       run: cargo deny check
