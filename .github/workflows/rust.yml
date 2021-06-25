@@ -45,7 +45,10 @@ jobs:
       run: cargo deny check
 
     - name: Clippy
-      run: nix develop -c cargo clippy
+    - uses: actions-rs/clippy-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        name: clippy
 
     - name: Build
       run: cargo build --release
