@@ -68,10 +68,7 @@ jobs:
 
     - name: Build
       run: cargo build --release
-
-    - name: Compress binary
-      run: upx target/release/scherzo
-
+      
     - name: Upload release
       if: github.event_name == 'push'
       env:
