@@ -654,7 +654,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c8a8fa8efa7b5fac1ff4122ce00d2a770a2261fd"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#94ea7e8cc6e70c82d80c42af1acc605b0a459ddc"
 dependencies = [
  "proc-macro2 1.0.27",
  "quote 1.0.9",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c8a8fa8efa7b5fac1ff4122ce00d2a770a2261fd"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#94ea7e8cc6e70c82d80c42af1acc605b0a459ddc"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -719,9 +719,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "322f4de77956e22ed0e5032c359a0f1273f1f7f0d79bfa3b8ffbc730d7fbcc5c"
+checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
 ]
