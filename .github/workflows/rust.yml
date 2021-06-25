@@ -28,44 +28,28 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v2
 
-    - name: Install nix
-      uses: cachix/install-nix-action@v13
-      with:
-        install_url: https://github.com/numtide/nix-unstable-installer/releases/download/nix-2.4pre20210604_8e6ee1b/install
-        extra_nix_config: |
-          experimental-features = nix-command flakes
-        nix_path: nixpkgs=channel:nixos-unstable
-
-    - name: Setup cachix
-      uses: cachix/cachix-action@v10
-      with:
-        name: harmony
-        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-    - name: Enter devshell
+    - name: Install dependencies
       run: |
-          nix build .#devShell.x86_64-linux 
-          source result
-          echo "$DEVSHELL_DIR/bin" >> $GITHUB_PATH
-          echo "PROTOC=$PROTOC" >> $GITHUB_ENV
-          echo "PROTOC_INCLUDE=$PROTOC_INCLUDE" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> $GITHUB_ENV
-          echo "C_INCLUDE_PATH=$C_INCLUDE_PATH" >> $GITHUB_ENV
-          echo "LIBRARY_PATH=$LIBRARY_PATH" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
-
-    - name: Cargo Deny
-      run: cargo deny check
+        sudo apt update -yy
+        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+    - name: Install rust
+      run: rustup default 1.53.0 && rustup component add rustfmt clippy
 
     - name: Cache rust
       uses: Swatinem/rust-cache@v1
+
+    - name: Install Cargo Deny
+      run: cargo install --locked cargo-deny
+
+    - name: Cargo Deny
+      run: cargo deny check
 
     - name: Clippy
       run: nix develop -c cargo clippy
 
     - name: Build
-      run: nix develop -c cargo build --release
-      
+      run: cargo build --release
+
     - name: Upload release
       if: github.event_name == 'push'
       env:
