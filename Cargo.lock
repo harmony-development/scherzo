@@ -1832,6 +1832,7 @@ dependencies = [
  "ahash",
  "cached",
  "console-subscriber",
+ "crossbeam-channel",
  "dashmap 4.0.2 (git+https://github.com/jackthomson2/dashmap.git?branch=master)",
  "flume",
  "git-version",
