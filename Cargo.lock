@@ -1815,7 +1815,6 @@ dependencies = [
  "ahash",
  "cached",
  "console-subscriber",
- "crossbeam-channel",
  "dashmap",
  "git-version",
  "harmony_rust_sdk",

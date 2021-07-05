@@ -1,7 +1,6 @@
 use std::{collections::HashMap, convert::TryInto, mem::size_of, ops::Not, sync::Arc};
 
 use ahash::RandomState;
-use crossbeam_channel::Sender;
 use dashmap::DashMap;
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
@@ -23,6 +22,7 @@ use harmony_rust_sdk::api::{
 };
 use parking_lot::RwLock;
 use sled::Tree;
+use tokio::sync::mpsc::{self, Sender};
 
 use super::{gen_rand_u64, make_u64_iter_logic, rate};
 use crate::{
@@ -122,7 +122,7 @@ impl ChatServer {
                     let has = subbed_to.read().contains(&sub);
                     if has {
                         if let Some(chan) = self.event_chans.get(stream_id) {
-                            if let Err(err) = chan.send(event.clone()) {
+                            if let Err(err) = chan.send(event.clone()).await {
                                 tracing::error!(
                                     "failed to send event to stream {} of user {}: {}",
                                     stream_id,
@@ -1657,7 +1657,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let stream_id = gen_rand_u64();
         let (mut rs, mut ws) = socket.split();
-        let (tx, rx) = crossbeam_channel::bounded(64);
+        let (tx, mut rx) = mpsc::channel(64);
         self.event_chans.insert(stream_id, tx);
         let subbed_to = self
             .subbed_to
@@ -1670,7 +1670,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let send_loop = async move {
             loop {
-                if let Ok(event) = rx.recv().map(|event| Event { event: Some(event) }) {
+                if let Some(event) = rx.recv().await.map(|event| Event { event: Some(event) }) {
                     return_print!(ws.send_message(event).await);
                 }
             }

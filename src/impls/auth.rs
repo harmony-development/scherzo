@@ -1,7 +1,6 @@
 use std::{convert::TryInto, mem::size_of, sync::Arc, time::Duration};
 
 use ahash::RandomState;
-use crossbeam_channel::Sender;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::*,
@@ -19,6 +18,7 @@ use harmony_rust_sdk::api::{
 use sha3::Digest;
 use sled::{IVec, Tree};
 use smol_str::SmolStr;
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
     db::{
@@ -216,10 +216,10 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<AuthStep>) {
-        let (tx, rx) = crossbeam_channel::bounded(64);
+        let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id, tx);
         loop {
-            if let Ok(step) = rx.recv() {
+            if let Some(step) = rx.recv().await {
                 return_print!(socket.send_message(step).await);
             }
         }
@@ -534,7 +534,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
 
         if let Some(chan) = self.send_step.get(auth_id.as_str()) {
-            if let Err(err) = chan.send(next_step.clone()) {
+            if let Err(err) = chan.send(next_step.clone()).await {
                 tracing::error!("failed to send auth step to {}: {}", auth_id, err);
             }
         }
@@ -574,7 +574,7 @@ impl auth_service_server::AuthService for AuthServer {
             }
             prev_step = step_stack.last().unwrap().clone();
             if let Some(chan) = self.send_step.get(auth_id.as_str()) {
-                if let Err(err) = chan.send(prev_step.clone()) {
+                if let Err(err) = chan.send(prev_step.clone()).await {
                     tracing::error!("failed to send auth step to {}: {}", auth_id, err);
                 }
             }

@@ -33,7 +33,6 @@ webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "master
 lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
-crossbeam-channel = "0.5.1"
 
 [profile.dev]
 opt-level = 0
