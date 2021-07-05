@@ -18,7 +18,7 @@ tokio-util = "0.6.7"
 tracing = "0.1"
 tracing-subscriber = "0.2"
 tracing-appender = "0.1"
-cached = "0.23"
+cached = { version = "0.23", default-features = false, features = ["proc_macro"] }
 paste = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.5"
@@ -26,7 +26,7 @@ sha3 = "0.9"
 urlencoding = "1.3"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
 infer = { version = "0.5", default-features = false }
-dashmap = "4.0"
+dashmap = { git = "https://github.com/jackthomson2/dashmap.git", branch = "master" }
 ahash = { version = "0.7", default-features = false }
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main", optional = true }
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "master", default-features = false }
