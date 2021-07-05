@@ -76,19 +76,6 @@ pub struct AuthServer {
 
 impl AuthServer {
     pub fn new(chat_tree: Tree, auth_tree: Tree, valid_sessions: SessionMap) -> Self {
-        fn scan_tree_for(auth_tree: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
-            auth_tree
-                .scan_prefix(prefix)
-                .flatten()
-                .map(|(key, val)| {
-                    (
-                        u64::from_be_bytes(key.split_at(prefix.len()).1.try_into().unwrap()),
-                        val,
-                    )
-                })
-                .collect()
-        }
-
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
         let vs = valid_sessions.clone();
@@ -96,9 +83,24 @@ impl AuthServer {
         std::thread::spawn(move || {
             let _guard = tracing::info_span!("auth_session_check").entered();
             tracing::info!("starting auth session expiration check thread");
+
+            fn scan_tree_for<'a>(
+                att: &'a Tree,
+                prefix: &[u8],
+            ) -> impl Iterator<Item = (u64, IVec)> + 'a {
+                let len = prefix.len();
+                att.scan_prefix(prefix).map(move |res| {
+                    let (key, val) = res.unwrap();
+                    (
+                        u64::from_be_bytes(key.split_at(len).1.try_into().unwrap()),
+                        val,
+                    )
+                })
+            }
+
             loop {
                 let tokens = scan_tree_for(&att, TOKEN_PREFIX);
-                let atimes = scan_tree_for(&att, ATIME_PREFIX);
+                let atimes = scan_tree_for(&att, ATIME_PREFIX).collect::<Vec<_>>();
 
                 let mut batch = sled::Batch::default();
                 for (id, raw_token) in tokens {
