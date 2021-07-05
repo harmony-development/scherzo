@@ -84,23 +84,22 @@ impl AuthServer {
             let _guard = tracing::info_span!("auth_session_check").entered();
             tracing::info!("starting auth session expiration check thread");
 
-            fn scan_tree_for<'a>(
-                att: &'a Tree,
-                prefix: &[u8],
-            ) -> impl Iterator<Item = (u64, IVec)> + 'a {
+            fn scan_tree_for(att: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
                 let len = prefix.len();
-                att.scan_prefix(prefix).map(move |res| {
-                    let (key, val) = res.unwrap();
-                    (
-                        u64::from_be_bytes(key.split_at(len).1.try_into().unwrap()),
-                        val,
-                    )
-                })
+                att.scan_prefix(prefix)
+                    .map(move |res| {
+                        let (key, val) = res.unwrap();
+                        (
+                            u64::from_be_bytes(key.split_at(len).1.try_into().unwrap()),
+                            val,
+                        )
+                    })
+                    .collect()
             }
 
             loop {
                 let tokens = scan_tree_for(&att, TOKEN_PREFIX);
-                let atimes = scan_tree_for(&att, ATIME_PREFIX).collect::<Vec<_>>();
+                let atimes = scan_tree_for(&att, ATIME_PREFIX);
 
                 let mut batch = sled::Batch::default();
                 for (id, raw_token) in tokens {
