@@ -9,7 +9,7 @@ FROM alpine:3.12
 EXPOSE 2289
 
 RUN mkdir -p /srv/scherzo
-COPY --from=builder /root/.cargo/bin/scherzo /srv/scherzo/
+COPY --from=builder /root/scherzo /srv/scherzo/
 
 RUN echo "listen_on_localhost = false" > /srv/scherzo/config.toml
 
