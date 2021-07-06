@@ -1,21 +1,8 @@
-# Alpine build image to build Scherzo's statically compiled binary
 FROM alpine:3.12 as builder
 
-# Specifies which revision/commit is build. Defaults to HEAD
-ARG GIT_REF=origin/master
+RUN apk add --no-cache curl
 
-RUN sed -i \
-	-e 's|v3\.12|edge|' \
-	/etc/apk/repositories
-
-RUN apk add --no-cache cargo protoc
-
-COPY src src
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
-COPY .cargo .cargo
-
-RUN cargo install --path .
+RUN cd /root && curl -L https://github.com/harmony-development/scherzo/releases/download/continuous/scherzo > scherzo && chmod +x scherzo
 
 FROM alpine:3.12
 
