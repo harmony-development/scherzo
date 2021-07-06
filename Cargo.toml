@@ -56,11 +56,13 @@ debug = false
 codegen-units = 1
 panic = 'abort'
 
-[workspace.metadata.nix]
-systems = ["x86_64-linux"]
+[package.metadata.nix]
 app = true
 build = true
 library = true
+
+[workspace.metadata.nix]
+systems = ["x86_64-linux"]
 devshell.packages = ["cargo-deny", "mkcert"]
 nativeBuildInputs = ["lld_12"]
 env.RUSTC_FORCE_INCREMENTAL = "1"
