@@ -1,21 +1,19 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use reqwest::{Client, Url};
+use scherzo_derive::*;
 use smol_str::SmolStr;
 use webpage::HTML;
 
 use std::time::Instant;
 
 use crate::{
-    impls::{
-        auth::{self, SessionMap},
-        get_mimetype, http, rate,
-    },
+    impls::{auth::SessionMap, get_mimetype, http},
     ServerError,
 };
 
 use harmony_rust_sdk::api::{
-    exports::hrpc::{warp::filters::BoxedFilter, Request},
+    exports::hrpc::Request,
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 
@@ -70,11 +68,6 @@ impl MediaproxyServer {
         }
     }
 
-    #[inline(always)]
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
-        auth::check_auth(&self.valid_sessions, request)
-    }
-
     async fn fetch_metadata(&self, raw_url: String) -> Result<Metadata, ServerError> {
         // Get from cache if available
         if let Some(value) = get_from_cache(&raw_url) {
@@ -125,15 +118,12 @@ impl MediaproxyServer {
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     type Error = ServerError;
 
-    fn fetch_link_metadata_pre(&self) -> BoxedFilter<()> {
-        rate(2, 1)
-    }
-
+    #[rate(2, 1)]
     async fn fetch_link_metadata(
         &self,
         request: Request<FetchLinkMetadataRequest>,
     ) -> Result<FetchLinkMetadataResponse, Self::Error> {
-        self.auth(&request)?;
+        auth!();
 
         let FetchLinkMetadataRequest { url } = request.into_parts().0;
 
@@ -153,15 +143,12 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         Ok(FetchLinkMetadataResponse { data: Some(data) })
     }
 
-    fn instant_view_pre(&self) -> BoxedFilter<()> {
-        rate(1, 5)
-    }
-
+    #[rate(1, 5)]
     async fn instant_view(
         &self,
         request: Request<InstantViewRequest>,
     ) -> Result<InstantViewResponse, Self::Error> {
-        self.auth(&request)?;
+        auth!();
 
         let InstantViewRequest { url } = request.into_parts().0;
 
@@ -185,15 +172,12 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         }
     }
 
-    fn can_instant_view_pre(&self) -> BoxedFilter<()> {
-        rate(20, 5)
-    }
-
+    #[rate(20, 5)]
     async fn can_instant_view(
         &self,
         request: Request<InstantViewRequest>,
     ) -> Result<CanInstantViewResponse, Self::Error> {
-        self.auth(&request)?;
+        auth!();
 
         let InstantViewRequest { url } = request.into_parts().0;
 

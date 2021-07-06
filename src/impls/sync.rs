@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use super::*;
 
 use ahash::RandomState;
@@ -24,6 +26,7 @@ pub struct SyncServer {
 }
 
 impl SyncServer {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             clients: DashMap::default(),

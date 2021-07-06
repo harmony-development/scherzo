@@ -1817,6 +1817,7 @@ dependencies = [
  "paste",
  "rand 0.8.4",
  "reqwest",
+ "scherzo_derive",
  "serde",
  "sha3",
  "sled",
@@ -1829,6 +1830,14 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "webpage",
+]
+
+[[package]]
+name = "scherzo_derive"
+version = "0.1.0"
+dependencies = [
+ "quote 1.0.9",
+ "syn 1.0.73",
 ]
 
 [[package]]

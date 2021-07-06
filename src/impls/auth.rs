@@ -7,14 +7,13 @@ use harmony_rust_sdk::api::{
     chat::GetUserResponse,
     exports::{
         hrpc::{
-            encode_protobuf_message, return_print,
-            server::WriteSocket,
-            warp::{filters::BoxedFilter, reply::Response},
+            encode_protobuf_message, return_print, server::WriteSocket, warp::reply::Response,
             Request,
         },
         prost::bytes::BytesMut,
     },
 };
+use scherzo_derive::rate;
 use sha3::Digest;
 use sled::{IVec, Tree};
 use smol_str::SmolStr;
@@ -27,7 +26,7 @@ use crate::{
         chat::{self as chatdb, make_user_profile_key},
     },
     http,
-    impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs, rate},
+    impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
     set_proto_name, ServerError, ServerResult,
 };
 
@@ -153,26 +152,17 @@ impl AuthServer {
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
-    fn check_logged_in_pre(&self) -> BoxedFilter<()> {
-        rate(20, 5)
-    }
-
+    #[rate(20, 5)]
     async fn check_logged_in(&self, request: Request<()>) -> Result<(), Self::Error> {
         self.auth(&request).map(|_| ())
     }
 
-    fn federate_pre(&self) -> BoxedFilter<()> {
-        rate(3, 1)
-    }
-
+    #[rate(3, 1)]
     async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
         Err(ServerError::NotImplemented)
     }
 
-    fn login_federated_pre(&self) -> BoxedFilter<()> {
-        rate(1, 5)
-    }
-
+    #[rate(1, 5)]
     async fn login_federated(
         &self,
         _: Request<LoginFederatedRequest>,
@@ -180,20 +170,13 @@ impl auth_service_server::AuthService for AuthServer {
         Err(ServerError::NotImplemented)
     }
 
-    fn key_pre(&self) -> BoxedFilter<()> {
-        rate(1, 5)
-    }
-
+    #[rate(1, 5)]
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
         Err(ServerError::NotImplemented)
     }
 
     fn stream_steps_on_upgrade(&self, response: Response) -> Response {
         set_proto_name(response)
-    }
-
-    fn stream_steps_pre(&self) -> BoxedFilter<()> {
-        rate(2, 5)
     }
 
     type StreamStepsValidationType = SmolStr;
@@ -215,6 +198,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
     }
 
+    #[rate(2, 5)]
     async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<AuthStep>) {
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id, tx);
@@ -225,10 +209,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
     }
 
-    fn begin_auth_pre(&self) -> BoxedFilter<()> {
-        rate(2, 5)
-    }
-
+    #[rate(2, 5)]
     async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
         let initial_step = AuthStep {
             can_go_back: false,
@@ -256,10 +237,7 @@ impl auth_service_server::AuthService for AuthServer {
         })
     }
 
-    fn next_step_pre(&self) -> BoxedFilter<()> {
-        rate(10, 5)
-    }
-
+    #[rate(10, 5)]
     async fn next_step(&self, req: Request<NextStepRequest>) -> Result<AuthStep, Self::Error> {
         let NextStepRequest {
             auth_id,
@@ -552,10 +530,7 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(next_step)
     }
 
-    fn step_back_pre(&self) -> BoxedFilter<()> {
-        rate(10, 5)
-    }
-
+    #[rate(10, 5)]
     async fn step_back(&self, req: Request<StepBackRequest>) -> Result<AuthStep, Self::Error> {
         let req = req.into_parts().0;
         let auth_id = req.auth_id;

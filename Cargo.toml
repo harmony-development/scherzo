@@ -1,3 +1,6 @@
+[workspace]
+members = ["scherzo_derive"]
+
 [package]
 name = "scherzo"
 version = "0.1.0"
@@ -9,6 +12,7 @@ default = []
 console = ["console-subscriber", "tokio/tracing"]
 
 [dependencies]
+scherzo_derive = { path = "./scherzo_derive" }
 harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = ["gen_server", "gen_client"] }
 sled = { version = "0.34.6", features = ["compression"] }
 parking_lot = "0.11"
@@ -52,7 +56,7 @@ debug = false
 codegen-units = 1
 panic = 'abort'
 
-[package.metadata.nix]
+[workspace.metadata.nix]
 systems = ["x86_64-linux"]
 app = true
 build = true
