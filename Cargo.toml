@@ -62,7 +62,6 @@ app = true
 build = true
 library = true
 devshell.packages = ["cargo-deny", "mkcert"]
-cCompiler = "llvmPackages_12.clang"
 nativeBuildInputs = ["lld_12"]
 env.RUSTC_FORCE_INCREMENTAL = "1"
 

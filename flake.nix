@@ -16,6 +16,7 @@
     buildPlatform = "crate2nix";
     overrides = {
       shell = common: prev: {
+        packages = prev.packages ++ [ common.pkgs.musl.dev ];
         commands = prev.commands ++ [
           {
             name = "generate-cert";

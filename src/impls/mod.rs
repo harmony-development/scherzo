@@ -50,14 +50,13 @@ fn gen_rand_str<const LEN: usize>() -> SmolStr {
 fn gen_rand_arr<const LEN: usize>() -> [u8; LEN] {
     let mut res = [0_u8; LEN];
 
-    for (index, ch) in rand::thread_rng()
+    let random = rand::thread_rng()
         .sample_iter(rand::distributions::Alphanumeric) // [tag:alphanumeric_array_gen]
-        .take(LEN)
-        .enumerate()
-    {
-        // Safety: we only take `LEN` long u8s, so this can never panic
-        res[index] = ch;
-    }
+        .take(LEN);
+
+    random
+        .zip(res.iter_mut())
+        .for_each(|(new_ch, ch)| *ch = new_ch);
 
     res
 }
