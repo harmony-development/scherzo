@@ -14,6 +14,8 @@ const fn port_default() -> u16 {
 pub struct Config {
     #[serde(default = "listen_on_localhost_default")]
     pub listen_on_localhost: bool,
+    #[serde(default)]
+    pub disable_ratelimits: bool,
     #[serde(default = "port_default")]
     pub port: u16,
     #[serde(default)]
@@ -25,6 +27,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            disable_ratelimits: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
             tls: None,

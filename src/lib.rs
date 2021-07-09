@@ -3,6 +3,7 @@
 use std::{
     fmt::{self, Display, Formatter},
     io::Error as IoError,
+    sync::atomic::AtomicBool,
     time::Duration,
 };
 
@@ -18,6 +19,7 @@ pub mod config;
 pub mod db;
 pub mod impls;
 
+pub static DISABLE_RATELIMITS: AtomicBool = AtomicBool::new(false);
 pub const HARMONY_PROTO_NAME: &str = "harmony";
 
 pub fn set_proto_name(mut response: Response) -> Response {

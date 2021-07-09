@@ -227,6 +227,9 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             tokio::fs::create_dir_all(&config.media.media_root)
                 .await
                 .expect("could not create media root dir");
+            if config.disable_ratelimits {
+                scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
