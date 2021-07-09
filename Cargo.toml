@@ -33,7 +33,7 @@ infer = { version = "0.5", default-features = false }
 dashmap = "4.0"
 ahash = { version = "0.7", default-features = false }
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main", optional = true }
-webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "master", default-features = false }
+webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "chore/deps", default-features = false }
 lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
@@ -73,3 +73,7 @@ key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
 
 [patch.crates-io]
 dashmap = { git = "https://github.com/jackthomson2/dashmap.git", branch = "master" }
+warp = { git = "https://github.com/yusdacra/warp.git", branch = "chore/deps" }
+markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
+string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
+string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
