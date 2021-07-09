@@ -15,7 +15,7 @@ on:
       - 'nix/envrc'
       - 'flake.lock'
 jobs:
-  tests:
+  nix-build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repo
