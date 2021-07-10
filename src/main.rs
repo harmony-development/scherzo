@@ -129,6 +129,8 @@ async fn main() {
             }
             "-v" | "--verbose" => filter_level = Level::TRACE,
             "-d" | "--debug" => filter_level = Level::DEBUG,
+            "-q" | "--quiet" => filter_level = Level::WARN,
+            "-qq" => filter_level = Level::ERROR,
             "--db" => {
                 if let Some(path) = std::env::args().nth(index + 1) {
                     db_path = path;
