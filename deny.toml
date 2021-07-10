@@ -78,7 +78,7 @@ allow = [
     "ISC",
     "OpenSSL",
     "Zlib",
-    "CC0-1.0"
+    "CC0-1.0",
 ]
 # List of explictly disallowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
@@ -111,7 +111,8 @@ exceptions = [
     # Each entry is the crate and version constraint, and its specific allow
     # list
     #{ allow = ["Zlib"], name = "adler32", version = "*" },
-    { allow = ["AGPL-3.0"], name = "scherzo", version = "*" },
+    { allow=["AGPL-3.0"], name="scherzo", version="*" },
+    { allow=["GPL-3.0"], name="scherzo_derive", version="*" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -131,7 +132,7 @@ expression = "MIT AND ISC AND OpenSSL"
 # depending on the rest of your configuration
 license-files = [
     # Each entry is a crate relative path, and the (opaque) hash of its contents
-    { path = "LICENSE", hash = 0xbd0eed23 }
+    { path="LICENSE", hash=0xbd0eed23 },
 ]
 
 [licenses.private]
@@ -199,7 +200,10 @@ unknown-git = "warn"
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
-allow-git = []
+allow-git = [
+    "https://github.com/jackthomson2/dashmap.git",
+    "https://github.com/servo/html5ever.git",
+]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for

@@ -88,6 +88,7 @@ impl ChatServer {
         }
     }
 
+    // TODO: instead of sending the events immediately, send them to a thread to be processed to speed up responses
     async fn send_event_through_chan(
         &self,
         sub: EventSub,

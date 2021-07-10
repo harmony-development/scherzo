@@ -158,21 +158,19 @@ checksum = "b700ce4376041dcd0a327fd0097c41095743c4c8af8887265942faf1100bd040"
 [[package]]
 name = "cached"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e2afe73808fbaac302e39c9754bfc3c4b4d0f99c9c240b9f4e4efc841ad1b74"
+source = "git+https://github.com/yusdacra/cached.git?branch=chore/deps#a0879d5d31be2c349a549e62a452139ed79160ea"
 dependencies = [
  "async-mutex",
  "cached_proc_macro",
  "cached_proc_macro_types",
- "hashbrown 0.9.1",
+ "hashbrown",
  "once_cell",
 ]
 
 [[package]]
 name = "cached_proc_macro"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf857ae42d910aede5c5186e62684b0d7a597ce2fe3bd14448ab8f7ef439848c"
+source = "git+https://github.com/yusdacra/cached.git?branch=chore/deps#a0879d5d31be2c349a549e62a452139ed79160ea"
 dependencies = [
  "async-mutex",
  "cached_proc_macro_types",
@@ -184,8 +182,7 @@ dependencies = [
 [[package]]
 name = "cached_proc_macro_types"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a4f925191b4367301851c6d99b09890311d74b0d43f274c0b34c86d308a3663"
+source = "git+https://github.com/yusdacra/cached.git?branch=chore/deps#a0879d5d31be2c349a549e62a452139ed79160ea"
 
 [[package]]
 name = "cc"
@@ -659,12 +656,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7afe4a420e3fe79967a00898cc1f4db7c8a49a9333a29f8a4bd76a253d5cd04"
-
-[[package]]
-name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
@@ -871,7 +862,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc633605454125dec4b66843673f01c7df2b89479b32e0ed634e43a91cff62a5"
 dependencies = [
  "autocfg",
- "hashbrown 0.11.2",
+ "hashbrown",
 ]
 
 [[package]]

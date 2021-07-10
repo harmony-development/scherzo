@@ -25,7 +25,7 @@ use scherzo::{
     },
     ServerError,
 };
-use tracing::Level;
+use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
 #[derive(Debug)]
@@ -175,11 +175,11 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     #[cfg(feature = "console")]
     tokio::spawn(console_server.serve());
 
-    tracing::info!("logging initialized");
+    info!("logging initialized");
 
-    let span = tracing::info_span!("db", path = %db_path);
+    let span = info_span!("db", path = %db_path);
     let db = span.in_scope(|| {
-        tracing::info!("initializing database");
+        info!("initializing database");
 
         let db_result = sled::Config::new()
             .use_compression(true)
@@ -190,7 +190,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         match db_result {
             Ok(db) => db,
             Err(err) => {
-                tracing::error!("cannot open database: {}; aborting", err);
+                error!("cannot open database: {}; aborting", err);
 
                 std::process::exit(1);
             }
@@ -217,17 +217,18 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 toml::from_slice(&std::fs::read(config_path).expect("failed to read config file"))
                     .expect("failed to parse config file")
             } else {
-                tracing::info!("No config file found, writing default config file");
+                info!("No config file found, writing default config file");
                 let def = Config::default();
                 std::fs::write(config_path, toml::to_vec(&def).unwrap())
                     .expect("failed to write default config file");
                 def
             };
-            tracing::debug!("running with {:?}", config);
+            debug!("running with {:?}", config);
             tokio::fs::create_dir_all(&config.media.media_root)
                 .await
                 .expect("could not create media root dir");
             if config.disable_ratelimits {
+                warn!("rate limits are disabled, please take care!");
                 scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
@@ -242,19 +243,19 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             let sync = PostboxServiceServer::new(sync_server).filters();
 
             std::thread::spawn(move || {
-                let span = tracing::info_span!("db_validate");
+                let span = info_span!("db_validate");
                 let _guard = span.enter();
-                tracing::info!("database integrity verification task is running");
+                info!("database integrity verification task is running");
                 loop {
                     std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
                     if let Err(err) = chat_tree
                         .verify_integrity()
                         .and_then(|_| auth_tree.verify_integrity())
                     {
-                        tracing::error!("database integrity check failed: {}", err);
+                        error!("database integrity check failed: {}", err);
                         break;
                     } else {
-                        tracing::debug!("database integrity check successful");
+                        debug!("database integrity check successful");
                     }
                 }
             });
