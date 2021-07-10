@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto, mem::size_of, ops::Not, sync::Arc};
+use std::{convert::TryInto, mem::size_of, ops::Not, sync::Arc};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -76,8 +76,9 @@ struct EventBroadcast {
     context: EventContext,
 }
 
-type SubbedTo = DashMap<u64, HashMap<u64, Arc<RwLock<Vec<EventSub>>>, RandomState>, RandomState>; // user id -> stream id -> event sub list
-type EventChans = DashMap<u64, Sender<event::Event>, RandomState>; // stream id -> event channel
+type SubbedTo =
+    Arc<DashMap<u64, DashMap<u64, Arc<RwLock<Vec<EventSub>>>, RandomState>, RandomState>>; // user id -> stream id -> event sub list
+type EventChans = Arc<DashMap<u64, Sender<event::Event>, RandomState>>; // stream id -> event channel
 
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
@@ -91,8 +92,8 @@ pub struct ChatServer {
 
 impl ChatServer {
     pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
-        let subbed_to: SubbedTo = DashMap::default();
-        let event_chans: EventChans = DashMap::default();
+        let subbed_to: SubbedTo = Default::default();
+        let event_chans: EventChans = Default::default();
         let chat_tree: ChatTree = ChatTree { chat_tree };
 
         let (tx, mut rx) = mpsc::unbounded_channel();

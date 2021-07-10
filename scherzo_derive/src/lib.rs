@@ -15,7 +15,8 @@ pub fn auth(_: TokenStream) -> TokenStream {
 pub fn send_event(_: TokenStream) -> TokenStream {
     (quote! {
         if let Some(subbed_to) = subbed_to.get(&user_id) {
-            for (stream_id, subbed_to) in subbed_to.iter() {
+            for subbed_to in subbed_to.iter() {
+                let stream_id = subbed_to.key();
                 if subbed_to.read().contains(&sub) {
                     if let Some(PermCheck {
                         guild_id,
