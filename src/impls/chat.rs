@@ -1571,14 +1571,15 @@ impl chat_service_server::ChatService for ChatServer {
                 });
             }
         };
+
         tokio::select!(
-            _ = spawn(send_loop) => {
-                return;
-            }
-            _ = spawn(recv_loop) => {
-                return;
-            }
+            _ = spawn(send_loop) => { }
+            _ = spawn(recv_loop) => { }
         );
+
+        // Remove the channel and subbed to entry of the stream after we are done
+        self.event_chans.remove(&stream_id);
+        self.subbed_to.get_mut(&user_id).unwrap().remove(&stream_id);
     }
 
     #[rate(32, 10)]

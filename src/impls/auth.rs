@@ -6,10 +6,7 @@ use harmony_rust_sdk::api::{
     auth::*,
     chat::GetUserResponse,
     exports::{
-        hrpc::{
-            encode_protobuf_message, return_print, server::WriteSocket, warp::reply::Response,
-            Request,
-        },
+        hrpc::{encode_protobuf_message, server::WriteSocket, warp::reply::Response, Request},
         prost::bytes::BytesMut,
     },
 };
@@ -201,10 +198,15 @@ impl auth_service_server::AuthService for AuthServer {
     #[rate(2, 5)]
     async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<AuthStep>) {
         let (tx, mut rx) = mpsc::channel(64);
-        self.send_step.insert(auth_id, tx);
+        self.send_step.insert(auth_id.clone(), tx);
         loop {
             if let Some(step) = rx.recv().await {
-                return_print!(socket.send_message(step).await);
+                if let Err(err) = socket.send_message(step).await {
+                    tracing::error!("error occured: {}", err);
+
+                    // Remove send step channel after we are done
+                    self.send_step.remove(&auth_id);
+                }
             }
         }
     }
