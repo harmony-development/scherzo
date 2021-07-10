@@ -16,30 +16,29 @@ pub fn send_event(_: TokenStream) -> TokenStream {
     (quote! {
         if let Some(subbed_to) = subbed_to.get(&user_id) {
             for (stream_id, subbed_to) in subbed_to.iter() {
-                if let Some(PermCheck {
-                    guild_id,
-                    channel_id,
-                    check_for,
-                    must_be_guild_owner,
-                }) = perm_check
-                {
-                    let perm = chat_tree.check_perms(
-                        guild_id,
-                        channel_id,
-                        user_id,
-                        check_for,
-                        must_be_guild_owner,
-                    );
-                    if !matches!(
-                        perm,
-                        Ok(_) | Err(ServerError::EmptyPermissionQuery)
-                    ) {
-                        continue;
-                    }
-                }
-
                 if subbed_to.read().contains(&sub) {
                     if let Some(chan) = event_chans.get(stream_id) {
+                        if let Some(PermCheck {
+                            guild_id,
+                            channel_id,
+                            check_for,
+                            must_be_guild_owner,
+                        }) = perm_check
+                        {
+                            let perm = chat_tree.check_perms(
+                                guild_id,
+                                channel_id,
+                                user_id,
+                                check_for,
+                                must_be_guild_owner,
+                            );
+                            if !matches!(
+                                perm,
+                                Ok(_) | Err(ServerError::EmptyPermissionQuery)
+                            ) {
+                                continue;
+                            }
+                        }
                         if let Err(err) = chan.send(event.clone()).await {
                             tracing::error!(
                                 "failed to send event to stream {} of user {}: {}",
