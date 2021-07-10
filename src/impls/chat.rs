@@ -20,7 +20,7 @@ use harmony_rust_sdk::api::{
 use parking_lot::RwLock;
 use scherzo_derive::*;
 use sled::Tree;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 
 use super::{gen_rand_u64, make_u64_iter_logic};
 use crate::{
@@ -69,79 +69,88 @@ impl EventContext {
     }
 }
 
+struct EventBroadcast {
+    sub: EventSub,
+    event: event::Event,
+    perm_check: Option<PermCheck<'static>>,
+    context: EventContext,
+}
+
+type SubbedTo = DashMap<u64, HashMap<u64, Arc<RwLock<Vec<EventSub>>>, RandomState>, RandomState>; // user id -> stream id -> event sub list
+type EventChans = DashMap<u64, Sender<event::Event>, RandomState>; // stream id -> event channel
+
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     pub chat_tree: ChatTree,
-    subbed_to: DashMap<u64, HashMap<u64, Arc<RwLock<Vec<EventSub>>>, RandomState>, RandomState>, // user id -> stream id -> event sub list
-    event_chans: DashMap<u64, Sender<event::Event>, RandomState>, // stream id -> event channel
+    subbed_to: SubbedTo,
+    event_chans: EventChans,
+    broadcast_chan: UnboundedSender<EventBroadcast>,
 }
 
 impl ChatServer {
     pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
-        Self {
-            valid_sessions,
-            chat_tree: ChatTree { chat_tree },
-            subbed_to: DashMap::default(),
-            event_chans: DashMap::default(),
-        }
-    }
+        let subbed_to: SubbedTo = DashMap::default();
+        let event_chans: EventChans = DashMap::default();
+        let chat_tree: ChatTree = ChatTree { chat_tree };
 
-    // TODO: instead of sending the events immediately, send them to a thread to be processed to speed up responses
-    async fn send_event_through_chan(
-        &self,
-        sub: EventSub,
-        event: event::Event,
-        perm_check: Option<PermCheck<'_>>,
-        context: EventContext,
-    ) {
-        let send_event = |user_id, event: event::Event| async move {
-            if let Some(subbed_to) = self.subbed_to.get(&user_id) {
-                for (stream_id, subbed_to) in subbed_to.iter() {
-                    if let Some(PermCheck {
-                        guild_id,
-                        channel_id,
-                        check_for,
-                        must_be_guild_owner,
-                    }) = perm_check
-                    {
-                        let perm = self.chat_tree.check_perms(
-                            guild_id,
-                            channel_id,
-                            user_id,
-                            check_for,
-                            must_be_guild_owner,
-                        );
-                        if !matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery)) {
-                            continue;
-                        }
-                    }
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        {
+            let subbed_to = subbed_to.clone();
+            let event_chans = event_chans.clone();
+            let chat_tree = chat_tree.clone();
 
-                    let has = subbed_to.read().contains(&sub);
-                    if has {
-                        if let Some(chan) = self.event_chans.get(stream_id) {
-                            if let Err(err) = chan.send(event.clone()).await {
-                                tracing::error!(
-                                    "failed to send event to stream {} of user {}: {}",
-                                    stream_id,
-                                    user_id,
-                                    err
-                                );
+            tokio::spawn(async move {
+                loop {
+                    if let Some(broadcast) = rx.recv().await {
+                        let EventBroadcast {
+                            sub,
+                            event,
+                            perm_check,
+                            context,
+                        } = broadcast;
+
+                        if !context.user_ids.is_empty() {
+                            for user_id in context.user_ids {
+                                send_event!();
+                            }
+                        } else {
+                            for user_id in subbed_to.iter().map(|k| *k.key()) {
+                                send_event!();
                             }
                         }
                     }
                 }
-            }
-        };
-        if !context.user_ids.is_empty() {
-            for user_id in context.user_ids {
-                send_event(user_id, event.clone()).await;
-            }
-        } else {
-            for subbed_to in self.subbed_to.iter() {
-                send_event(*subbed_to.key(), event.clone()).await;
-            }
+            });
+        }
+
+        Self {
+            valid_sessions,
+            chat_tree,
+            subbed_to,
+            event_chans,
+            broadcast_chan: tx,
+        }
+    }
+
+    fn send_event_through_chan(
+        &self,
+        sub: EventSub,
+        event: event::Event,
+        perm_check: Option<PermCheck<'static>>,
+        context: EventContext,
+    ) {
+        if let Err(err) = self.broadcast_chan.send(EventBroadcast {
+            sub,
+            event,
+            perm_check,
+            context,
+        }) {
+            tracing::error!(
+                "failed to send event broadcast to processing thread: {}",
+                err
+            );
         }
     }
 }
@@ -255,8 +264,7 @@ impl chat_service_server::ChatService for ChatServer {
                     }),
                     None,
                     EventContext::new(vec![user_id]),
-                )
-                .await;
+                );
             }
         }
 
@@ -343,8 +351,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(CreateChannelResponse { channel_id })
     }
@@ -578,8 +585,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -643,8 +649,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -683,8 +688,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -743,8 +747,7 @@ impl chat_service_server::ChatService for ChatServer {
             })),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -786,8 +789,7 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         let mut local_ids = Vec::new();
         for member_id in guild_members {
@@ -808,8 +810,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::new(local_ids),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -891,8 +892,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -942,8 +942,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -1018,8 +1017,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
@@ -1034,8 +1032,7 @@ impl chat_service_server::ChatService for ChatServer {
                     }),
                     None,
                     EventContext::new(vec![user_id]),
-                )
-                .await;
+                );
             }
         }
 
@@ -1074,8 +1071,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
@@ -1090,8 +1086,7 @@ impl chat_service_server::ChatService for ChatServer {
                     }),
                     None,
                     EventContext::new(vec![user_id]),
-                )
-                .await;
+                );
             }
         }
 
@@ -1174,8 +1169,7 @@ impl chat_service_server::ChatService for ChatServer {
             })),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(SendMessageResponse { message_id })
     }
@@ -1703,8 +1697,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -1732,8 +1725,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -1811,8 +1803,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
@@ -1847,8 +1838,7 @@ impl chat_service_server::ChatService for ChatServer {
             }),
             None,
             EventContext::empty(),
-        )
-        .await;
+        );
 
         Ok(())
     }
