@@ -186,9 +186,9 @@ source = "git+https://github.com/yusdacra/cached.git?branch=chore/deps#a0879d5d3
 
 [[package]]
 name = "cc"
-version = "1.0.68"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a72c244c1ff497a746a7e1fb3d14bd08420ecda70c8f25c7112f2781652d787"
+checksum = "e70cc2f62c6ce1868963827bd677764c62d07c3d9a3e1fb1177ee1a9ab199eb2"
 dependencies = [
  "jobserver",
 ]
@@ -631,7 +631,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#ea4e4afb9f4f9e7fc06aaee6674cd09397841f7a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36744cf92d0ffc7325bb1d7e064e2a242e7ab006"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -641,7 +641,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#ea4e4afb9f4f9e7fc06aaee6674cd09397841f7a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36744cf92d0ffc7325bb1d7e064e2a242e7ab006"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -873,9 +873,9 @@ checksum = "ea70330449622910e0edebab230734569516269fb32342fb0a8956340fa48c6c"
 
 [[package]]
 name = "instant"
-version = "0.1.9"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61124eeebbd69b8190558df225adf7e4caafce0d743919e5d6b19652314ec5ec"
+checksum = "bee0328b1209d157ef001c94dd85b4f8f64139adb0eac2659f4b08382b2f474d"
 dependencies = [
  "cfg-if",
 ]
