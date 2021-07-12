@@ -1,7 +1,5 @@
 use std::{convert::TryInto, mem::size_of, ops::Not, sync::Arc};
 
-use ahash::RandomState;
-use dashmap::DashMap;
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
@@ -11,18 +9,26 @@ use harmony_rust_sdk::api::{
     },
     exports::{
         hrpc::{
-            encode_protobuf_message, return_print, server::Socket, warp::reply::Response, Request,
+            encode_protobuf_message, return_print,
+            server::{Socket, WriteSocket},
+            warp::reply::Response,
+            Request,
         },
         prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{content, Content, ContentText, Message as HarmonyMessage, Metadata},
 };
-use parking_lot::RwLock;
 use scherzo_derive::*;
 use sled::Tree;
-use tokio::sync::mpsc::{self, Sender, UnboundedSender};
+use tokio::{
+    sync::{
+        broadcast::{self, Sender as BroadcastSend},
+        mpsc::{self, Receiver},
+    },
+    task::JoinHandle,
+};
 
-use super::{gen_rand_u64, make_u64_iter_logic};
+use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic};
 use crate::{
     db::{self, chat::*},
     impls::auth,
@@ -76,63 +82,118 @@ struct EventBroadcast {
     context: EventContext,
 }
 
-type SubbedTo =
-    Arc<DashMap<u64, DashMap<u64, Arc<RwLock<Vec<EventSub>>>, RandomState>, RandomState>>; // user id -> stream id -> event sub list
-type EventChans = Arc<DashMap<u64, Sender<event::Event>, RandomState>>; // stream id -> event channel
-
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     pub chat_tree: ChatTree,
-    subbed_to: SubbedTo,
-    event_chans: EventChans,
-    broadcast_chan: UnboundedSender<EventBroadcast>,
+    broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
 }
 
 impl ChatServer {
     pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
-        let subbed_to: SubbedTo = Default::default();
-        let event_chans: EventChans = Default::default();
         let chat_tree: ChatTree = ChatTree { chat_tree };
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        {
-            let subbed_to = subbed_to.clone();
-            let event_chans = event_chans.clone();
-            let chat_tree = chat_tree.clone();
-
-            tokio::spawn(async move {
-                loop {
-                    if let Some(broadcast) = rx.recv().await {
-                        let EventBroadcast {
-                            sub,
-                            event,
-                            perm_check,
-                            context,
-                        } = broadcast;
-
-                        if !context.user_ids.is_empty() {
-                            for user_id in context.user_ids {
-                                send_event!();
-                            }
-                        } else {
-                            for user_id in subbed_to.iter().map(|k| *k.key()) {
-                                send_event!();
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
+        let (tx, _) = broadcast::channel(1000);
         Self {
             valid_sessions,
             chat_tree,
-            subbed_to,
-            event_chans,
-            broadcast_chan: tx,
+            broadcast_send: tx,
         }
+    }
+
+    fn spawn_event_stream_processor(
+        &self,
+        user_id: u64,
+        mut sub_rx: Receiver<EventSub>,
+        mut ws: WriteSocket<Event>,
+    ) -> JoinHandle<()> {
+        async fn send_event(
+            ws: &mut WriteSocket<Event>,
+            broadcast: &EventBroadcast,
+            user_id: u64,
+        ) -> bool {
+            ws.send_message(Event {
+                event: Some(broadcast.event.clone()),
+            })
+            .await
+            .map_or_else(
+                |err| {
+                    tracing::error!(
+                        "couldnt write to stream events socket for user {}: {}",
+                        user_id,
+                        err
+                    );
+                    true
+                },
+                |_| false,
+            )
+        }
+
+        let mut rx = self.broadcast_send.subscribe();
+        let chat_tree = self.chat_tree.clone();
+
+        tokio::spawn(async move {
+            let subs = AppendList::new();
+
+            loop {
+                tokio::select! {
+                    _ = async {
+                        // Push all the subs
+                        while let Some(sub) = sub_rx.recv().await {
+                            subs.append(sub);
+                        }
+                    } => { }
+                    res = async {
+                        // Broadcast all events
+                        // TODO: what do we do when RecvError::Lagged?
+                        while let Ok(broadcast) = rx.recv().await {
+                            let check_perms = || {
+                                broadcast.perm_check.map_or(true, |perm_check| {
+                                    let PermCheck {
+                                        guild_id,
+                                        channel_id,
+                                        check_for,
+                                        must_be_guild_owner,
+                                    } = perm_check;
+
+                                    let perm = chat_tree.check_perms(
+                                        guild_id,
+                                        channel_id,
+                                        user_id,
+                                        check_for,
+                                        must_be_guild_owner,
+                                    );
+
+                                    matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
+                                })
+                            };
+
+                            if subs.iter().any(|val| val.eq(&broadcast.sub)) {
+                                if !broadcast.context.user_ids.is_empty() {
+                                    if broadcast.context.user_ids.contains(&user_id)
+                                        && check_perms()
+                                        && send_event(&mut ws, broadcast.as_ref(), user_id).await
+                                    {
+                                        return true;
+                                    }
+                                } else if check_perms()
+                                    && send_event(&mut ws, broadcast.as_ref(), user_id).await
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+
+                        false
+                    } => {
+                        if res {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
     }
 
     fn send_event_through_chan(
@@ -142,12 +203,14 @@ impl ChatServer {
         perm_check: Option<PermCheck<'static>>,
         context: EventContext,
     ) {
-        if let Err(err) = self.broadcast_chan.send(EventBroadcast {
+        let broadcast = EventBroadcast {
             sub,
             event,
             perm_check,
             context,
-        }) {
+        };
+
+        if let Err(err) = self.broadcast_send.send(Arc::new(broadcast)) {
             tracing::error!(
                 "failed to send event broadcast to processing thread: {}",
                 err
@@ -1523,28 +1586,11 @@ impl chat_service_server::ChatService for ChatServer {
 
     #[rate(1, 5)]
     async fn stream_events(&self, user_id: u64, socket: Socket<StreamEventsRequest, Event>) {
-        use tokio::spawn;
-
-        let stream_id = gen_rand_u64();
-        let (mut rs, mut ws) = socket.split();
-        let (tx, mut rx) = mpsc::channel(64);
-        self.event_chans.insert(stream_id, tx);
-        let subbed_to = self
-            .subbed_to
-            .entry(user_id)
-            .or_default()
-            .entry(stream_id)
-            .or_default()
-            .clone();
+        let (mut rs, ws) = socket.split();
+        let (sub_tx, sub_rx) = mpsc::channel(64);
         let chat_tree = self.chat_tree.clone();
 
-        let send_loop = async move {
-            loop {
-                if let Some(event) = rx.recv().await.map(|event| Event { event: Some(event) }) {
-                    return_print!(ws.send_message(event).await);
-                }
-            }
-        };
+        let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, ws);
         let recv_loop = async move {
             loop {
                 return_print!(rs.receive_message().await, |maybe_req| {
@@ -1567,20 +1613,20 @@ impl chat_service_server::ChatService for ChatServer {
                             ) => EventSub::Homeserver,
                         };
 
-                        subbed_to.write().push(sub);
+                        sub_tx.send(sub).await.unwrap();
                     }
                 });
             }
         };
 
         tokio::select!(
-            _ = spawn(send_loop) => { }
-            _ = spawn(recv_loop) => { }
+            res = send_loop => {
+                res.unwrap();
+            }
+            res = tokio::spawn(recv_loop) => {
+                res.unwrap();
+            }
         );
-
-        // Remove the channel and subbed to entry of the stream after we are done
-        self.event_chans.remove(&stream_id);
-        self.subbed_to.get_mut(&user_id).unwrap().remove(&stream_id);
     }
 
     #[rate(32, 10)]

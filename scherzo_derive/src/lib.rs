@@ -11,52 +11,6 @@ pub fn auth(_: TokenStream) -> TokenStream {
     .into()
 }
 
-#[proc_macro]
-pub fn send_event(_: TokenStream) -> TokenStream {
-    (quote! {
-        if let Some(subbed_to) = subbed_to.get(&user_id) {
-            for subbed_to in subbed_to.iter() {
-                let stream_id = subbed_to.key();
-                if subbed_to.read().contains(&sub) {
-                    if let Some(PermCheck {
-                        guild_id,
-                        channel_id,
-                        check_for,
-                        must_be_guild_owner,
-                    }) = perm_check
-                    {
-                        let perm = chat_tree.check_perms(
-                            guild_id,
-                            channel_id,
-                            user_id,
-                            check_for,
-                            must_be_guild_owner,
-                        );
-                        if !matches!(
-                            perm,
-                            Ok(_) | Err(ServerError::EmptyPermissionQuery)
-                        ) {
-                            continue;
-                        }
-                    }
-
-                    if let Some(chan) = event_chans.get(stream_id) {
-                        if let Err(err) = chan.send(event.clone()).await {
-                            tracing::error!(
-                                "failed to send event to stream {} of user {}: {}",
-                                stream_id,
-                                user_id,
-                                err
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    })
-    .into()
-}
-
 // TODO: move this to hrpc, add error reporting for invalid inputs
 /// Apply a rate limit to this endpoint.
 #[proc_macro_attribute]
