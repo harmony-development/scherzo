@@ -104,6 +104,7 @@ pub enum ServerError {
     TooFast(Duration),
     MediaNotFound,
     InviteExpired,
+    FailedToAuthSync,
 }
 
 impl Display for ServerError {
@@ -213,6 +214,7 @@ impl Display for ServerError {
             ServerError::InvalidFileId => write!(f, "invalid file id"),
             ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
             ServerError::MediaNotFound => write!(f, "requested media is not found"),
+            ServerError::FailedToAuthSync => write!(f, "failed to auth for host"),
         }
     }
 }
@@ -250,7 +252,8 @@ impl CustomError for ServerError {
             | ServerError::InvalidFileId
             | ServerError::NotAnImage
             | ServerError::InvalidUrl(_)
-            | ServerError::InviteExpired => StatusCode::BAD_REQUEST,
+            | ServerError::InviteExpired
+            | ServerError::FailedToAuthSync => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
@@ -312,6 +315,7 @@ impl CustomError for ServerError {
             ServerError::MediaNotFound => return Self::NOT_FOUND_ERROR.1.to_vec(),
             ServerError::InvalidUrl(_) => "h.invalid-url",
             ServerError::InviteExpired => "h.bad-invite-id",
+            ServerError::FailedToAuthSync => "h.bad-auth",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }

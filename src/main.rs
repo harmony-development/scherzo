@@ -20,7 +20,10 @@ use hrpc::warp;
 use scherzo::{
     db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
     impls::{
-        auth::AuthServer, chat::ChatServer, mediaproxy::MediaproxyServer, rest::RestConfig,
+        auth::AuthServer,
+        chat::{ChatServer, ChatTree},
+        mediaproxy::MediaproxyServer,
+        rest::RestConfig,
         sync::SyncServer,
     },
     ServerError,
@@ -202,11 +205,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     let auth_tree = db.open_tree("auth").unwrap();
     let chat_tree = db.open_tree("chat").unwrap();
-
-    let auth_server = AuthServer::new(chat_tree.clone(), auth_tree.clone(), valid_sessions.clone());
-    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
-    let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-    let sync_server = SyncServer::new();
+    let chat_tree = ChatTree { chat_tree };
 
     match command {
         Command::RunServer => {
@@ -232,6 +231,16 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
+            let auth_server = AuthServer::new(
+                chat_tree.clone(),
+                auth_tree.clone(),
+                valid_sessions.clone(),
+                config.federation_key,
+            );
+            let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
+            let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
+            let sync_server = SyncServer::new(chat_tree.clone());
+
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
             let rest = scherzo::impls::rest::rest(RestConfig {
@@ -249,6 +258,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 loop {
                     std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
                     if let Err(err) = chat_tree
+                        .chat_tree
                         .verify_integrity()
                         .and_then(|_| auth_tree.verify_integrity())
                     {
@@ -290,6 +300,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         }
         Command::GetInvites => {
             let invites = chat_tree
+                .chat_tree
                 .scan_prefix(INVITE_PREFIX)
                 .flatten()
                 .map(|(k, v)| {
@@ -303,43 +314,52 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
         }
         Command::GetMembers => {
-            let members = chat_tree.scan_prefix(USER_PREFIX).flatten().map(|(k, v)| {
-                let member_id =
-                    u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
-                let member_data = GetUserResponse::decode(v.as_ref()).unwrap();
-                (member_id, member_data)
-            });
+            let members = chat_tree
+                .chat_tree
+                .scan_prefix(USER_PREFIX)
+                .flatten()
+                .map(|(k, v)| {
+                    let member_id =
+                        u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
+                    let member_data = GetUserResponse::decode(v.as_ref()).unwrap();
+                    (member_id, member_data)
+                });
 
             for (id, data) in members {
                 println!("{}: {:?}", id, data);
             }
         }
         Command::GetGuilds => {
-            let guilds = chat_tree.scan_prefix([]).flatten().filter_map(|(k, v)| {
-                if k.len() == 8 {
-                    let guild_id = u64::from_be_bytes(k.as_ref().try_into().unwrap());
-                    let guild_data = GetGuildResponse::decode(v.as_ref()).unwrap();
+            let guilds = chat_tree
+                .chat_tree
+                .scan_prefix([])
+                .flatten()
+                .filter_map(|(k, v)| {
+                    if k.len() == 8 {
+                        let guild_id = u64::from_be_bytes(k.as_ref().try_into().unwrap());
+                        let guild_data = GetGuildResponse::decode(v.as_ref()).unwrap();
 
-                    Some((guild_id, guild_data))
-                } else {
-                    None
-                }
-            });
+                        Some((guild_id, guild_data))
+                    } else {
+                        None
+                    }
+                });
 
             for (id, data) in guilds {
                 println!("{}: {:?}", id, data);
             }
         }
         Command::GetGuildInvites(id) => {
-            let invites = chat_server.chat_tree.get_guild_invites_logic(id);
+            let invites = chat_tree.get_guild_invites_logic(id);
             println!("{:#?}", invites.invites)
         }
         Command::GetGuildChannels(id) => {
-            let channels = chat_server.chat_tree.get_guild_channels_logic(id, 0);
+            let channels = chat_tree.get_guild_channels_logic(id, 0);
             println!("{:#?}", channels.channels)
         }
         Command::GetInvite(id) => {
             let invite = chat_tree
+                .chat_tree
                 .get(make_invite_key(id.as_str()))
                 .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
             println!("{:#?}", invite);
@@ -349,9 +369,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             message_id,
         } => {
-            let message = chat_server
-                .chat_tree
-                .get_message_logic(guild_id, channel_id, message_id);
+            let message = chat_tree.get_message_logic(guild_id, channel_id, message_id);
             println!("{:#?}", message);
         }
         Command::GetChannelMessages {
@@ -359,7 +377,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             channel_id,
             before_message_id,
         } => {
-            let messages = chat_server.chat_tree.get_channel_messages_logic(
+            let messages = chat_tree.get_channel_messages_logic(
                 guild_id,
                 channel_id,
                 before_message_id.unwrap_or(0),
@@ -369,15 +387,15 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
         }
         Command::GetGuild(id) => {
-            let guild = chat_server.chat_tree.get_guild_logic(id);
+            let guild = chat_tree.get_guild_logic(id);
             println!("{:#?}", guild);
         }
         Command::GetMember(id) => {
-            let member = chat_server.chat_tree.get_user_logic(id);
+            let member = chat_tree.get_user_logic(id);
             println!("{:#?}", member);
         }
         Command::GetGuildMembers(id) => {
-            let members = chat_server.chat_tree.get_guild_members_logic(id);
+            let members = chat_tree.get_guild_members_logic(id);
             println!("{:?}", members.members);
         }
     }

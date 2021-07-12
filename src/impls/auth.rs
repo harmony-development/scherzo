@@ -1,7 +1,8 @@
-use std::{convert::TryInto, mem::size_of, time::Duration};
+use std::{convert::TryInto, mem::size_of, path::PathBuf, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
+use ed25519_compact::Seed;
 use harmony_rust_sdk::api::{
     auth::*,
     chat::GetUserResponse,
@@ -18,11 +19,7 @@ use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
 
 use crate::{
-    db::{
-        self,
-        auth::*,
-        chat::{self as chatdb, make_user_profile_key},
-    },
+    db::{auth::*, chat::make_user_profile_key},
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
     set_proto_name, ServerError, ServerResult,
@@ -66,11 +63,17 @@ pub struct AuthServer {
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     auth_tree: Tree,
-    chat_tree: Tree,
+    chat_tree: ChatTree,
+    federation_key: PathBuf,
 }
 
 impl AuthServer {
-    pub fn new(chat_tree: Tree, auth_tree: Tree, valid_sessions: SessionMap) -> Self {
+    pub fn new(
+        chat_tree: ChatTree,
+        auth_tree: Tree,
+        valid_sessions: SessionMap,
+        federation_key: PathBuf,
+    ) -> Self {
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
         let vs = valid_sessions.clone();
@@ -98,8 +101,7 @@ impl AuthServer {
 
                 let mut batch = sled::Batch::default();
                 for (id, raw_token) in tokens {
-                    if let Some(profile) = ctt.get(chatdb::make_user_profile_key(id)).unwrap() {
-                        let profile = db::deser_profile(profile);
+                    if let Ok(profile) = ctt.get_user_logic(id) {
                         for (oid, raw_atime) in &atimes {
                             if id.eq(oid) {
                                 let secs =
@@ -135,6 +137,7 @@ impl AuthServer {
             send_step: DashMap::default(),
             auth_tree,
             chat_tree,
+            federation_key,
         }
     }
 
@@ -168,6 +171,39 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(1, 5)]
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
+        fn key_to_pem(key: &[u8]) -> String {
+            let key = ed25519_compact::KeyPair::from_slice(key).unwrap();
+            let pubkey = key.pk;
+            let pem = pem::Pem {
+                contents: pubkey.to_vec(),
+                tag: "ED25519 PUBLIC KEY".to_string(),
+            };
+            pem::encode(&pem)
+        }
+
+        match tokio::fs::read(&self.federation_key).await {
+            Ok(key) => {
+                return Ok(KeyReply {
+                    key: key_to_pem(key.as_slice()),
+                })
+            }
+            Err(err) => {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    let new_key = ed25519_compact::KeyPair::from_seed(Seed::generate());
+                    let key_raw = new_key.to_vec();
+                    if tokio::fs::write(&self.federation_key, &key_raw)
+                        .await
+                        .is_ok()
+                    {
+                        return Ok(KeyReply {
+                            key: key_to_pem(&key_raw),
+                        });
+                    }
+                }
+            }
+        }
+
+        // TODO: replace this with a proper error
         Err(ServerError::NotImplemented)
     }
 
@@ -475,6 +511,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         },
                                     );
                                     self.chat_tree
+                                        .chat_tree
                                         .insert(make_user_profile_key(user_id), buf.as_ref())
                                         .unwrap();
 
@@ -590,6 +627,8 @@ const USERNAME_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
 };
 
 use next_step_request::form_fields::Field;
+
+use super::chat::ChatTree;
 
 #[inline(always)]
 fn try_get_string(values: &mut Vec<Field>, err: ServerError) -> ServerResult<String> {

@@ -91,14 +91,12 @@ struct EventBroadcast {
 #[derive(Debug)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
-    pub chat_tree: ChatTree,
+    chat_tree: ChatTree,
     broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
 }
 
 impl ChatServer {
-    pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
-        let chat_tree: ChatTree = ChatTree { chat_tree };
-
+    pub fn new(chat_tree: ChatTree, valid_sessions: auth::SessionMap) -> Self {
         // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
         let (tx, _) = broadcast::channel(1000);
         Self {
@@ -1919,7 +1917,7 @@ impl chat_service_server::ChatService for ChatServer {
 
 #[derive(Debug, Clone)]
 pub struct ChatTree {
-    chat_tree: Tree,
+    pub chat_tree: Tree,
 }
 
 impl ChatTree {

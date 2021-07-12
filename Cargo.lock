@@ -392,6 +392,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-compact"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf396058cc7285b342f9a10ed7a377f088942396c46c4c9a7eb4f0782cb1171"
+dependencies = [
+ "getrandom",
+]
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -631,7 +640,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36744cf92d0ffc7325bb1d7e064e2a242e7ab006"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8280cdd411f46d63c2682088e0322334737a557a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -641,7 +650,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36744cf92d0ffc7325bb1d7e064e2a242e7ab006"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8280cdd411f46d63c2682088e0322334737a557a"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -1217,6 +1226,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf547ad0c65e31259204bd90935776d1c693cec2f4ff7abb7a1bbbd40dfe58"
 
 [[package]]
+name = "pem"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd56cbd21fea48d0c440b41cd69c589faacade08c992d9a54e471b79d0fd13eb"
+dependencies = [
+ "base64",
+ "once_cell",
+ "regex",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1663,12 +1683,14 @@ dependencies = [
  "cached",
  "console-subscriber",
  "dashmap",
+ "ed25519-compact",
  "git-version",
  "harmony_rust_sdk",
  "infer",
  "lazy_static",
  "parking_lot",
  "paste",
+ "pem",
  "rand",
  "reqwest",
  "scherzo_derive",

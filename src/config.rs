@@ -10,6 +10,10 @@ const fn port_default() -> u16 {
     2289
 }
 
+fn federation_key_default() -> PathBuf {
+    Path::new("./federation_key").to_path_buf()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default = "listen_on_localhost_default")]
@@ -18,6 +22,8 @@ pub struct Config {
     pub disable_ratelimits: bool,
     #[serde(default = "port_default")]
     pub port: u16,
+    #[serde(default = "federation_key_default")]
+    pub federation_key: PathBuf,
     #[serde(default)]
     pub tls: Option<TlsConfig>,
     #[serde(default)]
@@ -30,6 +36,7 @@ impl Default for Config {
             disable_ratelimits: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
+            federation_key: federation_key_default(),
             tls: None,
             media: MediaConfig::default(),
         }
