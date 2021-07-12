@@ -6,12 +6,13 @@ use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
-        hrpc::{async_trait, server::Socket, Request},
+        hrpc::{async_trait, return_print, server::Socket, Request},
         prost::Message,
     },
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
+use parking_lot::RwLock;
 use reqwest::Url;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -22,11 +23,34 @@ pub struct EventDispatch {
     pub event: Event,
 }
 
+struct Clients(DashMap<String, PostboxServiceClient, RandomState>);
+
+impl Clients {
+    fn get_client<'a>(
+        &'a self,
+        host: &str,
+    ) -> RefMut<'a, String, PostboxServiceClient, RandomState> {
+        if let Some(client) = self.0.get_mut(host) {
+            client
+        } else {
+            let http = reqwest::Client::new(); // each server gets its own http client
+            let host_url: Url = host.parse().unwrap();
+
+            let auth_client = PostboxServiceClient::new(http, host_url).unwrap();
+
+            self.0.insert(host.to_string(), auth_client);
+            self.0.get_mut(host).unwrap()
+        }
+    }
+}
+
+type PullQueue = Arc<RwLock<Vec<Event>>>;
+
 #[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
     keys_manager: Arc<KeysManager>,
-    clients: DashMap<String, PostboxServiceClient, RandomState>,
+    pull_queue_map: Arc<DashMap<String, PullQueue, RandomState>>,
 }
 
 impl SyncServer {
@@ -38,42 +62,33 @@ impl SyncServer {
         let sync = Self {
             chat_tree,
             keys_manager,
-            clients: DashMap::default(),
+            pull_queue_map: Default::default(),
         };
         let sync2 = sync.clone();
         tokio::spawn(async move {
+            let clients = Clients(DashMap::default());
+
             loop {
                 while let Some(dispatch) = dispatch_rx.recv().await {
-                    // TODO: push to queue if fails
-                    sync2
+                    if clients
                         .get_client(&dispatch.host)
-                        .push(dispatch.event)
+                        .push(dispatch.event.clone())
                         .await
-                        .unwrap();
+                        .is_err()
+                    {
+                        sync2
+                            .pull_queue_map
+                            .entry(dispatch.host)
+                            .or_default()
+                            .write()
+                            .push(dispatch.event);
+                    }
                 }
             }
         });
         sync
     }
 
-    fn get_client<'a>(
-        &'a self,
-        host: &str,
-    ) -> RefMut<'a, String, PostboxServiceClient, RandomState> {
-        if let Some(client) = self.clients.get_mut(host) {
-            client
-        } else {
-            let http = reqwest::Client::new(); // each server gets its own http client
-            let host_url: Url = host.parse().unwrap();
-
-            let auth_client = PostboxServiceClient::new(http, host_url).unwrap();
-
-            self.clients.insert(host.to_string(), auth_client);
-            self.clients.get_mut(host).unwrap()
-        }
-    }
-
-    // TODO: improve errors
     async fn auth<T>(&self, request: &Request<T>) -> Result<String, ServerError> {
         let maybe_auth = request.get_header(&http::header::AUTHORIZATION);
 
@@ -106,8 +121,33 @@ impl postbox_service_server::PostboxService for SyncServer {
         self.auth(&request).await
     }
 
-    async fn pull(&self, _host: String, _socket: Socket<Ack, Syn>) {
-        todo!()
+    async fn pull(&self, host: String, mut socket: Socket<Ack, Syn>) {
+        let mut id = 0;
+
+        loop {
+            if let Some(ev) = self
+                .pull_queue_map
+                .get(&host)
+                .and_then(|queue| queue.write().pop())
+            {
+                return_print!(
+                    socket
+                        .send_message(Syn {
+                            event: Some(ev),
+                            event_id: id,
+                        })
+                        .await
+                );
+            }
+
+            return_print!(socket.receive_message().await, |ack| {
+                if Some(id) != ack.map(|ack| ack.event_id) {
+                    return;
+                }
+            });
+
+            id += 1;
+        }
     }
 
     async fn push(&self, request: Request<Event>) -> Result<(), Self::Error> {
