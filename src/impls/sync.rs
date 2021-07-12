@@ -2,27 +2,74 @@
 
 use super::{chat::ChatTree, keys_manager::KeysManager, *};
 
+use ahash::RandomState;
+use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{async_trait, server::Socket, Request},
         prost::Message,
     },
     harmonytypes::Token,
-    sync::{event::*, *},
+    sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
+use reqwest::Url;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use triomphe::Arc;
 
+pub struct EventDispatch {
+    pub host: String,
+    pub event: Event,
+}
+
+#[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
     keys_manager: Arc<KeysManager>,
+    clients: DashMap<String, PostboxServiceClient, RandomState>,
 }
 
 impl SyncServer {
-    pub fn new(chat_tree: ChatTree, keys_manager: Arc<KeysManager>) -> Self {
-        Self {
+    pub fn new(
+        chat_tree: ChatTree,
+        keys_manager: Arc<KeysManager>,
+        mut dispatch_rx: UnboundedReceiver<EventDispatch>,
+    ) -> Self {
+        let sync = Self {
             chat_tree,
             keys_manager,
+            clients: DashMap::default(),
+        };
+        let sync2 = sync.clone();
+        tokio::spawn(async move {
+            loop {
+                while let Some(dispatch) = dispatch_rx.recv().await {
+                    // TODO: push to queue if fails
+                    sync2
+                        .get_client(&dispatch.host)
+                        .push(dispatch.event)
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+        sync
+    }
+
+    fn get_client<'a>(
+        &'a self,
+        host: &str,
+    ) -> RefMut<'a, String, PostboxServiceClient, RandomState> {
+        if let Some(client) = self.clients.get_mut(host) {
+            client
+        } else {
+            let http = reqwest::Client::new(); // each server gets its own http client
+            let host_url: Url = host.parse().unwrap();
+
+            let auth_client = PostboxServiceClient::new(http, host_url).unwrap();
+
+            self.clients.insert(host.to_string(), auth_client);
+            self.clients.get_mut(host).unwrap()
         }
     }
 

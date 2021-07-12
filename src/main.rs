@@ -232,6 +232,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
+            let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
             let keys_manager = Arc::new(KeysManager::new(config.federation_key));
             let auth_server = AuthServer::new(
                 chat_tree.clone(),
@@ -239,9 +240,10 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 valid_sessions.clone(),
                 keys_manager.clone(),
             );
-            let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
+            let chat_server =
+                ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
             let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-            let sync_server = SyncServer::new(chat_tree.clone(), keys_manager);
+            let sync_server = SyncServer::new(chat_tree.clone(), keys_manager, dispatch_rx);
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();

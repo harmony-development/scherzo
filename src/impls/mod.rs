@@ -243,14 +243,9 @@ pub mod keys_manager {
     use ahash::RandomState;
     use dashmap::{mapref::one::RefMut, DashMap};
     use ed25519_compact::{KeyPair, PublicKey, Seed};
-    use harmony_rust_sdk::api::{
-        auth::auth_service_client::AuthServiceClient,
-        sync::postbox_service_client::PostboxServiceClient,
-    };
+    use harmony_rust_sdk::api::auth::auth_service_client::AuthServiceClient;
 
     use reqwest::Url;
-
-    type Clients = (PostboxServiceClient, AuthServiceClient);
 
     fn parse_pem(key: String, host: &str) -> Result<ed25519_compact::PublicKey, ServerError> {
         let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.into()))?;
@@ -266,7 +261,7 @@ pub mod keys_manager {
     #[derive(Debug)]
     pub struct KeysManager {
         keys: DashMap<String, PublicKey, RandomState>,
-        clients: DashMap<String, Clients, RandomState>,
+        clients: DashMap<String, AuthServiceClient, RandomState>,
         federation_key: PathBuf,
     }
 
@@ -308,7 +303,7 @@ pub mod keys_manager {
             } else {
                 let key = self
                     .get_client(host)
-                    .1
+                    .value_mut()
                     .key(())
                     .await
                     .map_err(|_| ServerError::CantGetHostKey(host.into()))?
@@ -321,19 +316,19 @@ pub mod keys_manager {
             Ok(key)
         }
 
-        fn get_client<'a>(&'a self, host: &str) -> RefMut<'a, String, Clients, RandomState> {
+        fn get_client<'a>(
+            &'a self,
+            host: &str,
+        ) -> RefMut<'a, String, AuthServiceClient, RandomState> {
             if let Some(client) = self.clients.get_mut(host) {
                 client
             } else {
                 let http = reqwest::Client::new(); // each server gets its own http client
                 let host_url: Url = host.parse().unwrap();
 
-                let sync_client =
-                    PostboxServiceClient::new(http.clone(), host_url.clone()).unwrap();
                 let auth_client = AuthServiceClient::new(http, host_url).unwrap();
 
-                self.clients
-                    .insert(host.to_string(), (sync_client, auth_client));
+                self.clients.insert(host.to_string(), auth_client);
                 self.clients.get_mut(host).unwrap()
             }
         }

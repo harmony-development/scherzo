@@ -17,19 +17,26 @@ use harmony_rust_sdk::api::{
         prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{content, Content, ContentText, Message as HarmonyMessage, Metadata},
+    sync::{
+        event::{
+            Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
+            UserRemovedFromGuild as SyncUserRemovedFromGuild,
+        },
+        Event as DispatchEvent,
+    },
 };
 use scherzo_derive::*;
 use sled::Tree;
 use tokio::{
     sync::{
         broadcast::{self, Sender as BroadcastSend},
-        mpsc::{self, Receiver},
+        mpsc::{self, Receiver, UnboundedSender},
     },
     task::JoinHandle,
 };
 use triomphe::Arc;
 
-use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic};
+use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic, sync::EventDispatch};
 use crate::{
     db::{self, chat::*},
     impls::auth,
@@ -93,16 +100,22 @@ pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
     broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
+    dispatch_tx: UnboundedSender<EventDispatch>,
 }
 
 impl ChatServer {
-    pub fn new(chat_tree: ChatTree, valid_sessions: auth::SessionMap) -> Self {
+    pub fn new(
+        chat_tree: ChatTree,
+        valid_sessions: auth::SessionMap,
+        dispatch_tx: UnboundedSender<EventDispatch>,
+    ) -> Self {
         // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
         let (tx, _) = broadcast::channel(1000);
         Self {
             valid_sessions,
             chat_tree,
             broadcast_send: tx,
+            dispatch_tx,
         }
     }
 
@@ -219,6 +232,15 @@ impl ChatServer {
 
         drop(self.broadcast_send.send(Arc::new(broadcast)));
     }
+
+    #[inline(always)]
+    fn dispatch_event(&self, target: String, event: DispatchKind) {
+        let dispatch = EventDispatch {
+            host: target,
+            event: DispatchEvent { kind: Some(event) },
+        };
+        drop(self.dispatch_tx.send(dispatch));
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -318,7 +340,13 @@ impl chat_service_server::ChatService for ChatServer {
             .set_permissions_logic(guild_id, channel_id, everyone_role_id, def_perms);
 
         match self.chat_tree.local_to_foreign_id(user_id) {
-            Some(_) => todo!("implement after postbox and federate"),
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
             None => {
                 self.chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, "");
@@ -860,7 +888,13 @@ impl chat_service_server::ChatService for ChatServer {
         let mut local_ids = Vec::new();
         for member_id in guild_members {
             match self.chat_tree.local_to_foreign_id(member_id) {
-                Some(_) => todo!("implement after postbox and federate"),
+                Some((foreign_id, target)) => self.dispatch_event(
+                    target,
+                    DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
+                        user_id: foreign_id,
+                        guild_id,
+                    }),
+                ),
                 None => {
                     self.chat_tree
                         .remove_guild_from_guild_list(user_id, guild_id, "");
@@ -1086,7 +1120,13 @@ impl chat_service_server::ChatService for ChatServer {
         );
 
         match self.chat_tree.local_to_foreign_id(user_id) {
-            Some(_) => todo!("implement this after postbox and federate"),
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
             None => {
                 self.chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, "");
@@ -1140,7 +1180,13 @@ impl chat_service_server::ChatService for ChatServer {
         );
 
         match self.chat_tree.local_to_foreign_id(user_id) {
-            Some(_) => todo!("implement this after postbox and federate"),
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
             None => {
                 self.chat_tree
                     .remove_guild_from_guild_list(user_id, guild_id, "");
