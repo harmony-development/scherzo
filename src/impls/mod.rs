@@ -113,7 +113,8 @@ pub fn version() -> BoxedFilter<(impl Reply,)> {
         .boxed()
 }
 
-/// Taken from `lockless` (license https://github.com/Diggsey/lockless/blob/master/Cargo.toml#L7)
+// Taken from `lockless` (license https://github.com/Diggsey/lockless/blob/master/Cargo.toml#L7)
+// and modified
 pub mod append_list {
     use std::ops::Not;
     use std::sync::atomic::{AtomicPtr, Ordering};
@@ -149,7 +150,7 @@ pub mod append_list {
             unsafe { self.append_ptr(p) };
         }
 
-        pub fn iter(&self) -> AppendListIterator<T> {
+        pub const fn iter(&self) -> AppendListIterator<T> {
             AppendListIterator(&self.0)
         }
 

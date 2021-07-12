@@ -42,7 +42,7 @@ enum EventSub {
     Actions,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct PermCheck<'a> {
     guild_id: u64,
     channel_id: u64,
@@ -51,7 +51,12 @@ struct PermCheck<'a> {
 }
 
 impl<'a> PermCheck<'a> {
-    fn new(guild_id: u64, channel_id: u64, check_for: &'a str, must_be_guild_owner: bool) -> Self {
+    const fn new(
+        guild_id: u64,
+        channel_id: u64,
+        check_for: &'a str,
+        must_be_guild_owner: bool,
+    ) -> Self {
         Self {
             guild_id,
             channel_id,
@@ -66,7 +71,7 @@ struct EventContext {
 }
 
 impl EventContext {
-    fn new(user_ids: Vec<u64>) -> Self {
+    const fn new(user_ids: Vec<u64>) -> Self {
         Self { user_ids }
     }
 
@@ -2523,13 +2528,12 @@ impl ChatTree {
     }
 
     pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
-        let serialized = [guild_id.to_be_bytes().as_ref(), homeserver.as_bytes()].concat();
-
         self.chat_tree
             .insert(
                 [
                     make_guild_list_key_prefix(user_id).as_ref(),
-                    serialized.as_slice(),
+                    guild_id.to_be_bytes().as_ref(),
+                    homeserver.as_bytes(),
                 ]
                 .concat(),
                 [].as_ref(),
