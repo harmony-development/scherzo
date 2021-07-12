@@ -200,7 +200,7 @@ impl auth_service_server::AuthService for AuthServer {
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id.clone(), tx);
         loop {
-            if let Some(step) = rx.recv().await {
+            while let Some(step) = rx.recv().await {
                 if let Err(err) = socket.send_message(step).await {
                     tracing::error!("error occured: {}", err);
 

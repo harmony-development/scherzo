@@ -10,7 +10,7 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             encode_protobuf_message, return_print,
-            server::{Socket, WriteSocket},
+            server::{Socket, SocketError, WriteSocket},
             warp::reply::Response,
             Request,
         },
@@ -124,11 +124,13 @@ impl ChatServer {
             .await
             .map_or_else(
                 |err| {
-                    tracing::error!(
-                        "couldnt write to stream events socket for user {}: {}",
-                        user_id,
-                        err
-                    );
+                    if !matches!(err, SocketError::ClosedNormally) {
+                        tracing::error!(
+                            "couldnt write to stream events socket for user {}: {}",
+                            user_id,
+                            err
+                        );
+                    }
                     true
                 },
                 |_| false,
@@ -215,12 +217,7 @@ impl ChatServer {
             context,
         };
 
-        if let Err(err) = self.broadcast_send.send(Arc::new(broadcast)) {
-            tracing::error!(
-                "failed to send event broadcast to processing thread: {}",
-                err
-            );
-        }
+        drop(self.broadcast_send.send(Arc::new(broadcast)));
     }
 }
 
