@@ -10,13 +10,17 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use harmony_rust_sdk::api::exports::{
-    hrpc::{
-        http,
-        server::filters::{rate::Rate, rate_limit},
-        warp::{self, filters::BoxedFilter, Filter, Reply},
+use ed25519_compact::PublicKey;
+use harmony_rust_sdk::api::{
+    exports::{
+        hrpc::{
+            http,
+            server::filters::{rate::Rate, rate_limit},
+            warp::{self, filters::BoxedFilter, Filter, Reply},
+        },
+        prost::bytes::Bytes,
     },
-    prost::bytes::Bytes,
+    harmonytypes::Token,
 };
 use rand::Rng;
 use reqwest::Response;
@@ -109,6 +113,19 @@ pub fn version() -> BoxedFilter<(impl Reply,)> {
         .and(warp::path!("_harmony" / "version"))
         .map(|| format!("scherzo {}\n", SCHERZO_VERSION))
         .boxed()
+}
+
+const KEY_TAG: &str = "ED25519 PUBLIC KEY";
+
+pub fn verify_token(token: &Token, pubkey: &PublicKey) -> Result<(), ServerError> {
+    let Token { sig, data } = token;
+
+    let sig = ed25519_compact::Signature::from_slice(sig.as_slice())
+        .map_err(|_| ServerError::InvalidTokenSignature)?;
+
+    pubkey
+        .verify(data, &sig)
+        .map_err(|_| ServerError::CouldntVerifyTokenData)
 }
 
 // Taken from `lockless` (license https://github.com/Diggsey/lockless/blob/master/Cargo.toml#L7)
@@ -214,6 +231,111 @@ pub mod append_list {
                 self.0 = &(*p).next.0;
                 &(*p).value
             })
+        }
+    }
+}
+
+pub mod keys_manager {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    use ahash::RandomState;
+    use dashmap::{mapref::one::RefMut, DashMap};
+    use ed25519_compact::{KeyPair, PublicKey, Seed};
+    use harmony_rust_sdk::api::{
+        auth::auth_service_client::AuthServiceClient,
+        sync::postbox_service_client::PostboxServiceClient,
+    };
+
+    use reqwest::Url;
+
+    type Clients = (PostboxServiceClient, AuthServiceClient);
+
+    fn parse_pem(key: String, host: &str) -> Result<ed25519_compact::PublicKey, ServerError> {
+        let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.into()))?;
+
+        if pem.tag != KEY_TAG {
+            return Err(ServerError::CantGetHostKey(host.into()));
+        }
+
+        ed25519_compact::PublicKey::from_slice(pem.contents.as_slice())
+            .map_err(|_| ServerError::CantGetHostKey(host.into()))
+    }
+
+    #[derive(Debug)]
+    pub struct KeysManager {
+        keys: DashMap<String, PublicKey, RandomState>,
+        clients: DashMap<String, Clients, RandomState>,
+        federation_key: PathBuf,
+    }
+
+    impl KeysManager {
+        pub fn new(federation_key: PathBuf) -> Self {
+            Self {
+                federation_key,
+                keys: DashMap::default(),
+                clients: DashMap::default(),
+            }
+        }
+
+        pub fn invalidate_key(&self, host: &str) {
+            self.keys.remove(host);
+        }
+
+        pub async fn get_own_key(&self) -> Result<KeyPair, ServerError> {
+            match tokio::fs::read(&self.federation_key).await {
+                Ok(key) => {
+                    ed25519_compact::KeyPair::from_slice(&key).map_err(|_| ServerError::CantGetKey)
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::NotFound {
+                        let new_key = ed25519_compact::KeyPair::from_seed(Seed::generate());
+                        tokio::fs::write(&self.federation_key, new_key.as_ref())
+                            .await
+                            .map(|_| new_key)
+                            .map_err(|_| ServerError::CantGetKey)
+                    } else {
+                        Err(ServerError::CantGetKey)
+                    }
+                }
+            }
+        }
+
+        pub async fn get_key(&self, host: &str) -> Result<PublicKey, ServerError> {
+            let key = if let Some(key) = self.keys.get(host) {
+                *key
+            } else {
+                let key = self
+                    .get_client(host)
+                    .1
+                    .key(())
+                    .await
+                    .map_err(|_| ServerError::CantGetHostKey(host.into()))?
+                    .key;
+                let key = parse_pem(key, host)?;
+                self.keys.insert(host.to_string(), key);
+                key
+            };
+
+            Ok(key)
+        }
+
+        fn get_client<'a>(&'a self, host: &str) -> RefMut<'a, String, Clients, RandomState> {
+            if let Some(client) = self.clients.get_mut(host) {
+                client
+            } else {
+                let http = reqwest::Client::new(); // each server gets its own http client
+                let host_url: Url = host.parse().unwrap();
+
+                let sync_client =
+                    PostboxServiceClient::new(http.clone(), host_url.clone()).unwrap();
+                let auth_client = AuthServiceClient::new(http, host_url).unwrap();
+
+                self.clients
+                    .insert(host.to_string(), (sync_client, auth_client));
+                self.clients.get_mut(host).unwrap()
+            }
         }
     }
 }

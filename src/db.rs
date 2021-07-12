@@ -14,6 +14,7 @@ pub mod chat {
     use super::concat_static;
 
     pub const USER_PREFIX: &[u8] = b"user_";
+    pub const FOREIGN_PREFIX: &[u8] = b"fuser_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
 
     // message
@@ -44,8 +45,18 @@ pub mod chat {
         ])
     }
 
-    pub const fn make_foreign_user_key(local_id: u64) -> [u8; 14] {
-        concat_static(&[USER_PREFIX, &local_id.to_be_bytes(), &[2]])
+    pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 14] {
+        concat_static(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
+    }
+
+    pub fn make_foreign_to_local_user_key(foreign_id: u64, host: &str) -> Vec<u8> {
+        [
+            FOREIGN_PREFIX,
+            &[2],
+            &foreign_id.to_be_bytes(),
+            host.as_bytes(),
+        ]
+        .concat()
     }
 
     pub const fn make_user_profile_key(user_id: u64) -> [u8; 13] {

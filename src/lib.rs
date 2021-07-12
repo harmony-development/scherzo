@@ -105,6 +105,13 @@ pub enum ServerError {
     MediaNotFound,
     InviteExpired,
     FailedToAuthSync,
+    CantGetKey,
+    CantGetHostKey(SmolStr),
+    InvalidTokenData,
+    InvalidTokenSignature,
+    InvalidTime,
+    CouldntVerifyTokenData,
+    InvalidToken,
 }
 
 impl Display for ServerError {
@@ -215,6 +222,16 @@ impl Display for ServerError {
             ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
             ServerError::MediaNotFound => write!(f, "requested media is not found"),
             ServerError::FailedToAuthSync => write!(f, "failed to auth for host"),
+            ServerError::CantGetKey => write!(f, "can't get key"),
+            ServerError::CantGetHostKey(host) => write!(f, "can't get host key: {}", host),
+            ServerError::InvalidTokenData => write!(f, "token data is invalid"),
+            ServerError::InvalidTokenSignature => write!(f, "token signature is invalid"),
+            ServerError::InvalidTime => write!(f, "invalid time"),
+            ServerError::InvalidToken => write!(f, "token is invalid"),
+            ServerError::CouldntVerifyTokenData => write!(
+                f,
+                "token data could not be verified with the given signature"
+            ),
         }
     }
 }
@@ -253,13 +270,20 @@ impl CustomError for ServerError {
             | ServerError::NotAnImage
             | ServerError::InvalidUrl(_)
             | ServerError::InviteExpired
-            | ServerError::FailedToAuthSync => StatusCode::BAD_REQUEST,
+            | ServerError::FailedToAuthSync
+            | ServerError::InvalidTokenData
+            | ServerError::InvalidTokenSignature
+            | ServerError::InvalidTime
+            | ServerError::CouldntVerifyTokenData
+            | ServerError::InvalidToken => StatusCode::BAD_REQUEST,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::NotImplemented
             | ServerError::InternalServerError
             | ServerError::ReqwestError(_)
-            | ServerError::Unexpected(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::Unexpected(_)
+            | ServerError::CantGetKey
+            | ServerError::CantGetHostKey(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound => StatusCode::NOT_FOUND,
         }
@@ -271,7 +295,9 @@ impl CustomError for ServerError {
             | ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::ReqwestError(_)
-            | ServerError::Unexpected(_) => "h.internal-server-error",
+            | ServerError::Unexpected(_)
+            | ServerError::CantGetKey
+            | ServerError::CantGetHostKey(_) => "h.internal-server-error",
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
@@ -313,9 +339,14 @@ impl CustomError for ServerError {
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
             ServerError::MediaNotFound => return Self::NOT_FOUND_ERROR.1.to_vec(),
-            ServerError::InvalidUrl(_) => "h.invalid-url",
+            ServerError::InvalidUrl(_) => "h.bad-url",
             ServerError::InviteExpired => "h.bad-invite-id",
             ServerError::FailedToAuthSync => "h.bad-auth",
+            ServerError::InvalidTokenData => "h.bad-token-data",
+            ServerError::InvalidTokenSignature => "h.bad-token-signature",
+            ServerError::InvalidTime => "h.bad-time",
+            ServerError::CouldntVerifyTokenData => "h.token-verify-failure",
+            ServerError::InvalidToken => "h.bad-token",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }

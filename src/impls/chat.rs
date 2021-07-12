@@ -317,7 +317,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .set_permissions_logic(guild_id, channel_id, everyone_role_id, def_perms);
 
-        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+        match self.chat_tree.local_to_foreign_id(user_id) {
             Some(_) => todo!("implement after postbox and federate"),
             None => {
                 self.chat_tree
@@ -859,7 +859,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let mut local_ids = Vec::new();
         for member_id in guild_members {
-            match self.chat_tree.local_user_id_to_foreign_user_id(member_id) {
+            match self.chat_tree.local_to_foreign_id(member_id) {
                 Some(_) => todo!("implement after postbox and federate"),
                 None => {
                     self.chat_tree
@@ -1085,7 +1085,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+        match self.chat_tree.local_to_foreign_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
             None => {
                 self.chat_tree
@@ -1139,7 +1139,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.chat_tree.local_user_id_to_foreign_user_id(user_id) {
+        match self.chat_tree.local_to_foreign_id(user_id) {
             Some(_) => todo!("implement this after postbox and federate"),
             None => {
                 self.chat_tree
@@ -1927,6 +1927,12 @@ impl ChatTree {
             .unwrap()
     }
 
+    pub fn does_user_exist(&self, user_id: u64) -> bool {
+        self.chat_tree
+            .contains_key(make_user_profile_key(user_id))
+            .unwrap()
+    }
+
     pub fn does_guild_exist(&self, guild_id: u64) -> bool {
         self.chat_tree.contains_key(guild_id.to_be_bytes()).unwrap()
     }
@@ -2002,6 +2008,17 @@ impl ChatTree {
     ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
         if guild_id == 0 || !self.does_guild_exist(guild_id) {
             return Err(ServerError::NoSuchGuild(guild_id));
+        }
+
+        Ok(())
+    }
+
+    pub fn check_user(
+        &self,
+        user_id: u64,
+    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+        if user_id == 0 || !self.does_user_exist(user_id) {
+            return Err(ServerError::NoSuchUser(user_id));
         }
 
         Ok(())
@@ -2544,8 +2561,8 @@ impl ChatTree {
             .unwrap();
     }
 
-    pub fn local_user_id_to_foreign_user_id(&self, user_id: u64) -> Option<(u64, String)> {
-        let key = make_foreign_user_key(user_id);
+    pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, String)> {
+        let key = make_local_to_foreign_user_key(local_id);
 
         self.chat_tree.get(&key).unwrap().map(|raw| {
             let (raw_id, raw_host) = raw.split_at(std::mem::size_of::<u64>());
@@ -2553,5 +2570,14 @@ impl ChatTree {
             let host = std::str::from_utf8(raw_host).unwrap().to_string();
             (foreign_id, host)
         })
+    }
+
+    pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> Option<u64> {
+        let key = make_foreign_to_local_user_key(foreign_id, host);
+
+        self.chat_tree
+            .get(key)
+            .unwrap()
+            .map(|raw| u64::from_be_bytes(raw.as_ref().try_into().unwrap()))
     }
 }

@@ -1,25 +1,32 @@
-use std::{convert::TryInto, mem::size_of, path::PathBuf, time::Duration};
+use std::{convert::TryInto, mem::size_of, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
-use ed25519_compact::Seed;
 use harmony_rust_sdk::api::{
-    auth::*,
+    auth::{next_step_request::form_fields::Field, *},
     chat::GetUserResponse,
     exports::{
         hrpc::{encode_protobuf_message, server::WriteSocket, warp::reply::Response, Request},
-        prost::bytes::BytesMut,
+        prost::{bytes::BytesMut, Message},
     },
+    harmonytypes::{Token, UserStatus},
 };
-use scherzo_derive::rate;
+use scherzo_derive::{auth, rate};
 use sha3::Digest;
-use sled::{IVec, Tree};
+use sled::{Batch, IVec, Tree};
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
 
+use super::{chat::ChatTree, keys_manager::KeysManager, verify_token, KEY_TAG};
+
 use crate::{
-    db::{auth::*, chat::make_user_profile_key},
+    db::{
+        auth::*,
+        chat::{
+            make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
+        },
+    },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
     set_proto_name, ServerError, ServerResult,
@@ -64,7 +71,7 @@ pub struct AuthServer {
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     auth_tree: Tree,
     chat_tree: ChatTree,
-    federation_key: PathBuf,
+    keys_manager: Arc<KeysManager>,
 }
 
 impl AuthServer {
@@ -72,7 +79,7 @@ impl AuthServer {
         chat_tree: ChatTree,
         auth_tree: Tree,
         valid_sessions: SessionMap,
-        federation_key: PathBuf,
+        keys_manager: Arc<KeysManager>,
     ) -> Self {
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
@@ -137,7 +144,7 @@ impl AuthServer {
             send_step: DashMap::default(),
             auth_tree,
             chat_tree,
-            federation_key,
+            keys_manager,
         }
     }
 
@@ -157,54 +164,112 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(3, 1)]
-    async fn federate(&self, _: Request<FederateRequest>) -> Result<FederateReply, Self::Error> {
-        Err(ServerError::NotImplemented)
+    async fn federate(
+        &self,
+        request: Request<FederateRequest>,
+    ) -> Result<FederateReply, Self::Error> {
+        auth!();
+
+        let profile = self.chat_tree.get_user_logic(user_id)?;
+        let target = request.into_parts().0.target;
+
+        let data = TokenData {
+            user_id,
+            target,
+            username: profile.user_name,
+            avatar: profile.user_avatar,
+        };
+
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, data);
+        let data = buf.to_vec();
+
+        let key = self.keys_manager.get_own_key().await?;
+        let sig = key.sk.sign(&data, Some(ed25519_compact::Noise::generate()));
+
+        Ok(FederateReply {
+            token: Some(Token {
+                data,
+                sig: sig.to_vec(),
+            }),
+            nonce: String::new(),
+        })
     }
 
     #[rate(1, 5)]
     async fn login_federated(
         &self,
-        _: Request<LoginFederatedRequest>,
+        request: Request<LoginFederatedRequest>,
     ) -> Result<Session, Self::Error> {
-        Err(ServerError::NotImplemented)
+        let LoginFederatedRequest { auth_token, domain } = request.into_parts().0;
+
+        if let Some(token) = auth_token {
+            let pubkey = self.keys_manager.get_key(&domain).await?;
+            verify_token(&token, &pubkey)?;
+            let TokenData {
+                user_id: foreign_id,
+                target,
+                username,
+                avatar,
+            } = TokenData::decode(token.data.as_slice()).unwrap();
+
+            let local_user_id = self
+                .chat_tree
+                .foreign_to_local_id(foreign_id, &target)
+                .unwrap_or_else(|| {
+                    let local_id = gen_rand_u64();
+
+                    let mut batch = Batch::default();
+                    // Add the local to foreign user key entry
+                    batch.insert(
+                        &make_local_to_foreign_user_key(local_id),
+                        [&foreign_id.to_be_bytes(), target.as_bytes()].concat(),
+                    );
+                    // Add the foreign to local user key entry
+                    batch.insert(
+                        make_foreign_to_local_user_key(foreign_id, &target),
+                        &local_id.to_be_bytes(),
+                    );
+                    // Add the profile entry
+                    let profile = GetUserResponse {
+                        is_bot: false,
+                        user_status: UserStatus::Offline.into(),
+                        user_avatar: avatar,
+                        user_name: username,
+                    };
+                    let mut buf = BytesMut::new();
+                    encode_protobuf_message(&mut buf, profile);
+                    batch.insert(&make_user_profile_key(local_id), buf.to_vec());
+                    self.chat_tree.chat_tree.apply_batch(batch).unwrap();
+
+                    local_id
+                });
+
+            let session_token = gen_auth_token();
+            let session = Session {
+                session_token: session_token.to_string(),
+                user_id: local_user_id,
+            };
+            self.valid_sessions.insert(session_token, local_user_id);
+
+            return Ok(session);
+        }
+
+        Err(ServerError::InvalidToken)
     }
 
     #[rate(1, 5)]
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
-        fn key_to_pem(key: &[u8]) -> String {
-            let key = ed25519_compact::KeyPair::from_slice(key).unwrap();
-            let pubkey = key.pk;
-            let pem = pem::Pem {
-                contents: pubkey.to_vec(),
-                tag: "ED25519 PUBLIC KEY".to_string(),
-            };
-            pem::encode(&pem)
-        }
+        let key = self.keys_manager.get_own_key().await?;
 
-        match tokio::fs::read(&self.federation_key).await {
-            Ok(key) => {
-                return Ok(KeyReply {
-                    key: key_to_pem(key.as_slice()),
-                })
-            }
-            Err(err) => {
-                if err.kind() == std::io::ErrorKind::NotFound {
-                    let new_key = ed25519_compact::KeyPair::from_seed(Seed::generate());
-                    let key_raw = new_key.to_vec();
-                    if tokio::fs::write(&self.federation_key, &key_raw)
-                        .await
-                        .is_ok()
-                    {
-                        return Ok(KeyReply {
-                            key: key_to_pem(&key_raw),
-                        });
-                    }
-                }
-            }
-        }
+        let pem = pem::Pem {
+            contents: key.pk.to_vec(),
+            tag: KEY_TAG.to_string(),
+        };
 
-        // TODO: replace this with a proper error
-        Err(ServerError::NotImplemented)
+        Ok(KeyReply {
+            key: pem::encode(&pem),
+        })
     }
 
     fn stream_steps_on_upgrade(&self, response: Response) -> Response {
@@ -625,10 +690,6 @@ const USERNAME_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
     name: SmolStr::new_inline("username"),
     expected: SmolStr::new_inline("text"),
 };
-
-use next_step_request::form_fields::Field;
-
-use super::chat::ChatTree;
 
 #[inline(always)]
 fn try_get_string(values: &mut Vec<Field>, err: ServerError) -> ServerResult<String> {

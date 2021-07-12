@@ -22,6 +22,7 @@ use scherzo::{
     impls::{
         auth::AuthServer,
         chat::{ChatServer, ChatTree},
+        keys_manager::KeysManager,
         mediaproxy::MediaproxyServer,
         rest::RestConfig,
         sync::SyncServer,
@@ -231,15 +232,16 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
             }
 
+            let keys_manager = Arc::new(KeysManager::new(config.federation_key));
             let auth_server = AuthServer::new(
                 chat_tree.clone(),
                 auth_tree.clone(),
                 valid_sessions.clone(),
-                config.federation_key,
+                keys_manager.clone(),
             );
             let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone());
             let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-            let sync_server = SyncServer::new(chat_tree.clone());
+            let sync_server = SyncServer::new(chat_tree.clone(), keys_manager);
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
