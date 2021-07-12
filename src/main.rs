@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 
-use std::{convert::TryInto, sync::Arc, time::Duration};
+use std::{convert::TryInto, time::Duration};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
@@ -27,6 +27,7 @@ use scherzo::{
 };
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
+use triomphe::Arc;
 
 #[derive(Debug)]
 pub enum Command {

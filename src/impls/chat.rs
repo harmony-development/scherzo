@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem::size_of, ops::Not, sync::Arc};
+use std::{convert::TryInto, mem::size_of, ops::Not};
 
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
@@ -27,6 +27,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use triomphe::Arc;
 
 use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic};
 use crate::{
@@ -88,7 +89,6 @@ struct EventBroadcast {
 }
 
 #[derive(Debug)]
-#[allow(clippy::type_complexity)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     pub chat_tree: ChatTree,
@@ -99,6 +99,7 @@ impl ChatServer {
     pub fn new(chat_tree: Tree, valid_sessions: auth::SessionMap) -> Self {
         let chat_tree: ChatTree = ChatTree { chat_tree };
 
+        // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
         let (tx, _) = broadcast::channel(1000);
         Self {
             valid_sessions,
@@ -203,6 +204,7 @@ impl ChatServer {
         })
     }
 
+    #[inline(always)]
     fn send_event_through_chan(
         &self,
         sub: EventSub,

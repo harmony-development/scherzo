@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem::size_of, sync::Arc, time::Duration};
+use std::{convert::TryInto, mem::size_of, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -15,6 +15,7 @@ use sha3::Digest;
 use sled::{IVec, Tree};
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
+use triomphe::Arc;
 
 use crate::{
     db::{

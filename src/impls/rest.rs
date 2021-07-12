@@ -11,7 +11,6 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
-    sync::Arc,
     task::Poll,
 };
 
@@ -36,6 +35,7 @@ use smol_str::SmolStr;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio_util::io::poll_read_buf;
 use tracing::info;
+use triomphe::Arc;
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
 const SEPERATOR: u8 = b'\n';
