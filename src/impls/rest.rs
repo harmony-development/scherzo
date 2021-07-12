@@ -91,7 +91,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         let content_type = resp
                             .headers()
                             .get(&http::header::CONTENT_TYPE)
-                            .map(|v| {
+                            .and_then(|v| {
                                 const IMAGE: &[u8] = b"image";
                                 (v.len() > IMAGE.len()
                                     && IMAGE
@@ -99,8 +99,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                                         .zip(v.as_bytes().iter().take(5))
                                         .all(|(a, b)| a == b))
                                 .then(|| v.clone())
-                            })
-                            .flatten();
+                            });
 
                         if let Some(content_type) = content_type {
                             let filename = resp

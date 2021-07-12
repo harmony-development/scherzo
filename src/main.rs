@@ -57,10 +57,7 @@ pub enum Command {
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
 
 pub fn get_arg_as_u64(index: usize) -> Option<u64> {
-    std::env::args()
-        .nth(index)
-        .map(|id| id.parse().ok())
-        .flatten()
+    std::env::args().nth(index).and_then(|id| id.parse().ok())
 }
 
 #[tokio::main]

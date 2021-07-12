@@ -77,10 +77,8 @@ fn get_mimetype(response: &Response) -> &str {
     response
         .headers()
         .get(&http::header::CONTENT_TYPE)
-        .map(|val| val.to_str().ok())
-        .flatten()
-        .map(|s| s.split(';').next())
-        .flatten()
+        .and_then(|val| val.to_str().ok())
+        .and_then(|s| s.split(';').next())
         .unwrap_or("application/octet-stream")
 }
 

@@ -43,13 +43,11 @@ pub fn check_auth<T>(
                 // Specific handling for web clients
                 request
                     .get_header(&http::header::SEC_WEBSOCKET_PROTOCOL)
-                    .map(|val| {
+                    .and_then(|val| {
                         val.to_str()
                             .ok()
-                            .map(|v| v.split(',').nth(1).map(str::trim))
-                            .flatten()
+                            .and_then(|v| v.split(',').nth(1).map(str::trim))
                     })
-                    .flatten()
             },
             |val| val.to_str().ok(),
         )

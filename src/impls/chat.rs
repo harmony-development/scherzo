@@ -1598,7 +1598,7 @@ impl chat_service_server::ChatService for ChatServer {
         let recv_loop = async move {
             loop {
                 return_print!(rs.receive_message().await, |maybe_req| {
-                    if let Some(req) = maybe_req.map(|r| r.request).flatten() {
+                    if let Some(req) = maybe_req.and_then(|r| r.request) {
                         use stream_events_request::*;
 
                         let sub = match req {

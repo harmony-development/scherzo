@@ -90,9 +90,8 @@ impl MediaproxyServer {
             let filename = response
                 .headers()
                 .get(&http::header::CONTENT_DISPOSITION)
-                .map(|val| val.to_str().ok())
-                .flatten()
-                .or_else(|| Some(url.path_segments()?.last()).flatten())
+                .and_then(|val| val.to_str().ok())
+                .or_else(|| url.path_segments().and_then(Iterator::last))
                 .unwrap_or("unknown")
                 .into();
             Metadata::Media {
