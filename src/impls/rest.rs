@@ -5,6 +5,7 @@ use crate::{
 };
 
 use std::{
+    borrow::Cow,
     cmp,
     collections::HashMap,
     fs::Metadata,
@@ -79,7 +80,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         }
                     })
             }
-            let id = urlencoding::decode(&id).unwrap_or(id);
+            let id = urlencoding::decode(&id).unwrap_or_else(|_| Cow::Borrowed(id.as_str()));
             let media_root = media_root.clone();
             let http_client = http_client.clone();
             let file_id = FileId::from_str(&id).map_err(|_| reject(ServerError::InvalidFileId));
