@@ -89,13 +89,14 @@ impl AuthServer {
             let _guard = tracing::info_span!("auth_session_check").entered();
             tracing::info!("starting auth session expiration check thread");
 
-            fn scan_tree_for(att: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
+            // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
+            unsafe fn scan_tree_for(att: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .map(move |res| {
                         let (key, val) = res.unwrap();
                         (
-                            u64::from_be_bytes(key.split_at(len).1.try_into().unwrap()),
+                            u64::from_be_bytes(key.split_at(len).1.try_into().unwrap_unchecked()),
                             val,
                         )
                     })
@@ -103,22 +104,27 @@ impl AuthServer {
             }
 
             loop {
-                let tokens = scan_tree_for(&att, TOKEN_PREFIX);
-                let atimes = scan_tree_for(&att, ATIME_PREFIX);
+                // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
+                let tokens = unsafe { scan_tree_for(&att, TOKEN_PREFIX) };
+                // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
+                let atimes = unsafe { scan_tree_for(&att, ATIME_PREFIX) };
 
                 let mut batch = sled::Batch::default();
                 for (id, raw_token) in tokens {
                     if let Ok(profile) = ctt.get_user_logic(id) {
                         for (oid, raw_atime) in &atimes {
                             if id.eq(oid) {
-                                let secs =
-                                    u64::from_be_bytes(raw_atime.as_ref().try_into().unwrap());
+                                // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
+                                let secs = u64::from_be_bytes(unsafe {
+                                    raw_atime.as_ref().try_into().unwrap_unchecked()
+                                });
                                 let auth_how_old = get_time_secs() - secs;
                                 // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
                                 let token =
                                     unsafe { std::str::from_utf8_unchecked(raw_token.as_ref()) };
 
                                 if vs.contains_key(token) {
+                                    // [ref:atime_u64_key] [ref:atime_u64_value]
                                     batch.insert(&atime_key(id), &get_time_secs().to_be_bytes());
                                 } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
                                     tracing::debug!("user {} session has expired", id);
@@ -204,14 +210,15 @@ impl auth_service_server::AuthService for AuthServer {
         let LoginFederatedRequest { auth_token, domain } = request.into_parts().0;
 
         if let Some(token) = auth_token {
-            let pubkey = self.keys_manager.get_key(&domain).await?;
+            let pubkey = self.keys_manager.get_key(domain.into()).await?;
             verify_token(&token, &pubkey)?;
             let TokenData {
                 user_id: foreign_id,
                 target,
                 username,
                 avatar,
-            } = TokenData::decode(token.data.as_slice()).unwrap();
+            } = TokenData::decode(token.data.as_slice())
+                .map_err(|_| ServerError::InvalidTokenData)?;
 
             let local_user_id = self
                 .chat_tree
@@ -291,7 +298,7 @@ impl auth_service_server::AuthService for AuthServer {
                 Err(ServerError::InvalidAuthId)
             }
         } else {
-            Ok(SmolStr::default())
+            Ok(SmolStr::new_inline(""))
         }
     }
 
@@ -327,6 +334,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let auth_id = gen_rand_inline_str();
 
+        // [tag:step_stack_non_empty]
         self.step_map
             .entry(auth_id.clone())
             .and_modify(|s| *s = vec![initial_step.clone()])
@@ -350,7 +358,16 @@ impl auth_service_server::AuthService for AuthServer {
 
         if let Some(mut step_stack) = self.step_map.get_mut(auth_id.as_str()) {
             if let Some(step) = maybe_step {
-                let current_step = step_stack.last().unwrap().step.as_ref().unwrap().clone();
+                // Safety: step stack can never be empty, and our steps always have an inner step contained in them [ref:step_stack_non_empty]
+                let current_step = unsafe {
+                    step_stack
+                        .last()
+                        .unwrap_unchecked()
+                        .step
+                        .as_ref()
+                        .unwrap_unchecked()
+                        .clone()
+                };
                 tracing::debug!("current auth step for session {}", auth_id);
                 tracing::debug!("client replied with {:#?}", step);
                 match step {
@@ -492,13 +509,14 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let user_id =
                                         if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
-                                            u64::from_be_bytes(
+                                            // Safety: this unwrap can never cause UB since we split at u64 boundary
+                                            u64::from_be_bytes(unsafe {
                                                 user_id
                                                     .split_at(size_of::<u64>())
                                                     .0
                                                     .try_into()
-                                                    .unwrap(),
-                                            )
+                                                    .unwrap_unchecked()
+                                            })
                                         } else {
                                             return Err(ServerError::WrongUserOrPassword {
                                                 email: email.into(),
@@ -518,9 +536,12 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
                                     let mut batch = sled::Batch::default();
+                                    // [ref:token_u64_key]
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
+                                        // [ref:atime_u64_key]
                                         &atime_key(user_id),
+                                        // [ref:atime_u64_value]
                                         &get_time_secs().to_be_bytes(),
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
@@ -558,9 +579,12 @@ impl auth_service_server::AuthService for AuthServer {
                                     let mut batch = sled::Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
                                     batch.insert(&user_id.to_be_bytes(), password_hashed.as_ref());
+                                    // [ref:token_u64_key]
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
+                                        // [ref:atime_u64_key]
                                         &atime_key(user_id),
+                                        // [ref:atime_u64_value]
                                         &get_time_secs().to_be_bytes(),
                                     );
                                     self.auth_tree
@@ -608,7 +632,8 @@ impl auth_service_server::AuthService for AuthServer {
                     }
                 }
             } else {
-                next_step = step_stack.last().unwrap().clone();
+                // Safety: step stack can never be empty [ref:step_stack_non_empty]
+                next_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
             }
         } else {
             return Err(ServerError::InvalidAuthId);
@@ -641,7 +666,8 @@ impl auth_service_server::AuthService for AuthServer {
         let prev_step;
 
         if let Some(mut step_stack) = self.step_map.get_mut(auth_id.as_str()) {
-            if step_stack.last().unwrap().can_go_back {
+            // Safety: step stack can never be empty [ref:step_stack_non_empty]
+            if unsafe { step_stack.last().unwrap_unchecked().can_go_back } {
                 step_stack.pop();
                 tracing::debug!("auth session {} went to previous step", auth_id);
             } else {
@@ -650,7 +676,8 @@ impl auth_service_server::AuthService for AuthServer {
                     auth_id
                 );
             }
-            prev_step = step_stack.last().unwrap().clone();
+            // Safety: step stack can never be empty [ref:step_stack_non_empty]
+            prev_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
             if let Some(chan) = self.send_step.get(auth_id.as_str()) {
                 if let Err(err) = chan.send(prev_step.clone()).await {
                     tracing::error!("failed to send auth step to {}: {}", auth_id, err);

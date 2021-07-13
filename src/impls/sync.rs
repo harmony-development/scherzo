@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+
 use super::{chat::ChatTree, keys_manager::KeysManager, *};
 
 use ahash::RandomState;
-use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{async_trait, return_print, server::Socket, Request},
@@ -12,45 +13,37 @@ use harmony_rust_sdk::api::{
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use parking_lot::RwLock;
 use reqwest::Url;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{
+    broadcast::{self, Sender as BroadcastSend},
+    mpsc::UnboundedReceiver,
+};
 
 use triomphe::Arc;
 
 pub struct EventDispatch {
-    pub host: String,
+    pub host: SmolStr,
     pub event: Event,
 }
 
-struct Clients(DashMap<String, PostboxServiceClient, RandomState>);
+struct Clients(HashMap<SmolStr, PostboxServiceClient, RandomState>);
 
 impl Clients {
-    fn get_client<'a>(
-        &'a self,
-        host: &str,
-    ) -> RefMut<'a, String, PostboxServiceClient, RandomState> {
-        if let Some(client) = self.0.get_mut(host) {
-            client
-        } else {
+    fn get_client(&mut self, host: SmolStr) -> &mut PostboxServiceClient {
+        self.0.entry(host.clone()).or_insert_with(|| {
             let http = reqwest::Client::new(); // each server gets its own http client
             let host_url: Url = host.parse().unwrap();
 
-            let auth_client = PostboxServiceClient::new(http, host_url).unwrap();
-
-            self.0.insert(host.to_string(), auth_client);
-            self.0.get_mut(host).unwrap()
-        }
+            PostboxServiceClient::new(http, host_url).unwrap()
+        })
     }
 }
-
-type PullQueue = Arc<RwLock<Vec<Event>>>;
 
 #[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
     keys_manager: Arc<KeysManager>,
-    pull_queue_map: Arc<DashMap<String, PullQueue, RandomState>>,
+    pull_queue_broadcast: BroadcastSend<Arc<EventDispatch>>,
 }
 
 impl SyncServer {
@@ -62,26 +55,21 @@ impl SyncServer {
         let sync = Self {
             chat_tree,
             keys_manager,
-            pull_queue_map: Default::default(),
+            pull_queue_broadcast: broadcast::channel(1000).0,
         };
         let sync2 = sync.clone();
         tokio::spawn(async move {
-            let clients = Clients(DashMap::default());
+            let mut clients = Clients(HashMap::default());
 
             loop {
                 while let Some(dispatch) = dispatch_rx.recv().await {
                     if clients
-                        .get_client(&dispatch.host)
+                        .get_client(dispatch.host.clone())
                         .push(dispatch.event.clone())
                         .await
                         .is_err()
                     {
-                        sync2
-                            .pull_queue_map
-                            .entry(dispatch.host)
-                            .or_default()
-                            .write()
-                            .push(dispatch.event);
+                        drop(sync2.pull_queue_broadcast.send(Arc::new(dispatch)));
                     }
                 }
             }
@@ -89,7 +77,7 @@ impl SyncServer {
         sync
     }
 
-    async fn auth<T>(&self, request: &Request<T>) -> Result<String, ServerError> {
+    async fn auth<T>(&self, request: &Request<T>) -> Result<SmolStr, ServerError> {
         let maybe_auth = request.get_header(&http::header::AUTHORIZATION);
 
         if let Some(auth) = maybe_auth.map(|h| h.as_bytes()) {
@@ -101,7 +89,8 @@ impl SyncServer {
             let cur_time = get_time_secs();
             // Check time variance (1 minute)
             if time < cur_time + 30 && time > cur_time - 30 {
-                let pubkey = self.keys_manager.get_key(&host).await?;
+                let host: SmolStr = host.into();
+                let pubkey = self.keys_manager.get_key(host.clone()).await?;
 
                 return verify_token(&token, &pubkey).map(|_| host);
             }
@@ -115,38 +104,40 @@ impl SyncServer {
 impl postbox_service_server::PostboxService for SyncServer {
     type Error = ServerError;
 
-    type PullValidationType = String;
+    type PullValidationType = SmolStr;
 
-    async fn pull_validation(&self, request: Request<Option<Ack>>) -> Result<String, Self::Error> {
+    async fn pull_validation(&self, request: Request<Option<Ack>>) -> Result<SmolStr, Self::Error> {
         self.auth(&request).await
     }
 
-    async fn pull(&self, host: String, mut socket: Socket<Ack, Syn>) {
+    async fn pull(&self, host: SmolStr, mut socket: Socket<Ack, Syn>) {
         let mut id = 0;
+        let mut rx = self.pull_queue_broadcast.subscribe();
 
         loop {
-            if let Some(ev) = self
-                .pull_queue_map
-                .get(&host)
-                .and_then(|queue| queue.write().pop())
-            {
+            let mut value = None;
+            while value.is_none() {
+                value = rx.recv().await.ok();
+            }
+            let value = unsafe { value.unwrap_unchecked() };
+            if value.host == host {
                 return_print!(
                     socket
                         .send_message(Syn {
-                            event: Some(ev),
+                            event: Some(value.event.clone()),
                             event_id: id,
                         })
                         .await
                 );
+
+                return_print!(socket.receive_message().await, |ack| {
+                    if Some(id) != ack.map(|ack| ack.event_id) {
+                        return;
+                    }
+                });
+
+                id += 1;
             }
-
-            return_print!(socket.receive_message().await, |ack| {
-                if Some(id) != ack.map(|ack| ack.event_id) {
-                    return;
-                }
-            });
-
-            id += 1;
         }
     }
 

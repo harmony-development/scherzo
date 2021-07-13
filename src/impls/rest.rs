@@ -124,14 +124,17 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                     }
                     FileId::Hmc(hmc) => {
                         info!("Serving HMC from {}", hmc);
-                        let url = format!(
-                            "https://{}:{}/_harmony/media/download/{}",
-                            hmc.server(),
-                            hmc.port(),
-                            hmc.id()
-                        )
-                        .parse()
-                        .unwrap();
+                        // Safety: this is always valid, since HMC is a valid URL
+                        let url = unsafe {
+                            format!(
+                                "https://{}:{}/_harmony/media/download/{}",
+                                hmc.server(),
+                                hmc.port(),
+                                hmc.id()
+                            )
+                            .parse()
+                            .unwrap_unchecked()
+                        };
                         let resp = make_request(&http_client, url).await?;
                         let (disposition, mimetype) =
                             extract_file_info_from_download_response(resp.headers())

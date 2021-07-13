@@ -99,7 +99,7 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
 #[inline(always)]
 fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
     raw.chunks_exact(size_of::<u64>())
-        .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
+        .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
 }
 
 const SCHERZO_VERSION: &str = git_version::git_version!(
@@ -247,21 +247,21 @@ pub mod keys_manager {
 
     use reqwest::Url;
 
-    fn parse_pem(key: String, host: &str) -> Result<ed25519_compact::PublicKey, ServerError> {
-        let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.into()))?;
+    fn parse_pem(key: String, host: SmolStr) -> Result<ed25519_compact::PublicKey, ServerError> {
+        let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.clone()))?;
 
         if pem.tag != KEY_TAG {
-            return Err(ServerError::CantGetHostKey(host.into()));
+            return Err(ServerError::CantGetHostKey(host));
         }
 
         ed25519_compact::PublicKey::from_slice(pem.contents.as_slice())
-            .map_err(|_| ServerError::CantGetHostKey(host.into()))
+            .map_err(|_| ServerError::CantGetHostKey(host))
     }
 
     #[derive(Debug)]
     pub struct KeysManager {
-        keys: DashMap<String, PublicKey, RandomState>,
-        clients: DashMap<String, AuthServiceClient, RandomState>,
+        keys: DashMap<SmolStr, PublicKey, RandomState>,
+        clients: DashMap<SmolStr, AuthServiceClient, RandomState>,
         federation_key: PathBuf,
     }
 
@@ -297,40 +297,32 @@ pub mod keys_manager {
             }
         }
 
-        pub async fn get_key(&self, host: &str) -> Result<PublicKey, ServerError> {
-            let key = if let Some(key) = self.keys.get(host) {
+        pub async fn get_key(&self, host: SmolStr) -> Result<PublicKey, ServerError> {
+            let key = if let Some(key) = self.keys.get(&host) {
                 *key
             } else {
                 let key = self
-                    .get_client(host)
+                    .get_client(host.clone())
                     .value_mut()
                     .key(())
                     .await
-                    .map_err(|_| ServerError::CantGetHostKey(host.into()))?
+                    .map_err(|_| ServerError::CantGetHostKey(host.clone()))?
                     .key;
-                let key = parse_pem(key, host)?;
-                self.keys.insert(host.to_string(), key);
+                let key = parse_pem(key, host.clone())?;
+                self.keys.insert(host, key);
                 key
             };
 
             Ok(key)
         }
 
-        fn get_client<'a>(
-            &'a self,
-            host: &str,
-        ) -> RefMut<'a, String, AuthServiceClient, RandomState> {
-            if let Some(client) = self.clients.get_mut(host) {
-                client
-            } else {
+        fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, AuthServiceClient, RandomState> {
+            self.clients.entry(host.clone()).or_insert_with(|| {
                 let http = reqwest::Client::new(); // each server gets its own http client
                 let host_url: Url = host.parse().unwrap();
 
-                let auth_client = AuthServiceClient::new(http, host_url).unwrap();
-
-                self.clients.insert(host.to_string(), auth_client);
-                self.clients.get_mut(host).unwrap()
-            }
+                AuthServiceClient::new(http, host_url).unwrap()
+            })
         }
     }
 }

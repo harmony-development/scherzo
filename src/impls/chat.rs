@@ -27,6 +27,7 @@ use harmony_rust_sdk::api::{
 };
 use scherzo_derive::*;
 use sled::Tree;
+use smol_str::SmolStr;
 use tokio::{
     sync::{
         broadcast::{self, Sender as BroadcastSend},
@@ -234,7 +235,7 @@ impl ChatServer {
     }
 
     #[inline(always)]
-    fn dispatch_event(&self, target: String, event: DispatchKind) {
+    fn dispatch_event(&self, target: SmolStr, event: DispatchKind) {
         let dispatch = EventDispatch {
             host: target,
             event: DispatchEvent { kind: Some(event) },
@@ -309,6 +310,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .insert(
                 &make_guild_default_role_key(guild_id),
+                // [tag:default_role_store]
                 everyone_role_id.to_be_bytes().as_ref(),
             )
             .unwrap();
@@ -477,8 +479,10 @@ impl chat_service_server::ChatService for ChatServer {
                     .1
                     .split_at(size_of::<u64>());
 
-                let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                let host = std::str::from_utf8(host_raw).unwrap();
+                // Safety: this unwrap can never cause UB since we split at u64 boundary
+                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+                // Safety: we never store non UTF-8 hosts, so this can't cause UB
+                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
 
                 get_guild_list_response::GuildListEntry {
                     guild_id,
@@ -825,10 +829,9 @@ impl chat_service_server::ChatService for ChatServer {
         let edited_at = Some(std::time::SystemTime::now().into());
         message.edited_at = edited_at.clone();
 
-        let mut buf = Vec::with_capacity(message.encoded_len());
-        // will never fail
-        message.encode(&mut buf).unwrap();
-        self.chat_tree.chat_tree.insert(&key, buf).unwrap();
+        let mut buf = BytesMut::new();
+        encode_protobuf_message(&mut buf, message);
+        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1242,16 +1245,17 @@ impl chat_service_server::ChatService for ChatServer {
             .scan_prefix(msg_prefix)
             .last()
             .map_or(1, |res| {
-                u64::from_be_bytes(
+                // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
+                u64::from_be_bytes(unsafe {
                     res.unwrap()
                         .0
                         .split_at(msg_prefix.len())
                         .1
                         .try_into()
-                        .unwrap(),
-                ) + 1
+                        .unwrap_unchecked()
+                }) + 1
             });
-        let key = make_msg_key(guild_id, channel_id, message_id);
+        let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
         let created_at = Some(std::time::SystemTime::now().into());
         let edited_at = None;
@@ -1270,7 +1274,8 @@ impl chat_service_server::ChatService for ChatServer {
         };
 
         let mut buf = BytesMut::with_capacity(message.encoded_len());
-        message.encode(&mut buf).unwrap();
+        // This can never fail, so we ignore the result
+        let _ = message.encode(&mut buf);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
@@ -1534,17 +1539,12 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
 
-        if self
-            .chat_tree
+        self.chat_tree
             .chat_tree
             .remove(&make_guild_role_key(guild_id, role_id))
             .unwrap()
-            .is_some()
-        {
-            Ok(())
-        } else {
-            Err(ServerError::NoSuchRole { guild_id, role_id })
-        }
+            .ok_or(ServerError::NoSuchRole { guild_id, role_id })
+            .map(|_| ())
     }
 
     #[rate(10, 5)]
@@ -1603,11 +1603,9 @@ impl chat_service_server::ChatService for ChatServer {
                 user_id: user_to_fetch,
             });
         }
-        let fetch_user = if user_to_fetch != 0 {
-            user_to_fetch
-        } else {
-            user_id
-        };
+        let fetch_user = (user_to_fetch == 0)
+            .then(|| user_id)
+            .unwrap_or(user_to_fetch);
         if fetch_user != user_id {
             self.chat_tree
                 .check_perms(guild_id, 0, user_id, "roles.user.get", false)?;
@@ -1661,7 +1659,7 @@ impl chat_service_server::ChatService for ChatServer {
                             ) => EventSub::Homeserver,
                         };
 
-                        sub_tx.send(sub).await.unwrap();
+                        drop(sub_tx.send(sub).await);
                     }
                 });
             }
@@ -1727,8 +1725,9 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .get(&make_user_metadata_key(user_id, &app_id))
             .unwrap()
-            .map_or_else(String::default, |raw| {
-                String::from_utf8_lossy(raw.as_ref()).into()
+            .map_or_else(String::default, |raw| unsafe {
+                // Safety: this can never cause UB since we don't store non UTF-8 user metadata
+                String::from_utf8_unchecked(raw.to_vec())
             });
 
         Ok(GetUserMetadataResponse { metadata })
@@ -2128,7 +2127,8 @@ impl ChatTree {
             .map(|res| {
                 let (_, value) = res.unwrap();
                 let (id_raw, invite_raw) = value.split_at(size_of::<u64>());
-                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                // Safety: this unwrap cannot fail since we split at u64 boundary
+                let id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
                 let invite = db::deser_invite(invite_raw.into());
                 (id, invite)
             })
@@ -2145,7 +2145,10 @@ impl ChatTree {
             .scan_prefix(prefix)
             .map(|res| {
                 let (id, _) = res.unwrap();
-                u64::from_be_bytes(id.split_at(prefix.len()).1.try_into().unwrap())
+                // Safety: this unwrap cannot fail since after we split at prefix length, the remainder is a valid u64
+                u64::from_be_bytes(unsafe {
+                    id.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                })
             })
             .collect();
 
@@ -2170,14 +2173,21 @@ impl ChatTree {
                                 .check_perms(
                                     guild_id,
                                     u64::from_be_bytes(
-                                        key.split_at(prefix.len()).1.try_into().unwrap(),
+                                        // Safety: this unwrap is safe since we check if it's a valid u64 beforehand
+                                        unsafe {
+                                            key.split_at(prefix.len())
+                                                .1
+                                                .try_into()
+                                                .unwrap_unchecked()
+                                        },
                                     ),
                                     user_id,
                                     "messages.view",
                                     false,
                                 )
                                 .is_ok())
-                        .then(|| Channel::decode(value.as_ref()).unwrap())
+                        // Safety: this unwrap is safe since we only store valid Channel message
+                        .then(|| unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() })
                     })
                     .flatten()
             })
@@ -2354,7 +2364,15 @@ impl ChatTree {
                     },
                     |last| {
                         get_messages(u64::from_be_bytes(
-                            last.unwrap().0.split_at(prefix.len()).1.try_into().unwrap(),
+                            // Safety: cannot fail since the remainder after we split is a valid u64
+                            unsafe {
+                                last.unwrap()
+                                    .0
+                                    .split_at(prefix.len())
+                                    .1
+                                    .try_into()
+                                    .unwrap_unchecked()
+                            },
                         ))
                     },
                 )
@@ -2369,7 +2387,8 @@ impl ChatTree {
             .unwrap()
             .map_or_else(Vec::default, |raw| {
                 raw.chunks_exact(size_of::<u64>())
-                    .map(|raw| u64::from_be_bytes(raw.try_into().unwrap()))
+                    // Safety: this is safe since we split at u64 boundary
+                    .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
                     .collect()
             })
     }
@@ -2487,8 +2506,10 @@ impl ChatTree {
             .get(&make_guild_default_role_key(guild_id))
             .unwrap()
         {
-            let default_role_id = u64::from_be_bytes(raw.as_ref().try_into().unwrap());
-            self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::default())?;
+            // Safety: safe since we only store valid u64 [ref:default_role_store]
+            let default_role_id =
+                u64::from_be_bytes(unsafe { raw.as_ref().try_into().unwrap_unchecked() });
+            self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::new())?;
         }
         Ok(())
     }
@@ -2580,7 +2601,8 @@ impl ChatTree {
                 let (key, _) = res.unwrap();
                 let (_, guild_id_raw) = key.split_at(prefix.len());
                 let (id_raw, _) = guild_id_raw.split_at(size_of::<u64>());
-                let guild_id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                // Safety: safe since we split at u64 boundary
+                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
                 self.get_guild_members_logic(guild_id).members
             })
             .flatten()
@@ -2607,13 +2629,15 @@ impl ChatTree {
             .unwrap();
     }
 
-    pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, String)> {
+    pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, SmolStr)> {
         let key = make_local_to_foreign_user_key(local_id);
 
         self.chat_tree.get(&key).unwrap().map(|raw| {
-            let (raw_id, raw_host) = raw.split_at(std::mem::size_of::<u64>());
-            let foreign_id = u64::from_be_bytes(raw_id.try_into().unwrap());
-            let host = std::str::from_utf8(raw_host).unwrap().to_string();
+            let (raw_id, raw_host) = raw.split_at(size_of::<u64>());
+            // Safety: safe since we split at u64 boundary.
+            let foreign_id = u64::from_be_bytes(unsafe { raw_id.try_into().unwrap_unchecked() });
+            // Safety: all stored hosts are valid UTF-8
+            let host = (unsafe { std::str::from_utf8_unchecked(raw_host) }).into();
             (foreign_id, host)
         })
     }
@@ -2624,6 +2648,7 @@ impl ChatTree {
         self.chat_tree
             .get(key)
             .unwrap()
-            .map(|raw| u64::from_be_bytes(raw.as_ref().try_into().unwrap()))
+            // Safety: we store u64's only for these keys
+            .map(|raw| u64::from_be_bytes(unsafe { raw.as_ref().try_into().unwrap_unchecked() }))
     }
 }

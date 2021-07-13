@@ -192,7 +192,7 @@ pub fn deser_invite_entry_guild_id(data: &sled::IVec) -> u64 {
     use std::convert::TryInto;
 
     let (id_raw, _) = data.split_at(size_of::<u64>());
-    u64::from_be_bytes(id_raw.try_into().unwrap())
+    u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() })
 }
 
 #[cached(size = 1024)]
