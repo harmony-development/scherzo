@@ -178,6 +178,14 @@ pub mod auth {
     }
 }
 
+pub mod sync {
+    pub const HOST_PREFIX: &[u8] = b"host_";
+
+    pub fn make_host_key(host: &str) -> Vec<u8> {
+        [HOST_PREFIX, host.as_bytes()].concat()
+    }
+}
+
 crate::impl_deser! {
     profile, GetUserResponse, 5096;
     invite, Invite, 1024;

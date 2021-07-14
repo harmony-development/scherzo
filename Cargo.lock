@@ -1691,6 +1691,7 @@ dependencies = [
  "parking_lot",
  "paste",
  "pem",
+ "prost 0.8.0",
  "rand",
  "reqwest",
  "scherzo_derive",

@@ -40,6 +40,7 @@ git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
 ed25519-compact = "0.1"
 pem = "0.8"
+prost = "0.8"
 
 [profile.dev]
 opt-level = 0

@@ -206,6 +206,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     let auth_tree = db.open_tree("auth").unwrap();
     let chat_tree = db.open_tree("chat").unwrap();
+    let sync_tree = db.open_tree("sync").unwrap();
     let chat_tree = ChatTree { chat_tree };
 
     match command {
@@ -243,7 +244,8 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             let chat_server =
                 ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
             let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-            let sync_server = SyncServer::new(chat_tree.clone(), keys_manager, dispatch_rx);
+            let sync_server =
+                SyncServer::new(chat_tree.clone(), sync_tree, keys_manager, dispatch_rx);
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();

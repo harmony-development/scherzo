@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use crate::db::sync::*;
+
 use super::{chat::ChatTree, keys_manager::KeysManager, *};
 
 use ahash::RandomState;
@@ -14,12 +16,19 @@ use harmony_rust_sdk::api::{
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
 use reqwest::Url;
+use sled::Tree;
 use tokio::sync::{
     broadcast::{self, Sender as BroadcastSend},
     mpsc::UnboundedReceiver,
 };
 
 use triomphe::Arc;
+
+#[derive(Message)]
+pub struct EventQueue {
+    #[prost(message, repeated, tag = "1")]
+    pub inner: Vec<Event>,
+}
 
 pub struct EventDispatch {
     pub host: SmolStr,
@@ -42,6 +51,7 @@ impl Clients {
 #[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
+    sync_tree: Tree,
     keys_manager: Arc<KeysManager>,
     pull_queue_broadcast: BroadcastSend<Arc<EventDispatch>>,
 }
@@ -49,17 +59,56 @@ pub struct SyncServer {
 impl SyncServer {
     pub fn new(
         chat_tree: ChatTree,
+        sync_tree: Tree,
         keys_manager: Arc<KeysManager>,
         mut dispatch_rx: UnboundedReceiver<EventDispatch>,
     ) -> Self {
         let sync = Self {
             chat_tree,
+            sync_tree,
             keys_manager,
             pull_queue_broadcast: broadcast::channel(1000).0,
         };
         let sync2 = sync.clone();
+
         tokio::spawn(async move {
             let mut clients = Clients(HashMap::default());
+
+            const PREFIX: &[u8] = HOST_PREFIX;
+            let hosts = sync2.sync_tree.scan_prefix(PREFIX).map(|res| {
+                let (key, value) = res.unwrap();
+                let (_, host_raw) = key.split_at(PREFIX.len());
+                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+                (
+                    SmolStr::new(host),
+                    EventQueue::decode(value.as_ref()).unwrap(),
+                )
+            });
+
+            for (host, queue) in hosts {
+                for event in queue.inner {
+                    let _ = sync2.pull_queue_broadcast.send(Arc::new(EventDispatch {
+                        host: host.clone(),
+                        event,
+                    }));
+                }
+
+                if let Ok(mut sock) = clients.get_client(host.clone()).pull(()).await {
+                    let sync = sync2.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            while let Some(Syn { event_id, event }) =
+                                sock.get_message().await.and_then(Result::ok)
+                            {
+                                if let Some(event) = event {
+                                    sync.push_logic(&host, event);
+                                }
+                                sock.send_message(Ack { event_id }).await.unwrap();
+                            }
+                        }
+                    });
+                }
+            }
 
             loop {
                 while let Some(dispatch) = dispatch_rx.recv().await {
@@ -98,6 +147,21 @@ impl SyncServer {
 
         Err(ServerError::FailedToAuthSync)
     }
+
+    fn push_logic(&self, host: &str, event: Event) {
+        if let Some(kind) = event.kind {
+            match kind {
+                Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
+                    self.chat_tree
+                        .remove_guild_from_guild_list(user_id, guild_id, host);
+                }
+                Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
+                    self.chat_tree
+                        .add_guild_to_guild_list(user_id, guild_id, host);
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -113,13 +177,7 @@ impl postbox_service_server::PostboxService for SyncServer {
     async fn pull(&self, host: SmolStr, mut socket: Socket<Ack, Syn>) {
         let mut id = 0;
         let mut rx = self.pull_queue_broadcast.subscribe();
-
-        loop {
-            let mut value = None;
-            while value.is_none() {
-                value = rx.recv().await.ok();
-            }
-            let value = unsafe { value.unwrap_unchecked() };
+        while let Ok(value) = rx.recv().await {
             if value.host == host {
                 return_print!(
                     socket
@@ -143,18 +201,11 @@ impl postbox_service_server::PostboxService for SyncServer {
 
     async fn push(&self, request: Request<Event>) -> Result<(), Self::Error> {
         let host = self.auth(&request).await?;
-        if let Some(kind) = request.into_parts().0.kind {
-            match kind {
-                Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
-                    self.chat_tree
-                        .remove_guild_from_guild_list(user_id, guild_id, &host);
-                }
-                Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
-                    self.chat_tree
-                        .add_guild_to_guild_list(user_id, guild_id, &host);
-                }
-            }
+        let key = make_host_key(&host);
+        if !self.sync_tree.contains_key(&key).unwrap() {
+            self.sync_tree.insert(key, [].as_ref()).unwrap();
         }
+        self.push_logic(&host, request.into_parts().0);
         Ok(())
     }
 }
