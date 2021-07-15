@@ -9,26 +9,18 @@ use super::{chat::ChatTree, keys_manager::KeysManager, *};
 use ahash::RandomState;
 use harmony_rust_sdk::api::{
     exports::{
-        hrpc::{async_trait, return_print, server::Socket, Request},
+        hrpc::{async_trait, encode_protobuf_message, Request},
         prost::Message,
     },
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
+use prost::bytes::BytesMut;
 use reqwest::Url;
 use sled::Tree;
-use tokio::sync::{
-    broadcast::{self, Sender as BroadcastSend},
-    mpsc::UnboundedReceiver,
-};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use triomphe::Arc;
-
-#[derive(Message)]
-pub struct EventQueue {
-    #[prost(message, repeated, tag = "1")]
-    pub inner: Vec<Event>,
-}
 
 pub struct EventDispatch {
     pub host: SmolStr,
@@ -53,7 +45,6 @@ pub struct SyncServer {
     chat_tree: ChatTree,
     sync_tree: Tree,
     keys_manager: Arc<KeysManager>,
-    pull_queue_broadcast: BroadcastSend<Arc<EventDispatch>>,
 }
 
 impl SyncServer {
@@ -67,7 +58,6 @@ impl SyncServer {
             chat_tree,
             sync_tree,
             keys_manager,
-            pull_queue_broadcast: broadcast::channel(1000).0,
         };
         let sync2 = sync.clone();
 
@@ -76,49 +66,40 @@ impl SyncServer {
 
             const PREFIX: &[u8] = HOST_PREFIX;
             let hosts = sync2.sync_tree.scan_prefix(PREFIX).map(|res| {
-                let (key, value) = res.unwrap();
+                let (key, _) = res.unwrap();
                 let (_, host_raw) = key.split_at(PREFIX.len());
                 let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-                (
-                    SmolStr::new(host),
-                    EventQueue::decode(value.as_ref()).unwrap(),
-                )
+                SmolStr::new(host)
             });
 
-            for (host, queue) in hosts {
-                for event in queue.inner {
-                    let _ = sync2.pull_queue_broadcast.send(Arc::new(EventDispatch {
-                        host: host.clone(),
-                        event,
-                    }));
-                }
-
-                if let Ok(mut sock) = clients.get_client(host.clone()).pull(()).await {
-                    let sync = sync2.clone();
-                    tokio::spawn(async move {
-                        loop {
-                            while let Some(Syn { event_id, event }) =
-                                sock.get_message().await.and_then(Result::ok)
-                            {
-                                if let Some(event) = event {
-                                    sync.push_logic(&host, event);
-                                }
-                                sock.send_message(Ack { event_id }).await.unwrap();
-                            }
-                        }
-                    });
+            for host in hosts {
+                if let Ok(queue) = clients.get_client(host.clone()).pull(()).await {
+                    for event in queue.events {
+                        sync2.push_logic(&host, event);
+                    }
                 }
             }
 
             loop {
-                while let Some(dispatch) = dispatch_rx.recv().await {
-                    if clients
-                        .get_client(dispatch.host.clone())
-                        .push(dispatch.event.clone())
-                        .await
-                        .is_err()
-                    {
-                        drop(sync2.pull_queue_broadcast.send(Arc::new(dispatch)));
+                while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
+                    let mut push_result =
+                        clients.get_client(host.clone()).push(event.clone()).await;
+                    let mut try_count = 0;
+                    while try_count < 5 && push_result.is_err() {
+                        push_result = clients.get_client(host.clone()).push(event.clone()).await;
+                        try_count += 1;
+                    }
+
+                    if push_result.is_err() {
+                        // TODO: this is a waste, find a way to optimize this
+                        let mut queue = sync2.get_event_queue(&host);
+                        queue.events.push(event);
+                        let mut buf = BytesMut::new();
+                        encode_protobuf_message(&mut buf, queue);
+                        sync2
+                            .sync_tree
+                            .insert(make_host_key(&host), buf.as_ref())
+                            .unwrap();
                     }
                 }
             }
@@ -162,41 +143,25 @@ impl SyncServer {
             }
         }
     }
+
+    fn get_event_queue(&self, host: &str) -> EventQueue {
+        self.sync_tree
+            .get(make_host_key(host))
+            .unwrap()
+            .map_or_else(EventQueue::default, |val| {
+                EventQueue::decode(val.as_ref()).unwrap()
+            })
+    }
 }
 
 #[async_trait]
 impl postbox_service_server::PostboxService for SyncServer {
     type Error = ServerError;
 
-    type PullValidationType = SmolStr;
-
-    async fn pull_validation(&self, request: Request<Option<Ack>>) -> Result<SmolStr, Self::Error> {
-        self.auth(&request).await
-    }
-
-    async fn pull(&self, host: SmolStr, mut socket: Socket<Ack, Syn>) {
-        let mut id = 0;
-        let mut rx = self.pull_queue_broadcast.subscribe();
-        while let Ok(value) = rx.recv().await {
-            if value.host == host {
-                return_print!(
-                    socket
-                        .send_message(Syn {
-                            event: Some(value.event.clone()),
-                            event_id: id,
-                        })
-                        .await
-                );
-
-                return_print!(socket.receive_message().await, |ack| {
-                    if Some(id) != ack.map(|ack| ack.event_id) {
-                        return;
-                    }
-                });
-
-                id += 1;
-            }
-        }
+    async fn pull(&self, request: Request<()>) -> Result<EventQueue, Self::Error> {
+        let host = self.auth(&request).await?;
+        let queue = self.get_event_queue(&host);
+        Ok(queue)
     }
 
     async fn push(&self, request: Request<Event>) -> Result<(), Self::Error> {

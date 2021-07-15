@@ -215,7 +215,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#35d675fa8397c7c6afebc0b031e26e83a308bdb8"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#6b835e765fb43e9cf0dafef97ff3edf9042b7da7"
 dependencies = [
  "prost 0.7.0",
  "prost-types 0.7.0",
@@ -227,7 +227,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#35d675fa8397c7c6afebc0b031e26e83a308bdb8"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#6b835e765fb43e9cf0dafef97ff3edf9042b7da7"
 dependencies = [
  "console-api",
  "futures",
@@ -640,7 +640,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8280cdd411f46d63c2682088e0322334737a557a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#71d98046b35d571d3066b8e19607e3d33850d5af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -650,7 +650,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8280cdd411f46d63c2682088e0322334737a557a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#71d98046b35d571d3066b8e19607e3d33850d5af"
 dependencies = [
  "derive-new",
  "derive_more",
