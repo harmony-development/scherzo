@@ -17,14 +17,14 @@ mkdir scherzo && cd scherzo && curl -L https://git.io/Jn9Lo > scherzo && chmod +
 
 ## Roadmap
 
-- Auth service: (partially done)
+- Auth service: (implemented)
     - dynamic auth is implemented (login and register by email)
-- Chat service: (almost done)
+- Chat service: (almost implemented)
     - everything except emote APIs are implemented
 - Mediaproxy service: (implemented)
 - Voice service: (not started)
 - Rest APIs: (implemented)
-- Federation: (not implemented)
+- Federation: (implemented)
 
 ## Build
 
