@@ -2,7 +2,7 @@
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::{
-    fmt::{self, Display, Formatter},
+    fmt::{self, Display, Formatter, Write},
     io::Error as IoError,
     sync::atomic::AtomicBool,
     time::Duration,
@@ -192,8 +192,6 @@ impl Display for ServerError {
                 must_be_guild_owner,
                 missing_permission,
             } => {
-                use std::fmt::Write;
-
                 f.write_str("missing permissions: \n")?;
                 if *must_be_guild_owner {
                     f.write_str("must be guild owner\n")?;
@@ -215,9 +213,18 @@ impl Display for ServerError {
             ),
             ServerError::TooManyFiles => write!(f, "uploaded too many files"),
             ServerError::MissingFiles => write!(f, "must upload at least one file"),
-            ServerError::WarpError(err) => write!(f, "error occured in warp: {}", err),
-            ServerError::IoError(err) => write!(f, "io error occured: {}", err),
-            ServerError::ReqwestError(err) => write!(f, "error occured in reqwest: {}", err),
+            ServerError::WarpError(err) => {
+                travel_error(f, err);
+                write!(f, "error occured in warp: {}", err)
+            }
+            ServerError::IoError(err) => {
+                travel_error(f, err);
+                write!(f, "io error occured: {}", err)
+            }
+            ServerError::ReqwestError(err) => {
+                travel_error(f, err);
+                write!(f, "error occured in reqwest: {}", err)
+            }
             ServerError::Unexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
             ServerError::InvalidFileId => write!(f, "invalid file id"),
             ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
@@ -368,5 +375,15 @@ impl From<warp::Error> for ServerError {
 impl From<reqwest::Error> for ServerError {
     fn from(err: reqwest::Error) -> Self {
         ServerError::ReqwestError(err)
+    }
+}
+
+fn travel_error(w: &mut dyn Write, error: &dyn std::error::Error) {
+    let mut cur_source = error.source();
+    let mut index = 0;
+    while let Some(source) = cur_source {
+        writeln!(w, "{}: {}", index, source).unwrap();
+        cur_source = source.source();
+        index += 1;
     }
 }
