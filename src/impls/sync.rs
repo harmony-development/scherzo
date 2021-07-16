@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::db::sync::*;
+use crate::db::{sync::*, Tree};
 
 use super::{chat::ChatTree, keys_manager::KeysManager, *};
 
@@ -17,7 +17,6 @@ use harmony_rust_sdk::api::{
 };
 use prost::bytes::BytesMut;
 use reqwest::Url;
-use sled::Tree;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use triomphe::Arc;
@@ -43,14 +42,14 @@ impl Clients {
 #[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
-    sync_tree: Tree,
+    sync_tree: std::sync::Arc<dyn Tree>,
     keys_manager: Arc<KeysManager>,
 }
 
 impl SyncServer {
     pub fn new(
         chat_tree: ChatTree,
-        sync_tree: Tree,
+        sync_tree: std::sync::Arc<dyn Tree>,
         keys_manager: Arc<KeysManager>,
         mut dispatch_rx: UnboundedReceiver<EventDispatch>,
     ) -> Self {
@@ -98,7 +97,7 @@ impl SyncServer {
                         encode_protobuf_message(&mut buf, queue);
                         sync2
                             .sync_tree
-                            .insert(make_host_key(&host), buf.as_ref())
+                            .insert(&make_host_key(&host), buf.as_ref())
                             .unwrap();
                     }
                 }
@@ -146,7 +145,7 @@ impl SyncServer {
 
     fn get_event_queue(&self, host: &str) -> EventQueue {
         self.sync_tree
-            .get(make_host_key(host))
+            .get(&make_host_key(host))
             .unwrap()
             .map_or_else(EventQueue::default, |val| {
                 EventQueue::decode(val.as_ref()).unwrap()
@@ -168,7 +167,7 @@ impl postbox_service_server::PostboxService for SyncServer {
         let host = self.auth(&request).await?;
         let key = make_host_key(&host);
         if !self.sync_tree.contains_key(&key).unwrap() {
-            self.sync_tree.insert(key, [].as_ref()).unwrap();
+            self.sync_tree.insert(&key, &[]).unwrap();
         }
         self.push_logic(&host, request.into_parts().0);
         Ok(())

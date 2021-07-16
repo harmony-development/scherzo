@@ -13,7 +13,6 @@ use harmony_rust_sdk::api::{
 };
 use scherzo_derive::{auth, rate};
 use sha3::Digest;
-use sled::{Batch, IVec, Tree};
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
@@ -26,9 +25,11 @@ use crate::{
         chat::{
             make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
         },
+        Batch, Tree,
     },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
+    ivec::IVec,
     set_proto_name, ServerError, ServerResult,
 };
 
@@ -64,12 +65,11 @@ pub fn check_auth<T>(
         .map_or(Err(ServerError::Unauthenticated), Ok)
 }
 
-#[derive(Debug)]
 pub struct AuthServer {
     valid_sessions: SessionMap,
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
-    auth_tree: Tree,
+    auth_tree: std::sync::Arc<dyn Tree>,
     chat_tree: ChatTree,
     keys_manager: Arc<KeysManager>,
 }
@@ -77,7 +77,7 @@ pub struct AuthServer {
 impl AuthServer {
     pub fn new(
         chat_tree: ChatTree,
-        auth_tree: Tree,
+        auth_tree: std::sync::Arc<dyn Tree>,
         valid_sessions: SessionMap,
         keys_manager: Arc<KeysManager>,
     ) -> Self {
@@ -90,7 +90,7 @@ impl AuthServer {
             tracing::info!("starting auth session expiration check thread");
 
             // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-            unsafe fn scan_tree_for(att: &Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
+            unsafe fn scan_tree_for(att: &dyn Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .map(move |res| {
@@ -105,11 +105,11 @@ impl AuthServer {
 
             loop {
                 // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                let tokens = unsafe { scan_tree_for(&att, TOKEN_PREFIX) };
+                let tokens = unsafe { scan_tree_for(att.as_ref(), TOKEN_PREFIX) };
                 // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                let atimes = unsafe { scan_tree_for(&att, ATIME_PREFIX) };
+                let atimes = unsafe { scan_tree_for(att.as_ref(), ATIME_PREFIX) };
 
-                let mut batch = sled::Batch::default();
+                let mut batch = Batch::default();
                 for (id, raw_token) in tokens {
                     if let Ok(profile) = ctt.get_user_logic(id) {
                         for (oid, raw_atime) in &atimes {
@@ -507,25 +507,26 @@ impl auth_service_server::AuthService for AuthServer {
                                     let password_hashed = hash_password(password_raw);
                                     let email = try_get_email(&mut values)?;
 
-                                    let user_id =
-                                        if let Ok(Some(user_id)) = self.auth_tree.get(&email) {
-                                            // Safety: this unwrap can never cause UB since we split at u64 boundary
-                                            u64::from_be_bytes(unsafe {
-                                                user_id
-                                                    .split_at(size_of::<u64>())
-                                                    .0
-                                                    .try_into()
-                                                    .unwrap_unchecked()
-                                            })
-                                        } else {
-                                            return Err(ServerError::WrongUserOrPassword {
-                                                email: email.into(),
-                                            });
-                                        };
+                                    let user_id = if let Ok(Some(user_id)) =
+                                        self.auth_tree.get(email.as_bytes())
+                                    {
+                                        // Safety: this unwrap can never cause UB since we split at u64 boundary
+                                        u64::from_be_bytes(unsafe {
+                                            user_id
+                                                .split_at(size_of::<u64>())
+                                                .0
+                                                .try_into()
+                                                .unwrap_unchecked()
+                                        })
+                                    } else {
+                                        return Err(ServerError::WrongUserOrPassword {
+                                            email: email.into(),
+                                        });
+                                    };
 
                                     if self
                                         .auth_tree
-                                        .get(user_id.to_be_bytes())
+                                        .get(user_id.to_be_bytes().as_ref())
                                         .unwrap()
                                         .map_or(true, |pass| pass != password_hashed.as_ref())
                                     {
@@ -535,7 +536,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     }
 
                                     let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
-                                    let mut batch = sled::Batch::default();
+                                    let mut batch = Batch::default();
                                     // [ref:token_u64_key]
                                     batch.insert(&token_key(user_id), session_token.as_str());
                                     batch.insert(
@@ -569,14 +570,14 @@ impl auth_service_server::AuthService for AuthServer {
                                     let email = try_get_email(&mut values)?;
                                     let username = try_get_username(&mut values)?;
 
-                                    if self.auth_tree.get(&email).unwrap().is_some() {
+                                    if self.auth_tree.get(email.as_bytes()).unwrap().is_some() {
                                         return Err(ServerError::UserAlreadyExists);
                                     }
 
                                     let user_id = gen_rand_u64();
                                     let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
-                                    let mut batch = sled::Batch::default();
+                                    let mut batch = Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
                                     batch.insert(&user_id.to_be_bytes(), password_hashed.as_ref());
                                     // [ref:token_u64_key]
@@ -601,7 +602,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     );
                                     self.chat_tree
                                         .chat_tree
-                                        .insert(make_user_profile_key(user_id), buf.as_ref())
+                                        .insert(&make_user_profile_key(user_id), buf.as_ref())
                                         .unwrap();
 
                                     tracing::debug!(

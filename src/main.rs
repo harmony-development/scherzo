@@ -18,7 +18,10 @@ use harmony_rust_sdk::api::{
 };
 use hrpc::warp;
 use scherzo::{
-    db::chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
+    db::{
+        chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
+        Db,
+    },
     impls::{
         auth::AuthServer,
         chat::{ChatServer, ChatTree},
@@ -149,6 +152,37 @@ async fn main() {
     run_command(command, filter_level, db_path).await
 }
 
+#[cfg(feature = "sled")]
+fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(db_path: P) -> Box<dyn Db> {
+    let span = info_span!("db", path = %db_path);
+    let db = span.in_scope(|| {
+        info!("initializing database");
+
+        let db_result = sled::Config::new()
+            .use_compression(true)
+            .path(db_path)
+            .open()
+            .and_then(|db| db.verify_integrity().map(|_| db));
+
+        match db_result {
+            Ok(db) => db,
+            Err(err) => {
+                error!("cannot open database: {}; aborting", err);
+
+                std::process::exit(1);
+            }
+        }
+    });
+    Box::new(db)
+}
+
+fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(_db_path: P) -> Box<dyn Db> {
+    #[cfg(feature = "sled")]
+    return open_sled(_db_path);
+    #[cfg(not(any(feature = "sled")))]
+    return Box::new(scherzo::db::noop::NoopDb);
+}
+
 pub async fn run_command(command: Command, filter_level: Level, db_path: String) {
     let term_logger = fmt::layer();
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
@@ -176,37 +210,19 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     base_loggers.init();
 
+    info!("logging initialized");
+
     #[cfg(feature = "console")]
     tokio::spawn(console_server.serve());
 
-    info!("logging initialized");
-
-    let span = info_span!("db", path = %db_path);
-    let db = span.in_scope(|| {
-        info!("initializing database");
-
-        let db_result = sled::Config::new()
-            .use_compression(true)
-            .path(db_path)
-            .open()
-            .and_then(|db| db.verify_integrity().map(|_| db));
-
-        match db_result {
-            Ok(db) => db,
-            Err(err) => {
-                error!("cannot open database: {}; aborting", err);
-
-                std::process::exit(1);
-            }
-        }
-    });
-    drop(span);
+    let db = open_db(&db_path);
 
     let valid_sessions = Arc::new(DashMap::default());
 
-    let auth_tree = db.open_tree("auth").unwrap();
-    let chat_tree = db.open_tree("chat").unwrap();
-    let sync_tree = db.open_tree("sync").unwrap();
+    let auth_tree = db.open_tree("auth".as_bytes()).unwrap();
+    let chat_tree = db.open_tree("chat".as_bytes()).unwrap();
+    let sync_tree = db.open_tree("sync".as_bytes()).unwrap();
+
     let chat_tree = ChatTree { chat_tree };
 
     match command {
@@ -338,7 +354,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         Command::GetGuilds => {
             let guilds = chat_tree
                 .chat_tree
-                .scan_prefix([])
+                .scan_prefix(&[])
                 .flatten()
                 .filter_map(|(k, v)| {
                     if k.len() == 8 {
@@ -366,7 +382,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         Command::GetInvite(id) => {
             let invite = chat_tree
                 .chat_tree
-                .get(make_invite_key(id.as_str()))
+                .get(&make_invite_key(id.as_str()))
                 .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
             println!("{:#?}", invite);
         }

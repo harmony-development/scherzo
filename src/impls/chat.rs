@@ -26,7 +26,6 @@ use harmony_rust_sdk::api::{
     },
 };
 use scherzo_derive::*;
-use sled::Tree;
 use smol_str::SmolStr;
 use tokio::{
     sync::{
@@ -39,7 +38,7 @@ use triomphe::Arc;
 
 use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic, sync::EventDispatch};
 use crate::{
-    db::{self, chat::*},
+    db::{self, chat::*, Batch, Tree},
     impls::auth,
     set_proto_name, ServerError,
 };
@@ -96,7 +95,6 @@ struct EventBroadcast {
     context: EventContext,
 }
 
-#[derive(Debug)]
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
@@ -270,7 +268,7 @@ impl chat_service_server::ChatService for ChatServer {
             while self
                 .chat_tree
                 .chat_tree
-                .contains_key(guild_id.to_be_bytes())
+                .contains_key(&guild_id.to_be_bytes())
                 .unwrap()
             {
                 guild_id = gen_rand_u64();
@@ -397,8 +395,8 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .chat_tree
             .insert(
-                key,
-                [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+                &key,
+                &[guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
             )
             .unwrap();
 
@@ -471,7 +469,7 @@ impl chat_service_server::ChatService for ChatServer {
         let guilds = self
             .chat_tree
             .chat_tree
-            .scan_prefix(prefix)
+            .scan_prefix(&prefix)
             .map(|res| {
                 let (guild_id_raw, _) = res.unwrap();
                 let (id_raw, host_raw) = guild_id_raw
@@ -638,7 +636,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         let key = guild_id.to_be_bytes();
-        let mut guild_info = if let Some(raw) = self.chat_tree.chat_tree.get(key).unwrap() {
+        let mut guild_info = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
             db::deser_guild(raw)
         } else {
             return Err(ServerError::NoSuchGuild(guild_id));
@@ -714,7 +712,7 @@ impl chat_service_server::ChatService for ChatServer {
         )?;
 
         let key = make_chan_key(guild_id, channel_id);
-        let mut chan_info = if let Some(raw) = self.chat_tree.chat_tree.get(key).unwrap() {
+        let mut chan_info = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
             db::deser_chan(raw)
         } else {
             return Err(ServerError::NoSuchChannel {
@@ -872,12 +870,12 @@ impl chat_service_server::ChatService for ChatServer {
         let guild_data = self
             .chat_tree
             .chat_tree
-            .scan_prefix(guild_id.to_be_bytes())
+            .scan_prefix(&guild_id.to_be_bytes())
             .map(|res| res.unwrap().0);
 
-        let mut batch = sled::Batch::default();
+        let mut batch = Batch::default();
         for key in guild_data {
-            batch.remove(&key);
+            batch.remove(key);
         }
         self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
@@ -936,7 +934,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree
             .chat_tree
-            .remove(make_invite_key(invite_id.as_str()))
+            .remove(&make_invite_key(invite_id.as_str()))
             .unwrap();
 
         Ok(())
@@ -967,7 +965,7 @@ impl chat_service_server::ChatService for ChatServer {
         let channel_data = self
             .chat_tree
             .chat_tree
-            .scan_prefix(make_chan_key(guild_id, channel_id))
+            .scan_prefix(&make_chan_key(guild_id, channel_id))
             .map(|res| res.unwrap().0);
 
         // Remove from ordering list
@@ -980,11 +978,11 @@ impl chat_service_server::ChatService for ChatServer {
         }
         let serialized_ordering = self.chat_tree.serialize_list_u64_logic(ordering);
 
-        let mut batch = sled::Batch::default();
+        let mut batch = Batch::default();
         for key in channel_data {
             batch.remove(key);
         }
-        batch.insert(&key, serialized_ordering.as_slice());
+        batch.insert(&key, serialized_ordering);
         self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
         self.send_event_through_chan(
@@ -1033,7 +1031,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree
             .chat_tree
-            .remove(make_msg_key(guild_id, channel_id, message_id))
+            .remove(&make_msg_key(guild_id, channel_id, message_id))
             .unwrap();
 
         self.send_event_through_chan(
@@ -1151,7 +1149,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .insert(
                 &key,
-                [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+                &[guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
             )
             .unwrap();
 
@@ -1242,7 +1240,7 @@ impl chat_service_server::ChatService for ChatServer {
         let message_id = self
             .chat_tree
             .chat_tree
-            .scan_prefix(msg_prefix)
+            .scan_prefix(&msg_prefix)
             .last()
             .map_or(1, |res| {
                 // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
@@ -1441,7 +1439,7 @@ impl chat_service_server::ChatService for ChatServer {
         let roles = self
             .chat_tree
             .chat_tree
-            .scan_prefix(prefix)
+            .scan_prefix(&prefix)
             .flat_map(|res| {
                 let (key, val) = res.unwrap();
                 (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
@@ -1702,7 +1700,7 @@ impl chat_service_server::ChatService for ChatServer {
             .into_iter()
             .map(|id| (id, make_user_profile_key(id)))
         {
-            if let Some(raw) = self.chat_tree.chat_tree.get(key).unwrap() {
+            if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
                 profiles.push(db::deser_profile(raw));
             } else {
                 return Err(ServerError::NoSuchUser(id));
@@ -1756,7 +1754,7 @@ impl chat_service_server::ChatService for ChatServer {
         let mut profile = self
             .chat_tree
             .chat_tree
-            .get(key)
+            .get(&key)
             .unwrap()
             .map_or_else(GetUserResponse::default, db::deser_profile);
 
@@ -1775,7 +1773,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let mut buf = BytesMut::new();
         encode_protobuf_message(&mut buf, profile);
-        self.chat_tree.chat_tree.insert(key, buf.as_ref()).unwrap();
+        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
             EventSub::Homeserver,
@@ -1960,43 +1958,45 @@ impl chat_service_server::ChatService for ChatServer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChatTree {
-    pub chat_tree: Tree,
+    pub chat_tree: std::sync::Arc<dyn Tree>,
 }
 
 impl ChatTree {
     pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
         self.chat_tree
-            .contains_key(make_member_key(guild_id, user_id))
+            .contains_key(&make_member_key(guild_id, user_id))
             .unwrap()
     }
 
     pub fn does_user_exist(&self, user_id: u64) -> bool {
         self.chat_tree
-            .contains_key(make_user_profile_key(user_id))
+            .contains_key(&make_user_profile_key(user_id))
             .unwrap()
     }
 
     pub fn does_guild_exist(&self, guild_id: u64) -> bool {
-        self.chat_tree.contains_key(guild_id.to_be_bytes()).unwrap()
+        self.chat_tree
+            .contains_key(&guild_id.to_be_bytes())
+            .unwrap()
     }
 
     pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> bool {
         self.chat_tree
-            .contains_key(make_chan_key(guild_id, channel_id))
+            .contains_key(&make_chan_key(guild_id, channel_id))
             .unwrap()
     }
 
     pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> bool {
         self.chat_tree
-            .contains_key(make_guild_role_key(guild_id, role_id))
+            .contains_key(&make_guild_role_key(guild_id, role_id))
             .unwrap()
     }
 
     pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
         self.chat_tree
-            .contains_key(make_banned_member_key(guild_id, user_id))
+            .contains_key(&make_banned_member_key(guild_id, user_id))
             .unwrap()
     }
 
@@ -2097,7 +2097,7 @@ impl ChatTree {
     ) -> Result<GetUserResponse, <ChatServer as chat_service_server::ChatService>::Error> {
         let key = make_user_profile_key(user_id);
 
-        let profile = if let Some(profile_raw) = self.chat_tree.get(key).unwrap() {
+        let profile = if let Some(profile_raw) = self.chat_tree.get(&key).unwrap() {
             db::deser_profile(profile_raw)
         } else {
             return Err(ServerError::NoSuchUser(user_id));
@@ -2123,7 +2123,7 @@ impl ChatTree {
     pub fn get_guild_invites_logic(&self, guild_id: u64) -> GetGuildInvitesResponse {
         let invites = self
             .chat_tree
-            .scan_prefix("invite_")
+            .scan_prefix(b"invite_")
             .map(|res| {
                 let (_, value) = res.unwrap();
                 let (id_raw, invite_raw) = value.split_at(size_of::<u64>());
@@ -2142,7 +2142,7 @@ impl ChatTree {
         let prefix = make_guild_mem_prefix(guild_id);
         let members = self
             .chat_tree
-            .scan_prefix(prefix)
+            .scan_prefix(&prefix)
             .map(|res| {
                 let (id, _) = res.unwrap();
                 // Safety: this unwrap cannot fail since after we split at prefix length, the remainder is a valid u64
@@ -2163,7 +2163,7 @@ impl ChatTree {
         let prefix = make_guild_chan_prefix(guild_id);
         let mut channels = self
             .chat_tree
-            .scan_prefix(prefix)
+            .scan_prefix(&prefix)
             .flat_map(|res| {
                 let (key, value) = res.unwrap();
                 (key.len() == prefix.len() + size_of::<u64>())
@@ -2340,7 +2340,7 @@ impl ChatTree {
 
             let messages = self
                 .chat_tree
-                .range(from_key..=to_key)
+                .range((&from_key)..=(&to_key))
                 .rev()
                 .map(|res| {
                     let (_, value) = res.unwrap();
@@ -2357,7 +2357,7 @@ impl ChatTree {
         let prefix = make_msg_prefix(guild_id, channel_id);
         (before_message == 0)
             .then(|| {
-                self.chat_tree.scan_prefix(prefix).last().map_or_else(
+                self.chat_tree.scan_prefix(&prefix).last().map_or_else(
                     || GetChannelMessagesResponse {
                         reached_top: true,
                         messages: Vec::new(),
@@ -2522,7 +2522,7 @@ impl ChatTree {
         let key = {
             role.role_id = gen_rand_u64();
             let mut key = make_guild_role_key(guild_id, role.role_id);
-            while self.chat_tree.contains_key(key).unwrap() {
+            while self.chat_tree.contains_key(&key).unwrap() {
                 role.role_id = gen_rand_u64();
                 key = make_guild_role_key(guild_id, role.role_id);
             }
@@ -2568,7 +2568,7 @@ impl ChatTree {
         let channel_id = {
             let mut channel_id = gen_rand_u64();
             let mut key = make_chan_key(guild_id, channel_id);
-            while self.chat_tree.contains_key(key).unwrap() {
+            while self.chat_tree.contains_key(&key).unwrap() {
                 channel_id = gen_rand_u64();
                 key = make_chan_key(guild_id, channel_id);
             }
@@ -2596,7 +2596,7 @@ impl ChatTree {
     pub fn calculate_users_seeing_user(&self, user_id: u64) -> Vec<u64> {
         let prefix = make_guild_list_key_prefix(user_id);
         self.chat_tree
-            .scan_prefix(prefix)
+            .scan_prefix(&prefix)
             .map(|res| {
                 let (key, _) = res.unwrap();
                 let (_, guild_id_raw) = key.split_at(prefix.len());
@@ -2612,7 +2612,7 @@ impl ChatTree {
     pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
         self.chat_tree
             .insert(
-                [
+                &[
                     make_guild_list_key_prefix(user_id).as_ref(),
                     guild_id.to_be_bytes().as_ref(),
                     homeserver.as_bytes(),
@@ -2625,7 +2625,7 @@ impl ChatTree {
 
     pub fn remove_guild_from_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
         self.chat_tree
-            .remove(make_guild_list_key(user_id, guild_id, homeserver))
+            .remove(&make_guild_list_key(user_id, guild_id, homeserver))
             .unwrap();
     }
 
@@ -2646,7 +2646,7 @@ impl ChatTree {
         let key = make_foreign_to_local_user_key(foreign_id, host);
 
         self.chat_tree
-            .get(key)
+            .get(&key)
             .unwrap()
             // Safety: we store u64's only for these keys
             .map(|raw| u64::from_be_bytes(unsafe { raw.as_ref().try_into().unwrap_unchecked() }))
