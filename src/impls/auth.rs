@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
     chat::GetUserResponse,
     exports::{
         hrpc::{encode_protobuf_message, server::WriteSocket, warp::reply::Response, Request},
-        prost::{bytes::BytesMut, Message},
+        prost::Message,
     },
     harmonytypes::{Token, UserStatus},
 };
@@ -198,8 +198,7 @@ impl auth_service_server::AuthService for AuthServer {
             avatar: profile.user_avatar,
         };
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, data);
+        let buf = encode_protobuf_message(data);
         let data = buf.to_vec();
 
         let key = self.keys_manager.get_own_key().await?;
@@ -256,8 +255,7 @@ impl auth_service_server::AuthService for AuthServer {
                         user_avatar: avatar,
                         user_name: username,
                     };
-                    let mut buf = BytesMut::new();
-                    encode_protobuf_message(&mut buf, profile);
+                    let buf = encode_protobuf_message(profile);
                     batch.insert(&make_user_profile_key(local_id), buf.to_vec());
                     self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
@@ -604,14 +602,10 @@ impl auth_service_server::AuthService for AuthServer {
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
-                                    let mut buf = BytesMut::new();
-                                    encode_protobuf_message(
-                                        &mut buf,
-                                        GetUserResponse {
-                                            user_name: username,
-                                            ..Default::default()
-                                        },
-                                    );
+                                    let buf = encode_protobuf_message(GetUserResponse {
+                                        user_name: username,
+                                        ..Default::default()
+                                    });
                                     self.chat_tree
                                         .chat_tree
                                         .insert(&make_user_profile_key(user_id), buf.as_ref())

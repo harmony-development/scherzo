@@ -11,7 +11,6 @@ use harmony_rust_sdk::api::{
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use prost::bytes::BytesMut;
 use reqwest::Url;
 use smol_str::SmolStr;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -96,8 +95,7 @@ impl SyncServer {
                         // TODO: this is a waste, find a way to optimize this
                         let mut queue = sync2.get_event_queue(&host);
                         queue.events.push(event);
-                        let mut buf = BytesMut::new();
-                        encode_protobuf_message(&mut buf, queue);
+                        let buf = encode_protobuf_message(queue);
                         sync2
                             .sync_tree
                             .insert(&make_host_key(&host), buf.as_ref())

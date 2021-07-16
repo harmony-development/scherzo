@@ -282,8 +282,7 @@ impl chat_service_server::ChatService for ChatServer {
             guild_owner: user_id,
             metadata,
         };
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, guild);
+        let buf = encode_protobuf_message(guild);
 
         self.chat_tree
             .chat_tree
@@ -389,8 +388,7 @@ impl chat_service_server::ChatService for ChatServer {
             use_count: 0,
             invite_id: name.clone(),
         };
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, invite);
+        let buf = encode_protobuf_message(invite);
 
         self.chat_tree
             .chat_tree
@@ -664,8 +662,7 @@ impl chat_service_server::ChatService for ChatServer {
             guild_info.metadata = metadata.clone();
         }
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, guild_info);
+        let buf = encode_protobuf_message(guild_info);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
@@ -728,8 +725,7 @@ impl chat_service_server::ChatService for ChatServer {
             chan_info.metadata = metadata.clone();
         }
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, chan_info);
+        let buf = encode_protobuf_message(chan_info);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
@@ -827,8 +823,7 @@ impl chat_service_server::ChatService for ChatServer {
         let edited_at = Some(std::time::SystemTime::now().into());
         message.edited_at = edited_at.clone();
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, message);
+        let buf = encode_protobuf_message(message);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
@@ -1143,8 +1138,7 @@ impl chat_service_server::ChatService for ChatServer {
             }
         }
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, invite);
+        let buf = encode_protobuf_message(invite);
         self.chat_tree
             .chat_tree
             .insert(
@@ -1512,8 +1506,7 @@ impl chat_service_server::ChatService for ChatServer {
                 role.pingable = new_role.pingable;
             }
 
-            let mut ser_role = BytesMut::new();
-            encode_protobuf_message(&mut ser_role, role);
+            let ser_role = encode_protobuf_message(role);
             self.chat_tree
                 .chat_tree
                 .insert(&key, ser_role.as_ref())
@@ -1771,8 +1764,7 @@ impl chat_service_server::ChatService for ChatServer {
             profile.is_bot = is_bot;
         }
 
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, profile);
+        let buf = encode_protobuf_message(profile);
         self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
 
         self.send_event_through_chan(
@@ -2528,8 +2520,7 @@ impl ChatTree {
             key
         };
         let role_id = role.role_id;
-        let mut ser_role = BytesMut::new();
-        encode_protobuf_message(&mut ser_role, role);
+        let ser_role = encode_protobuf_message(role);
         self.chat_tree.insert(&key, ser_role.as_ref()).unwrap();
         self.move_role_logic(guild_id, role_id, 0, 0)?;
         Ok(role_id)
@@ -2543,8 +2534,7 @@ impl ChatTree {
         perms: PermissionList,
     ) {
         let put_perms = |key| {
-            let mut buf = BytesMut::new();
-            encode_protobuf_message(&mut buf, perms);
+            let buf = encode_protobuf_message(perms);
             self.chat_tree.insert(key, buf.as_ref()).unwrap();
         };
         // TODO: categories?
@@ -2581,9 +2571,7 @@ impl ChatTree {
             channel_name,
             is_category,
         };
-        let mut buf = BytesMut::new();
-        encode_protobuf_message(&mut buf, channel);
-
+        let buf = encode_protobuf_message(channel);
         self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
 
         // Add from ordering list
