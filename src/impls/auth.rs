@@ -35,6 +35,8 @@ use crate::{
     set_proto_name, ServerError, ServerResult,
 };
 
+use super::gen_rand_arr;
+
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
 pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
@@ -156,9 +158,16 @@ impl AuthServer {
         }
     }
 
-    #[inline(always)]
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
-        check_auth(&self.valid_sessions, request)
+    // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
+    fn gen_auth_token(&self) -> SmolStr {
+        let mut rng = rand::thread_rng();
+        let mut raw = gen_rand_arr::<_, 22>(&mut rng);
+        let mut token = unsafe { std::str::from_utf8_unchecked(&raw) };
+        while self.valid_sessions.contains_key(token) {
+            raw = gen_rand_arr::<_, 22>(&mut rng);
+            token = unsafe { std::str::from_utf8_unchecked(&raw) };
+        }
+        SmolStr::new_inline(token)
     }
 }
 
@@ -168,7 +177,8 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(20, 5)]
     async fn check_logged_in(&self, request: Request<()>) -> Result<(), Self::Error> {
-        self.auth(&request).map(|_| ())
+        auth!();
+        Ok(())
     }
 
     #[rate(3, 1)]
@@ -254,7 +264,7 @@ impl auth_service_server::AuthService for AuthServer {
                     local_id
                 });
 
-            let session_token = gen_auth_token();
+            let session_token = self.gen_auth_token();
             let session = Session {
                 session_token: session_token.to_string(),
                 user_id: local_user_id,
@@ -537,7 +547,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         });
                                     }
 
-                                    let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
+                                    let session_token = self.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
                                     let mut batch = Batch::default();
                                     // [ref:token_u64_key]
                                     batch.insert(&token_key(user_id), session_token.as_str());
@@ -577,7 +587,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     }
 
                                     let user_id = gen_rand_u64();
-                                    let session_token = gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
+                                    let session_token = self.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
                                     let mut batch = Batch::default();
                                     batch.insert(email.as_str(), &user_id.to_be_bytes());
@@ -698,12 +708,6 @@ fn hash_password(raw: Vec<u8>) -> impl AsRef<[u8]> {
     let mut sh = sha3::Sha3_512::new();
     sh.update(raw);
     sh.finalize()
-}
-
-#[inline(always)]
-fn gen_auth_token() -> SmolStr {
-    // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
-    gen_rand_inline_str() // generates 22 chars long inlined SmolStr [ref:inlined_smol_str_gen]
 }
 
 const PASSWORD_FIELD_ERR: ServerError = ServerError::WrongTypeForField {

@@ -31,6 +31,7 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
+use rand::SeedableRng;
 use reqwest::{header::HeaderValue, StatusCode, Url};
 use smol_str::SmolStr;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
@@ -222,7 +223,8 @@ pub fn upload(
                         let content_type = param
                             .get("contentType")
                             .map_or("application/octet-stream", |a| a.as_str());
-                        let id_arr = gen_rand_arr::<64>();
+                        let id_arr =
+                            gen_rand_arr::<_, 64>(&mut rand::rngs::SmallRng::from_entropy());
                         // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
                         let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
                         let data = [
