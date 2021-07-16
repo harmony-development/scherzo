@@ -117,7 +117,7 @@ pub mod chat {
         ])
     }
 
-    pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 14] {
+    pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 15] {
         concat_static(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
     }
 
