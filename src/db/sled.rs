@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use super::{Batch, Db, DbError, DbResult, IVec, Iter, RangeIter, Tree};
+use super::{Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
 
 impl Db for sled::Db {
     fn open_tree(&self, name: &[u8]) -> DbResult<std::sync::Arc<dyn Tree>> {
@@ -12,29 +12,29 @@ impl Db for sled::Db {
 }
 
 impl Tree for sled::Tree {
-    fn get(&self, key: &[u8]) -> Result<Option<IVec>, DbError> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
         self.get(key)
             .map_err(Into::into)
-            .map(|opt| opt.map(Into::into))
+            .map(|opt| opt.map(|i| i.to_vec()))
     }
 
-    fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<IVec>, DbError> {
+    fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
         self.insert(key, value)
             .map_err(Into::into)
-            .map(|opt| opt.map(Into::into))
+            .map(|opt| opt.map(|i| i.to_vec()))
     }
 
-    fn remove(&self, key: &[u8]) -> Result<Option<IVec>, DbError> {
+    fn remove(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
         self.remove(key)
             .map_err(Into::into)
-            .map(|opt| opt.map(Into::into))
+            .map(|opt| opt.map(|i| i.to_vec()))
     }
 
     fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a> {
-        Box::new(
-            self.scan_prefix(prefix)
-                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
-        )
+        Box::new(self.scan_prefix(prefix).map(|res| {
+            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
+                .map_err(Into::into)
+        }))
     }
 
     fn apply_batch(&self, batch: Batch) -> Result<(), DbError> {
@@ -46,10 +46,10 @@ impl Tree for sled::Tree {
     }
 
     fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a> {
-        Box::new(
-            self.range(range)
-                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
-        )
+        Box::new(self.range(range).map(|res| {
+            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
+                .map_err(Into::into)
+        }))
     }
 
     fn verify_integrity(&self) -> DbResult<()> {

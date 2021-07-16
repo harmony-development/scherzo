@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use super::{Batch, Db, DbResult, IVec, Iter, RangeIter, Tree};
+use super::{Batch, Db, DbResult, Iter, RangeIter, Tree};
 
 pub struct NoopDb;
 
@@ -15,15 +15,15 @@ impl Db for NoopDb {
 }
 
 impl Tree for NoopTree {
-    fn get(&self, _: &[u8]) -> DbResult<Option<IVec>> {
+    fn get(&self, _: &[u8]) -> DbResult<Option<Vec<u8>>> {
         Ok(None)
     }
 
-    fn insert(&self, _: &[u8], _: &[u8]) -> DbResult<Option<IVec>> {
+    fn insert(&self, _: &[u8], _: &[u8]) -> DbResult<Option<Vec<u8>>> {
         Ok(None)
     }
 
-    fn remove(&self, _: &[u8]) -> DbResult<Option<IVec>> {
+    fn remove(&self, _: &[u8]) -> DbResult<Option<Vec<u8>>> {
         Ok(None)
     }
 

@@ -358,7 +358,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 .flatten()
                 .filter_map(|(k, v)| {
                     if k.len() == 8 {
-                        let guild_id = u64::from_be_bytes(k.as_ref().try_into().unwrap());
+                        let guild_id = u64::from_be_bytes(k.try_into().unwrap());
                         let guild_data = GetGuildResponse::decode(v.as_ref()).unwrap();
 
                         Some((guild_id, guild_data))

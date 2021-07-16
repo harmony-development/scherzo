@@ -2507,8 +2507,7 @@ impl ChatTree {
             .unwrap()
         {
             // Safety: safe since we only store valid u64 [ref:default_role_store]
-            let default_role_id =
-                u64::from_be_bytes(unsafe { raw.as_ref().try_into().unwrap_unchecked() });
+            let default_role_id = u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() });
             self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::new())?;
         }
         Ok(())
@@ -2649,6 +2648,6 @@ impl ChatTree {
             .get(&key)
             .unwrap()
             // Safety: we store u64's only for these keys
-            .map(|raw| u64::from_be_bytes(unsafe { raw.as_ref().try_into().unwrap_unchecked() }))
+            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
     }
 }

@@ -6,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{ivec::IVec, travel_error};
+use crate::travel_error;
 use cached::proc_macro::cached;
 use harmony_rust_sdk::api::{
     chat::{
@@ -23,16 +23,17 @@ pub mod sled;
 
 #[derive(Default)]
 pub struct Batch {
-    inserts: Vec<(IVec, Option<IVec>)>,
+    inserts: Vec<(Vec<u8>, Option<Vec<u8>>)>,
 }
 
 impl Batch {
-    pub fn insert(&mut self, key: impl Into<IVec>, value: impl Into<IVec>) {
-        self.inserts.push((key.into(), Some(value.into())));
+    pub fn insert(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
+        self.inserts
+            .push((key.as_ref().to_vec(), Some(value.as_ref().to_vec())));
     }
 
-    pub fn remove(&mut self, key: impl Into<IVec>) {
-        self.inserts.push((key.into(), None));
+    pub fn remove(&mut self, key: impl AsRef<[u8]>) {
+        self.inserts.push((key.as_ref().to_vec(), None));
     }
 }
 
@@ -55,17 +56,17 @@ impl StdError for DbError {
 }
 
 type DbResult<T> = Result<T, DbError>;
-type Iter<'a> = Box<dyn Iterator<Item = DbResult<(IVec, IVec)>> + Send + 'a>;
-type RangeIter<'a> = Box<dyn DoubleEndedIterator<Item = DbResult<(IVec, IVec)>> + Send + 'a>;
+type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
+type RangeIter<'a> = Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
 
 pub trait Db {
     fn open_tree(&self, name: &[u8]) -> DbResult<Arc<dyn Tree>>;
 }
 
 pub trait Tree: Send + Sync {
-    fn get(&self, key: &[u8]) -> DbResult<Option<IVec>>;
-    fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<IVec>>;
-    fn remove(&self, key: &[u8]) -> DbResult<Option<IVec>>;
+    fn get(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
+    fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<Vec<u8>>>;
+    fn remove(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
     fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a>;
     fn apply_batch(&self, batch: Batch) -> DbResult<()>;
     fn contains_key(&self, key: &[u8]) -> DbResult<bool>;
@@ -259,7 +260,7 @@ crate::impl_deser! {
     perm_list, PermissionList, 1024;
 }
 
-pub fn deser_invite_entry_guild_id(data: &IVec) -> u64 {
+pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
     use std::convert::TryInto;
 
     let (id_raw, _) = data.split_at(size_of::<u64>());
@@ -267,7 +268,7 @@ pub fn deser_invite_entry_guild_id(data: &IVec) -> u64 {
 }
 
 #[cached(size = 1024)]
-pub fn deser_invite_entry(data: IVec) -> (u64, Invite) {
+pub fn deser_invite_entry(data: Vec<u8>) -> (u64, Invite) {
     let guild_id = deser_invite_entry_guild_id(&data);
     let (_, invite_raw) = data.split_at(size_of::<u64>());
     let invite = deser_invite(invite_raw.into());
@@ -281,7 +282,7 @@ macro_rules! impl_deser {
         paste::paste! {
             $(
                 #[cached(size = $size)]
-                pub fn [<deser_ $name>](data: IVec) -> $msg {
+                pub fn [<deser_ $name>](data: Vec<u8>) -> $msg {
                     $msg::decode(data.as_ref()).unwrap()
                 }
             )*

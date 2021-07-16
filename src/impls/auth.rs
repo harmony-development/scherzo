@@ -29,7 +29,6 @@ use crate::{
     },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
-    ivec::IVec,
     set_proto_name, ServerError, ServerResult,
 };
 
@@ -90,7 +89,7 @@ impl AuthServer {
             tracing::info!("starting auth session expiration check thread");
 
             // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-            unsafe fn scan_tree_for(att: &dyn Tree, prefix: &[u8]) -> Vec<(u64, IVec)> {
+            unsafe fn scan_tree_for(att: &dyn Tree, prefix: &[u8]) -> Vec<(u64, Vec<u8>)> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .map(move |res| {
@@ -116,7 +115,7 @@ impl AuthServer {
                             if id.eq(oid) {
                                 // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
                                 let secs = u64::from_be_bytes(unsafe {
-                                    raw_atime.as_ref().try_into().unwrap_unchecked()
+                                    raw_atime.as_slice().try_into().unwrap_unchecked()
                                 });
                                 let auth_how_old = get_time_secs() - secs;
                                 // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
