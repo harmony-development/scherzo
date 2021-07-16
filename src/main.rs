@@ -25,12 +25,10 @@ use scherzo::{
     impls::{
         auth::AuthServer,
         chat::{ChatServer, ChatTree},
-        keys_manager::KeysManager,
         mediaproxy::MediaproxyServer,
-        rest::RestConfig,
         sync::SyncServer,
     },
-    ServerError,
+    key, ServerError,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
@@ -250,7 +248,7 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
             }
 
             let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
-            let keys_manager = Arc::new(KeysManager::new(config.federation_key));
+            let keys_manager = Arc::new(key::Manager::new(config.federation_key));
             let auth_server = AuthServer::new(
                 chat_tree.clone(),
                 auth_tree.clone(),
@@ -265,11 +263,11 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
-            let rest = scherzo::impls::rest::rest(RestConfig {
-                max_length: config.media.max_upload_length,
-                media_root: Arc::new(config.media.media_root),
-                sessions: valid_sessions,
-            });
+            let rest = scherzo::impls::rest::rest(
+                Arc::new(config.media.media_root),
+                valid_sessions,
+                config.media.max_upload_length,
+            );
             let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
             let sync = PostboxServiceServer::new(sync_server).filters();
 

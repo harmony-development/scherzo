@@ -4,23 +4,15 @@ pub mod mediaproxy;
 pub mod rest;
 pub mod sync;
 
-use std::{
-    convert::TryInto,
-    mem::size_of,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::time::{Duration, UNIX_EPOCH};
 
-use ed25519_compact::PublicKey;
-use harmony_rust_sdk::api::{
-    exports::{
-        hrpc::{
-            http,
-            server::filters::{rate::Rate, rate_limit},
-            warp::{self, filters::BoxedFilter, Filter, Reply},
-        },
-        prost::bytes::Bytes,
+use harmony_rust_sdk::api::exports::{
+    hrpc::{
+        http,
+        server::filters::{rate::Rate, rate_limit},
+        warp::{self, filters::BoxedFilter, Filter, Reply},
     },
-    harmonytypes::Token,
+    prost::bytes::Bytes,
 };
 use rand::Rng;
 use reqwest::Response;
@@ -96,233 +88,15 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         })
 }
 
-#[inline(always)]
-fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
-    raw.chunks_exact(size_of::<u64>())
-        .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
-}
-
-const SCHERZO_VERSION: &str = git_version::git_version!(
-    prefix = "git:",
-    cargo_prefix = "cargo:",
-    fallback = "unknown"
-);
-
 pub fn version() -> BoxedFilter<(impl Reply,)> {
+    const SCHERZO_VERSION: &str = git_version::git_version!(
+        prefix = "git:",
+        cargo_prefix = "cargo:",
+        fallback = "unknown"
+    );
+
     warp::get()
         .and(warp::path!("_harmony" / "version"))
         .map(|| format!("scherzo {}\n", SCHERZO_VERSION))
         .boxed()
-}
-
-const KEY_TAG: &str = "ED25519 PUBLIC KEY";
-
-pub fn verify_token(token: &Token, pubkey: &PublicKey) -> Result<(), ServerError> {
-    let Token { sig, data } = token;
-
-    let sig = ed25519_compact::Signature::from_slice(sig.as_slice())
-        .map_err(|_| ServerError::InvalidTokenSignature)?;
-
-    pubkey
-        .verify(data, &sig)
-        .map_err(|_| ServerError::CouldntVerifyTokenData)
-}
-
-// Taken from `lockless` (license https://github.com/Diggsey/lockless/blob/master/Cargo.toml#L7)
-// and modified
-pub mod append_list {
-    use std::ops::Not;
-    use std::sync::atomic::{AtomicPtr, Ordering};
-    use std::{mem, ptr};
-
-    type NodePtr<T> = Option<Box<Node<T>>>;
-
-    #[derive(Debug)]
-    struct Node<T> {
-        value: T,
-        next: AppendList<T>,
-    }
-
-    #[derive(Debug)]
-    pub struct AppendList<T>(AtomicPtr<Node<T>>);
-
-    impl<T> AppendList<T> {
-        #[allow(clippy::new_without_default)]
-        pub fn new() -> Self {
-            Self::new_internal(None)
-        }
-
-        pub fn append(&self, value: T) {
-            self.append_list(AppendList::new_internal(Some(Box::new(Node {
-                value,
-                next: AppendList::new(),
-            }))));
-        }
-
-        pub fn append_list(&self, other: AppendList<T>) {
-            let p = other.0.load(Ordering::Acquire);
-            mem::forget(other);
-            unsafe { self.append_ptr(p) };
-        }
-
-        pub const fn iter(&self) -> AppendListIterator<T> {
-            AppendListIterator(&self.0)
-        }
-
-        #[allow(clippy::wrong_self_convention)]
-        fn into_raw(ptr: NodePtr<T>) -> *mut Node<T> {
-            match ptr {
-                Some(b) => Box::into_raw(b),
-                None => ptr::null_mut(),
-            }
-        }
-
-        unsafe fn from_raw(ptr: *mut Node<T>) -> NodePtr<T> {
-            ptr.is_null().not().then(|| Box::from_raw(ptr))
-        }
-
-        fn new_internal(ptr: NodePtr<T>) -> Self {
-            AppendList(AtomicPtr::new(Self::into_raw(ptr)))
-        }
-
-        unsafe fn append_ptr(&self, p: *mut Node<T>) {
-            loop {
-                match self.0.compare_exchange_weak(
-                    ptr::null_mut(),
-                    p,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => return,
-                    Err(head) => {
-                        if !head.is_null() {
-                            return (*head).next.append_ptr(p);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    impl<T> Drop for AppendList<T> {
-        fn drop(&mut self) {
-            unsafe { Self::from_raw(mem::replace(self.0.get_mut(), ptr::null_mut())) };
-        }
-    }
-
-    impl<'a, T> IntoIterator for &'a AppendList<T> {
-        type Item = &'a T;
-        type IntoIter = AppendListIterator<'a, T>;
-
-        fn into_iter(self) -> AppendListIterator<'a, T> {
-            self.iter()
-        }
-    }
-
-    #[derive(Debug)]
-    pub struct AppendListIterator<'a, T: 'a>(&'a AtomicPtr<Node<T>>);
-
-    impl<'a, T: 'a> Iterator for AppendListIterator<'a, T> {
-        type Item = &'a T;
-
-        fn next(&mut self) -> Option<&'a T> {
-            let p = self.0.load(Ordering::Acquire);
-            p.is_null().not().then(|| unsafe {
-                self.0 = &(*p).next.0;
-                &(*p).value
-            })
-        }
-    }
-}
-
-pub mod keys_manager {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    use ahash::RandomState;
-    use dashmap::{mapref::one::RefMut, DashMap};
-    use ed25519_compact::{KeyPair, PublicKey, Seed};
-    use harmony_rust_sdk::api::auth::auth_service_client::AuthServiceClient;
-
-    use reqwest::Url;
-
-    fn parse_pem(key: String, host: SmolStr) -> Result<ed25519_compact::PublicKey, ServerError> {
-        let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.clone()))?;
-
-        if pem.tag != KEY_TAG {
-            return Err(ServerError::CantGetHostKey(host));
-        }
-
-        ed25519_compact::PublicKey::from_slice(pem.contents.as_slice())
-            .map_err(|_| ServerError::CantGetHostKey(host))
-    }
-
-    #[derive(Debug)]
-    pub struct KeysManager {
-        keys: DashMap<SmolStr, PublicKey, RandomState>,
-        clients: DashMap<SmolStr, AuthServiceClient, RandomState>,
-        federation_key: PathBuf,
-    }
-
-    impl KeysManager {
-        pub fn new(federation_key: PathBuf) -> Self {
-            Self {
-                federation_key,
-                keys: DashMap::default(),
-                clients: DashMap::default(),
-            }
-        }
-
-        pub fn invalidate_key(&self, host: &str) {
-            self.keys.remove(host);
-        }
-
-        pub async fn get_own_key(&self) -> Result<KeyPair, ServerError> {
-            match tokio::fs::read(&self.federation_key).await {
-                Ok(key) => {
-                    ed25519_compact::KeyPair::from_slice(&key).map_err(|_| ServerError::CantGetKey)
-                }
-                Err(err) => {
-                    if err.kind() == std::io::ErrorKind::NotFound {
-                        let new_key = ed25519_compact::KeyPair::from_seed(Seed::generate());
-                        tokio::fs::write(&self.federation_key, new_key.as_ref())
-                            .await
-                            .map(|_| new_key)
-                            .map_err(|_| ServerError::CantGetKey)
-                    } else {
-                        Err(ServerError::CantGetKey)
-                    }
-                }
-            }
-        }
-
-        pub async fn get_key(&self, host: SmolStr) -> Result<PublicKey, ServerError> {
-            let key = if let Some(key) = self.keys.get(&host) {
-                *key
-            } else {
-                let key = self
-                    .get_client(host.clone())
-                    .value_mut()
-                    .key(())
-                    .await
-                    .map_err(|_| ServerError::CantGetHostKey(host.clone()))?
-                    .key;
-                let key = parse_pem(key, host.clone())?;
-                self.keys.insert(host, key);
-                key
-            };
-
-            Ok(key)
-        }
-
-        fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, AuthServiceClient, RandomState> {
-            self.clients.entry(host.clone()).or_insert_with(|| {
-                let http = reqwest::Client::new(); // each server gets its own http client
-                let host_url: Url = host.parse().unwrap();
-
-                AuthServiceClient::new(http, host_url).unwrap()
-            })
-        }
-    }
 }

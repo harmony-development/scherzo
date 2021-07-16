@@ -1,13 +1,13 @@
 use std::ops::RangeInclusive;
 
-use super::{Batch, Db, DbResult, Iter, RangeIter, Tree};
+use super::{ArcTree, Batch, Db, DbResult, Iter, RangeIter, Tree};
 
 pub struct NoopDb;
 
 pub struct NoopTree;
 
 impl Db for NoopDb {
-    fn open_tree(&self, _: &[u8]) -> DbResult<std::sync::Arc<dyn Tree>> {
+    fn open_tree(&self, _: &[u8]) -> DbResult<ArcTree> {
         let tree = NoopTree;
         let box_tree: Box<dyn Tree> = Box::new(tree);
         Ok(box_tree.into())

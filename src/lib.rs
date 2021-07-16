@@ -16,9 +16,11 @@ use harmony_rust_sdk::api::exports::hrpc::{
 };
 use smol_str::SmolStr;
 
+pub mod append_list;
 pub mod config;
 pub mod db;
 pub mod impls;
+pub mod key;
 
 pub static DISABLE_RATELIMITS: AtomicBool = AtomicBool::new(false);
 pub const HARMONY_PROTO_NAME: &str = "harmony";

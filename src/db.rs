@@ -1,4 +1,5 @@
 use std::{
+    convert::TryInto,
     error::Error as StdError,
     fmt::{self, Display, Formatter},
     mem::size_of,
@@ -55,13 +56,15 @@ impl StdError for DbError {
     }
 }
 
-type DbResult<T> = Result<T, DbError>;
-type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
-type RangeIter<'a> = Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
+pub type DbResult<T> = Result<T, DbError>;
+pub type ArcTree = Arc<dyn Tree>;
 
 pub trait Db {
-    fn open_tree(&self, name: &[u8]) -> DbResult<Arc<dyn Tree>>;
+    fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree>;
 }
+
+type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
+type RangeIter<'a> = Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
 
 pub trait Tree: Send + Sync {
     fn get(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
@@ -72,6 +75,11 @@ pub trait Tree: Send + Sync {
     fn contains_key(&self, key: &[u8]) -> DbResult<bool>;
     fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a>;
     fn verify_integrity(&self) -> DbResult<()>;
+}
+
+pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
+    raw.chunks_exact(size_of::<u64>())
+        .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
 }
 
 pub mod chat {
@@ -261,8 +269,6 @@ crate::impl_deser! {
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
-    use std::convert::TryInto;
-
     let (id_raw, _) = data.split_at(size_of::<u64>());
     u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() })
 }

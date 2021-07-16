@@ -36,10 +36,10 @@ use tokio::{
 };
 use triomphe::Arc;
 
-use super::{append_list::AppendList, gen_rand_u64, make_u64_iter_logic, sync::EventDispatch};
 use crate::{
-    db::{self, chat::*, Batch, Tree},
-    impls::auth,
+    append_list::AppendList,
+    db::{self, chat::*, Batch},
+    impls::{auth, gen_rand_u64, sync::EventDispatch},
     set_proto_name, ServerError,
 };
 
@@ -1960,7 +1960,7 @@ impl chat_service_server::ChatService for ChatServer {
 
 #[derive(Clone)]
 pub struct ChatTree {
-    pub chat_tree: std::sync::Arc<dyn Tree>,
+    pub chat_tree: db::ArcTree,
 }
 
 impl ChatTree {
@@ -2204,7 +2204,7 @@ impl ChatTree {
             .get(&make_guild_chan_ordering_key(guild_id))
             .unwrap()
             .unwrap_or_default();
-        for (order_index, order_id) in make_u64_iter_logic(ordering_raw.as_ref()).enumerate() {
+        for (order_index, order_id) in db::make_u64_iter_logic(ordering_raw.as_ref()).enumerate() {
             if let Some(index) = channels.iter().position(|chan| chan.channel_id == order_id) {
                 channels.swap(order_index, index);
             }
@@ -2215,7 +2215,7 @@ impl ChatTree {
 
     #[inline(always)]
     pub fn get_list_u64_logic(&self, key: &[u8]) -> Vec<u64> {
-        make_u64_iter_logic(
+        db::make_u64_iter_logic(
             self.chat_tree
                 .get(key)
                 .unwrap()

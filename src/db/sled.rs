@@ -1,9 +1,9 @@
 use std::ops::RangeInclusive;
 
-use super::{Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
+use super::{ArcTree, Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
 
 impl Db for sled::Db {
-    fn open_tree(&self, name: &[u8]) -> DbResult<std::sync::Arc<dyn Tree>> {
+    fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree> {
         self.open_tree(name).map_err(Into::into).map(|tree| {
             let box_tree: Box<dyn Tree> = Box::new(tree);
             box_tree.into()

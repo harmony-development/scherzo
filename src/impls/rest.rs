@@ -41,15 +41,13 @@ use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter,
 
 const SEPERATOR: u8 = b'\n';
 
-pub struct RestConfig {
-    pub media_root: Arc<PathBuf>,
-    pub sessions: SessionMap,
-    pub max_length: u64,
-}
-
-pub fn rest(data: RestConfig) -> BoxedFilter<(impl Reply,)> {
-    download(data.media_root.clone())
-        .or(upload(data.sessions, data.media_root, data.max_length))
+pub fn rest(
+    media_root: Arc<PathBuf>,
+    sessions: SessionMap,
+    max_length: u64,
+) -> BoxedFilter<(impl Reply,)> {
+    download(media_root.clone())
+        .or(upload(sessions, media_root, max_length))
         .boxed()
 }
 

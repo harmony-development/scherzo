@@ -2,10 +2,6 @@
 
 use std::collections::HashMap;
 
-use crate::db::{sync::*, Tree};
-
-use super::{chat::ChatTree, keys_manager::KeysManager, *};
-
 use ahash::RandomState;
 use harmony_rust_sdk::api::{
     exports::{
@@ -17,9 +13,16 @@ use harmony_rust_sdk::api::{
 };
 use prost::bytes::BytesMut;
 use reqwest::Url;
+use smol_str::SmolStr;
 use tokio::sync::mpsc::UnboundedReceiver;
-
 use triomphe::Arc;
+
+use crate::{
+    db::{sync::*, ArcTree},
+    impls::{chat::ChatTree, get_time_secs, http},
+    key::{self, Manager as KeyManager},
+    ServerError,
+};
 
 pub struct EventDispatch {
     pub host: SmolStr,
@@ -42,15 +45,15 @@ impl Clients {
 #[derive(Clone)]
 pub struct SyncServer {
     chat_tree: ChatTree,
-    sync_tree: std::sync::Arc<dyn Tree>,
-    keys_manager: Arc<KeysManager>,
+    sync_tree: ArcTree,
+    keys_manager: Arc<KeyManager>,
 }
 
 impl SyncServer {
     pub fn new(
         chat_tree: ChatTree,
-        sync_tree: std::sync::Arc<dyn Tree>,
-        keys_manager: Arc<KeysManager>,
+        sync_tree: ArcTree,
+        keys_manager: Arc<KeyManager>,
         mut dispatch_rx: UnboundedReceiver<EventDispatch>,
     ) -> Self {
         let sync = Self {
@@ -121,7 +124,7 @@ impl SyncServer {
                 let host: SmolStr = host.into();
                 let pubkey = self.keys_manager.get_key(host.clone()).await?;
 
-                return verify_token(&token, &pubkey).map(|_| host);
+                return key::verify_token(&token, &pubkey).map(|_| host);
             }
         }
 

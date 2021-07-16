@@ -17,7 +17,7 @@ use harmony_rust_sdk::api::{
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 enum Metadata {
     Site(HTML),
     Media {
@@ -54,7 +54,6 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
     }
 }
 
-#[derive(Debug)]
 pub struct MediaproxyServer {
     http: Client,
     valid_sessions: SessionMap,

@@ -17,7 +17,10 @@ use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
 
-use super::{chat::ChatTree, keys_manager::KeysManager, verify_token, KEY_TAG};
+use crate::{
+    impls::chat::ChatTree,
+    key::{self, Manager as KeyManager},
+};
 
 use crate::{
     db::{
@@ -25,7 +28,7 @@ use crate::{
         chat::{
             make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
         },
-        Batch, Tree,
+        ArcTree, Batch, Tree,
     },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
@@ -68,17 +71,17 @@ pub struct AuthServer {
     valid_sessions: SessionMap,
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
-    auth_tree: std::sync::Arc<dyn Tree>,
+    auth_tree: ArcTree,
     chat_tree: ChatTree,
-    keys_manager: Arc<KeysManager>,
+    keys_manager: Arc<KeyManager>,
 }
 
 impl AuthServer {
     pub fn new(
         chat_tree: ChatTree,
-        auth_tree: std::sync::Arc<dyn Tree>,
+        auth_tree: ArcTree,
         valid_sessions: SessionMap,
-        keys_manager: Arc<KeysManager>,
+        keys_manager: Arc<KeyManager>,
     ) -> Self {
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
@@ -210,7 +213,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         if let Some(token) = auth_token {
             let pubkey = self.keys_manager.get_key(domain.into()).await?;
-            verify_token(&token, &pubkey)?;
+            key::verify_token(&token, &pubkey)?;
             let TokenData {
                 user_id: foreign_id,
                 target,
@@ -270,7 +273,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let pem = pem::Pem {
             contents: key.pk.to_vec(),
-            tag: KEY_TAG.to_string(),
+            tag: key::KEY_TAG.to_string(),
         };
 
         Ok(KeyReply {
