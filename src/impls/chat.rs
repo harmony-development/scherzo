@@ -2580,6 +2580,7 @@ impl ChatTree {
         Ok(channel_id)
     }
 
+    /// Calculates all users which can "see" the given user
     pub fn calculate_users_seeing_user(&self, user_id: u64) -> Vec<u64> {
         let prefix = make_guild_list_key_prefix(user_id);
         self.chat_tree
@@ -2596,6 +2597,7 @@ impl ChatTree {
             .collect()
     }
 
+    /// Adds a guild to a user's guild list
     pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
         self.chat_tree
             .insert(
@@ -2610,12 +2612,14 @@ impl ChatTree {
             .unwrap();
     }
 
+    /// Removes a guild from a user's guild list
     pub fn remove_guild_from_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
         self.chat_tree
             .remove(&make_guild_list_key(user_id, guild_id, homeserver))
             .unwrap();
     }
 
+    /// Converts a local user ID to the corresponding foreign user ID and the host
     pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, SmolStr)> {
         let key = make_local_to_foreign_user_key(local_id);
 
@@ -2629,6 +2633,7 @@ impl ChatTree {
         })
     }
 
+    /// Convert a foreign user ID to a local user ID
     pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> Option<u64> {
         let key = make_foreign_to_local_user_key(foreign_id, host);
 

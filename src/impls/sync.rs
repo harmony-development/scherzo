@@ -34,6 +34,7 @@ impl Clients {
     fn get_client(&mut self, host: SmolStr) -> &mut PostboxServiceClient {
         self.0.entry(host.clone()).or_insert_with(|| {
             let http = reqwest::Client::new(); // each server gets its own http client
+                                               // TODO: Handle url parsing error
             let host_url: Url = host.parse().unwrap();
 
             PostboxServiceClient::new(http, host_url).unwrap()
@@ -65,10 +66,9 @@ impl SyncServer {
         tokio::spawn(async move {
             let mut clients = Clients(HashMap::default());
 
-            const PREFIX: &[u8] = HOST_PREFIX;
-            let hosts = sync2.sync_tree.scan_prefix(PREFIX).map(|res| {
+            let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).map(|res| {
                 let (key, _) = res.unwrap();
-                let (_, host_raw) = key.split_at(PREFIX.len());
+                let (_, host_raw) = key.split_at(HOST_PREFIX.len());
                 let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
                 SmolStr::new(host)
             });
