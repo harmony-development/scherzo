@@ -55,9 +55,7 @@ pub fn rest(
 pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
     let http_client = reqwest::Client::new();
     warp::get()
-        .and(warp::path("_harmony"))
-        .and(warp::path("media"))
-        .and(warp::path("download"))
+        .and(warp::path!("_harmony" / "media" / "download"))
         .and(warp::path::param::<String>())
         .and(rate(10, 5))
         .and_then(move |id: String| {
@@ -183,9 +181,7 @@ pub fn upload(
     max_length: u64,
 ) -> BoxedFilter<(impl Reply,)> {
     warp::post()
-        .and(warp::path("_harmony"))
-        .and(warp::path("media"))
-        .and(warp::path("upload"))
+        .and(warp::path!("_harmony" / "media" / "upload"))
         .and(rate(5, 5))
         .and(warp::filters::header::value("authorization").and_then(
             move |maybe_token: HeaderValue| {

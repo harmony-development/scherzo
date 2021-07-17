@@ -120,9 +120,17 @@ impl SyncServer {
             // Check time variance (1 minute)
             if time < cur_time + 30 && time > cur_time - 30 {
                 let host: SmolStr = host.into();
-                let pubkey = self.keys_manager.get_key(host.clone()).await?;
+                let get_key = || self.keys_manager.get_key(host.clone());
+                let mut pubkey = get_key().await?;
 
-                return key::verify_token(&token, &pubkey).map(|_| host);
+                let verify = |pubkey| key::verify_token(&token, &pubkey).map(|_| host.clone());
+                // Fetch pubkey if the verification fails, it might have changed
+                if matches!(verify(pubkey), Err(ServerError::CouldntVerifyTokenData)) {
+                    self.keys_manager.invalidate_key(&host);
+                    pubkey = get_key().await?;
+                }
+
+                return verify(pubkey);
             }
         }
 
