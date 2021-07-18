@@ -28,12 +28,14 @@ mkdir scherzo && cd scherzo && curl -L https://git.io/Jn9Lo > scherzo && chmod +
 
 ## Build
 
-- Make sure you have the latest stable Rust toolchain installed (not required if you have Nix)
 - Clone this repo
+- Make sure you have the toolchain described in `rust-toolchain.toml` installed
+    - This will be installed automatically for you if you have rustup setup!
+- Make sure you have `lld` installed
 - Run `cargo build`
 
-If you have Nix, you can do:
-- Flakes: `nix build`
-- Non-flakes: `nix-build`
+If you have Nix, you can just do:
+- Flakes: `nix build` to build, `nix develop` for development shell
+- Non-flakes: `nix-build` to build, `nix-shell shell.nix` for development shell
 
 You can also get an executable binary from the latest `Continous build` release.
