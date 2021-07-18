@@ -229,15 +229,24 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
             let config_path = std::path::Path::new("./config.toml");
             let config: Config = if config_path.exists() {
-                toml::from_slice(&std::fs::read(config_path).expect("failed to read config file"))
-                    .expect("failed to parse config file")
+                toml::from_slice(
+                    &tokio::fs::read(config_path)
+                        .await
+                        .expect("failed to read config file"),
+                )
+                .expect("failed to parse config file")
             } else {
                 info!("No config file found, writing default config file");
                 let def = Config::default();
-                std::fs::write(config_path, toml::to_vec(&def).unwrap())
+                tokio::fs::write(config_path, toml::to_vec(&def).unwrap())
+                    .await
                     .expect("failed to write default config file");
                 def
             };
+            // Write config file back, since it might have filled in with default values
+            tokio::fs::write(config_path, toml::to_vec(&config).unwrap())
+                .await
+                .expect("failed to write to config file");
             debug!("running with {:?}", config);
             tokio::fs::create_dir_all(&config.media.media_root)
                 .await
