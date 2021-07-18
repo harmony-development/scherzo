@@ -717,10 +717,9 @@ impl auth_service_server::AuthService for AuthServer {
     }
 }
 
-fn hash_password(raw: Vec<u8>) -> impl AsRef<[u8]> {
-    let mut sh = sha3::Sha3_512::new();
-    sh.update(raw);
-    sh.finalize()
+#[inline(always)]
+fn hash_password(raw: impl AsRef<[u8]>) -> impl AsRef<[u8]> {
+    sha3::Sha3_512::digest(raw.as_ref())
 }
 
 const PASSWORD_FIELD_ERR: ServerError = ServerError::WrongTypeForField {

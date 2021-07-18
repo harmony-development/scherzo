@@ -1,6 +1,6 @@
 use crate::{
     http,
-    impls::{auth::SessionMap, gen_rand_arr, get_content_length, rate},
+    impls::{auth::SessionMap, get_content_length, rate},
     ServerError,
 };
 
@@ -31,8 +31,8 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use rand::SeedableRng;
 use reqwest::{header::HeaderValue, StatusCode, Url};
+use sha3::Digest;
 use smol_str::SmolStr;
 use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
 use tokio_util::io::poll_read_buf;
@@ -213,28 +213,28 @@ pub fn upload(
                             .await
                             .ok_or_else(|| reject(ServerError::MissingFiles))?
                             .map_err(reject)?;
+                        let data = data.chunk();
+                        let id = format!("{:x}", sha3::Sha3_256::digest(data));
+                        let path = media_root.join(&id);
+                        if path.exists() {
+                            return Ok(format!(r#"{{ "id": "{}" }}"#, id));
+                        }
                         // [tag:ascii_filename_upload]
                         let name = param.get("filename").map_or("unknown", |a| a.as_str());
                         // [tag:ascii_mimetype_upload]
                         let content_type = param
                             .get("contentType")
                             .map_or("application/octet-stream", |a| a.as_str());
-                        let id_arr =
-                            gen_rand_arr::<_, 64>(&mut rand::rngs::SmallRng::from_entropy());
-                        // Safety: gen_rand_arr only generates alphanumerics, so it will always be a valid str [ref:alphanumeric_array_gen]
-                        let id = unsafe { std::str::from_utf8_unchecked(&id_arr) };
                         let data = [
                             name.as_bytes(),
                             &[SEPERATOR],
                             content_type.as_bytes(),
                             &[SEPERATOR],
-                            data.chunk(),
+                            data,
                         ]
                         .concat();
 
-                        tokio::fs::write(media_root.join(id), data)
-                            .await
-                            .map_err(reject)?;
+                        tokio::fs::write(path, data).await.map_err(reject)?;
 
                         Ok(format!(r#"{{ "id": "{}" }}"#, id))
                     } else {
