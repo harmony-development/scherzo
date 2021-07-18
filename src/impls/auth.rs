@@ -11,7 +11,7 @@ use harmony_rust_sdk::api::{
     },
     harmonytypes::UserStatus,
 };
-use scherzo_derive::{auth, auth_get, chat_insert, rate};
+use scherzo_derive::{auth, rate};
 use sha3::Digest;
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
@@ -535,24 +535,28 @@ impl auth_service_server::AuthService for AuthServer {
                                     let password_raw = try_get_password(&mut values)?;
                                     let password_hashed = hash_password(password_raw);
                                     let email = try_get_email(&mut values)?;
-                                    let email = &email;
 
-                                    let user_id = auth_get!(email.as_bytes())
-                                        .map(|user_id| {
-                                            // Safety: this unwrap can never cause UB since we split at u64 boundary
-                                            u64::from_be_bytes(unsafe {
-                                                user_id
-                                                    .split_at(size_of::<u64>())
-                                                    .0
-                                                    .try_into()
-                                                    .unwrap_unchecked()
-                                            })
+                                    let user_id = if let Ok(Some(user_id)) =
+                                        self.auth_tree.get(email.as_bytes())
+                                    {
+                                        // Safety: this unwrap can never cause UB since we split at u64 boundary
+                                        u64::from_be_bytes(unsafe {
+                                            user_id
+                                                .split_at(size_of::<u64>())
+                                                .0
+                                                .try_into()
+                                                .unwrap_unchecked()
                                         })
-                                        .ok_or_else(|| ServerError::WrongUserOrPassword {
+                                    } else {
+                                        return Err(ServerError::WrongUserOrPassword {
                                             email: email.into(),
-                                        })?;
+                                        });
+                                    };
 
-                                    if auth_get!(user_id.to_be_bytes())
+                                    if self
+                                        .auth_tree
+                                        .get(user_id.to_be_bytes().as_ref())
+                                        .unwrap()
                                         .map_or(true, |pass| pass != password_hashed.as_ref())
                                     {
                                         return Err(ServerError::WrongUserOrPassword {
@@ -595,7 +599,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     let email = try_get_email(&mut values)?;
                                     let username = try_get_username(&mut values)?;
 
-                                    if self.auth_tree.contains_key(email.as_bytes()).unwrap() {
+                                    if self.auth_tree.get(email.as_bytes()).unwrap().is_some() {
                                         return Err(ServerError::UserAlreadyExists);
                                     }
 
@@ -621,7 +625,10 @@ impl auth_service_server::AuthService for AuthServer {
                                         user_name: username,
                                         ..Default::default()
                                     });
-                                    chat_insert!(make_user_profile_key(user_id), buf);
+                                    self.chat_tree
+                                        .chat_tree
+                                        .insert(&make_user_profile_key(user_id), buf.as_ref())
+                                        .unwrap();
 
                                     tracing::debug!(
                                         "new user {} registered with email {}",
