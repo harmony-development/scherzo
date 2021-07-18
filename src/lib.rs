@@ -115,6 +115,8 @@ pub enum ServerError {
     InvalidTime,
     CouldntVerifyTokenData,
     InvalidToken,
+    FederationDisabled,
+    HostNotAllowed,
 }
 
 impl Display for ServerError {
@@ -242,6 +244,8 @@ impl Display for ServerError {
                 f,
                 "token data could not be verified with the given signature"
             ),
+            ServerError::FederationDisabled => write!(f, "federation is disabled on this server"),
+            ServerError::HostNotAllowed => write!(f, "host is not allowed on this server"),
         }
     }
 }
@@ -286,9 +290,9 @@ impl CustomError for ServerError {
             | ServerError::InvalidTime
             | ServerError::CouldntVerifyTokenData
             | ServerError::InvalidToken => StatusCode::BAD_REQUEST,
+            ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
-            | ServerError::NotImplemented
             | ServerError::InternalServerError
             | ServerError::ReqwestError(_)
             | ServerError::Unexpected(_)
@@ -296,6 +300,7 @@ impl CustomError for ServerError {
             | ServerError::CantGetHostKey(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound => StatusCode::NOT_FOUND,
+            ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
         }
     }
 
@@ -357,6 +362,8 @@ impl CustomError for ServerError {
             ServerError::InvalidTime => "h.bad-time",
             ServerError::CouldntVerifyTokenData => "h.token-verify-failure",
             ServerError::InvalidToken => "h.bad-token",
+            ServerError::FederationDisabled => "h.federation-disabled",
+            ServerError::HostNotAllowed => "h.host-not-allowed",
         };
         format!("{}\n{}", i18n_code, self).into_bytes()
     }

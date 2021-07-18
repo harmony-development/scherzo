@@ -9,7 +9,7 @@ use harmony_rust_sdk::api::{
         hrpc::{encode_protobuf_message, server::WriteSocket, warp::reply::Response, Request},
         prost::Message,
     },
-    harmonytypes::{Token, UserStatus},
+    harmonytypes::UserStatus,
 };
 use scherzo_derive::{auth, rate};
 use sha3::Digest;
@@ -18,6 +18,7 @@ use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
 
 use crate::{
+    config::FederationConfig,
     impls::chat::ChatTree,
     key::{self, Manager as KeyManager},
 };
@@ -75,7 +76,8 @@ pub struct AuthServer {
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     auth_tree: ArcTree,
     chat_tree: ChatTree,
-    keys_manager: Arc<KeyManager>,
+    keys_manager: Option<Arc<KeyManager>>,
+    federation_config: Option<Arc<FederationConfig>>,
 }
 
 impl AuthServer {
@@ -83,7 +85,8 @@ impl AuthServer {
         chat_tree: ChatTree,
         auth_tree: ArcTree,
         valid_sessions: SessionMap,
-        keys_manager: Arc<KeyManager>,
+        keys_manager: Option<Arc<KeyManager>>,
+        federation_config: Option<Arc<FederationConfig>>,
     ) -> Self {
         let att = auth_tree.clone();
         let ctt = chat_tree.clone();
@@ -155,6 +158,7 @@ impl AuthServer {
             auth_tree,
             chat_tree,
             keys_manager,
+            federation_config,
         }
     }
 
@@ -168,6 +172,20 @@ impl AuthServer {
             token = unsafe { std::str::from_utf8_unchecked(&raw) };
         }
         SmolStr::new_inline(token)
+    }
+
+    fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
+        self.keys_manager
+            .as_ref()
+            .ok_or(ServerError::FederationDisabled)
+    }
+
+    fn is_host_allowed(&self, host: &str) -> Result<(), ServerError> {
+        self.federation_config
+            .as_ref()
+            .map_or(Err(ServerError::FederationDisabled), |conf| {
+                conf.is_host_allowed(host)
+            })
     }
 }
 
@@ -188,8 +206,12 @@ impl auth_service_server::AuthService for AuthServer {
     ) -> Result<FederateReply, Self::Error> {
         auth!();
 
+        let keys_manager = self.keys_manager()?;
+
         let profile = self.chat_tree.get_user_logic(user_id)?;
         let target = request.into_parts().0.target;
+
+        self.is_host_allowed(&target)?;
 
         let data = TokenData {
             user_id,
@@ -198,17 +220,10 @@ impl auth_service_server::AuthService for AuthServer {
             avatar: profile.user_avatar,
         };
 
-        let buf = encode_protobuf_message(data);
-        let data = buf.to_vec();
-
-        let key = self.keys_manager.get_own_key().await?;
-        let sig = key.sk.sign(&data, Some(ed25519_compact::Noise::generate()));
+        let token = keys_manager.generate_token(data).await?;
 
         Ok(FederateReply {
-            token: Some(Token {
-                data,
-                sig: sig.to_vec(),
-            }),
+            token: Some(token),
             nonce: String::new(),
         })
     }
@@ -220,8 +235,11 @@ impl auth_service_server::AuthService for AuthServer {
     ) -> Result<Session, Self::Error> {
         let LoginFederatedRequest { auth_token, domain } = request.into_parts().0;
 
+        self.is_host_allowed(&domain)?;
+
         if let Some(token) = auth_token {
-            let pubkey = self.keys_manager.get_key(domain.into()).await?;
+            let keys_manager = self.keys_manager()?;
+            let pubkey = keys_manager.get_key(domain.into()).await?;
             key::verify_token(&token, &pubkey)?;
             let TokenData {
                 user_id: foreign_id,
@@ -277,7 +295,8 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(1, 5)]
     async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
-        let key = self.keys_manager.get_own_key().await?;
+        let keys_manager = self.keys_manager()?;
+        let key = keys_manager.get_own_key().await?;
 
         let pem = pem::Pem {
             contents: key.pk.to_vec(),

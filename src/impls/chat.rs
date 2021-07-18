@@ -1236,6 +1236,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .scan_prefix(&msg_prefix)
             .last()
+            // Ensure that the first message ID is always 1!
             .map_or(1, |res| {
                 // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
                 u64::from_be_bytes(unsafe {

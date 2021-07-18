@@ -3,7 +3,11 @@ use std::path::PathBuf;
 use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use ed25519_compact::{KeyPair, PublicKey, Seed};
-use harmony_rust_sdk::api::{auth::auth_service_client::AuthServiceClient, harmonytypes::Token};
+use harmony_rust_sdk::api::{
+    auth::auth_service_client::AuthServiceClient, exports::hrpc::encode_protobuf_message,
+    harmonytypes::Token,
+};
+use prost::Message;
 use reqwest::Url;
 use smol_str::SmolStr;
 
@@ -47,6 +51,19 @@ impl Manager {
             keys: DashMap::default(),
             clients: DashMap::default(),
         }
+    }
+
+    pub async fn generate_token(&self, data: impl Message) -> Result<Token, ServerError> {
+        let buf = encode_protobuf_message(data);
+        let data = buf.to_vec();
+
+        let key = self.get_own_key().await?;
+        let sig = key
+            .sk
+            .sign(&data, Some(ed25519_compact::Noise::generate()))
+            .to_vec();
+
+        Ok(Token { sig, data })
     }
 
     pub fn invalidate_key(&self, host: &str) {

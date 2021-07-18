@@ -5,18 +5,19 @@ use std::collections::HashMap;
 use ahash::RandomState;
 use harmony_rust_sdk::api::{
     exports::{
-        hrpc::{async_trait, encode_protobuf_message, Request},
+        hrpc::{async_trait, encode_protobuf_message, futures_util::TryFutureExt, Request},
         prost::Message,
     },
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use reqwest::Url;
+use reqwest::{header::HeaderValue, Url};
 use smol_str::SmolStr;
 use tokio::sync::mpsc::UnboundedReceiver;
 use triomphe::Arc;
 
 use crate::{
+    config::FederationConfig,
     db::{sync::*, ArcTree},
     impls::{chat::ChatTree, get_time_secs, http},
     key::{self, Manager as KeyManager},
@@ -46,20 +47,26 @@ impl Clients {
 pub struct SyncServer {
     chat_tree: ChatTree,
     sync_tree: ArcTree,
-    keys_manager: Arc<KeyManager>,
+    keys_manager: Option<Arc<KeyManager>>,
+    federation_config: Option<Arc<FederationConfig>>,
+    host: String,
 }
 
 impl SyncServer {
     pub fn new(
         chat_tree: ChatTree,
         sync_tree: ArcTree,
-        keys_manager: Arc<KeyManager>,
+        keys_manager: Option<Arc<KeyManager>>,
         mut dispatch_rx: UnboundedReceiver<EventDispatch>,
+        federation_config: Option<Arc<FederationConfig>>,
+        host: String,
     ) -> Self {
         let sync = Self {
             chat_tree,
             sync_tree,
             keys_manager,
+            federation_config,
+            host,
         };
         let sync2 = sync.clone();
 
@@ -74,37 +81,90 @@ impl SyncServer {
             });
 
             for host in hosts {
-                if let Ok(queue) = clients.get_client(host.clone()).pull(()).await {
-                    for event in queue.events {
-                        sync2.push_logic(&host, event);
+                if sync2.is_host_allowed(&host).is_ok() {
+                    if let Ok(queue) = sync2
+                        .generate_request(())
+                        .map_err(|_| ())
+                        .and_then(|req| clients.get_client(host.clone()).pull(req).map_err(|_| ()))
+                        .await
+                    {
+                        for event in queue.events {
+                            sync2.push_logic(&host, event);
+                        }
                     }
                 }
             }
 
             loop {
                 while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
-                    let mut push_result =
-                        clients.get_client(host.clone()).push(event.clone()).await;
-                    let mut try_count = 0;
-                    while try_count < 5 && push_result.is_err() {
-                        push_result = clients.get_client(host.clone()).push(event.clone()).await;
-                        try_count += 1;
-                    }
+                    if sync2.is_host_allowed(&host).is_ok() {
+                        let mut push_result = sync2
+                            .generate_request(event.clone())
+                            .map_err(|_| ())
+                            .and_then(|req| {
+                                clients.get_client(host.clone()).push(req).map_err(|_| ())
+                            })
+                            .await;
+                        let mut try_count = 0;
+                        while try_count < 5 && push_result.is_err() {
+                            push_result = sync2
+                                .generate_request(event.clone())
+                                .map_err(|_| ())
+                                .and_then(|req| {
+                                    clients.get_client(host.clone()).push(req).map_err(|_| ())
+                                })
+                                .await;
+                            try_count += 1;
+                        }
 
-                    if push_result.is_err() {
-                        // TODO: this is a waste, find a way to optimize this
-                        let mut queue = sync2.get_event_queue(&host);
-                        queue.events.push(event);
-                        let buf = encode_protobuf_message(queue);
-                        sync2
-                            .sync_tree
-                            .insert(&make_host_key(&host), buf.as_ref())
-                            .unwrap();
+                        if push_result.is_err() {
+                            // TODO: this is a waste, find a way to optimize this
+                            let mut queue = sync2.get_event_queue(&host);
+                            queue.events.push(event);
+                            let buf = encode_protobuf_message(queue);
+                            sync2
+                                .sync_tree
+                                .insert(&make_host_key(&host), buf.as_ref())
+                                .unwrap();
+                        }
                     }
                 }
             }
         });
         sync
+    }
+
+    async fn generate_request<Msg: prost::Message>(
+        &self,
+        msg: Msg,
+    ) -> Result<Request<Msg>, ServerError> {
+        let data = AuthData {
+            host: self.host.clone(),
+            time: get_time_secs(),
+        };
+
+        let token = self.keys_manager()?.generate_token(data).await?;
+        let token = encode_protobuf_message(token).freeze();
+
+        Ok(
+            Request::new(msg).header(http::header::AUTHORIZATION, unsafe {
+                HeaderValue::from_maybe_shared_unchecked(token)
+            }),
+        )
+    }
+
+    fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
+        self.keys_manager
+            .as_ref()
+            .ok_or(ServerError::FederationDisabled)
+    }
+
+    fn is_host_allowed(&self, host: &str) -> Result<(), ServerError> {
+        self.federation_config
+            .as_ref()
+            .map_or(Err(ServerError::FederationDisabled), |conf| {
+                conf.is_host_allowed(host)
+            })
     }
 
     async fn auth<T>(&self, request: &Request<T>) -> Result<SmolStr, ServerError> {
@@ -116,17 +176,21 @@ impl SyncServer {
             let AuthData { host, time } = AuthData::decode(token.data.as_slice())
                 .map_err(|_| ServerError::InvalidTokenData)?;
 
+            self.is_host_allowed(&host)?;
+
             let cur_time = get_time_secs();
             // Check time variance (1 minute)
             if time < cur_time + 30 && time > cur_time - 30 {
+                let keys_manager = self.keys_manager()?;
+
                 let host: SmolStr = host.into();
-                let get_key = || self.keys_manager.get_key(host.clone());
+                let get_key = || keys_manager.get_key(host.clone());
                 let mut pubkey = get_key().await?;
 
                 let verify = |pubkey| key::verify_token(&token, &pubkey).map(|_| host.clone());
                 // Fetch pubkey if the verification fails, it might have changed
                 if matches!(verify(pubkey), Err(ServerError::CouldntVerifyTokenData)) {
-                    self.keys_manager.invalidate_key(&host);
+                    keys_manager.invalidate_key(&host);
                     pubkey = get_key().await?;
                 }
 

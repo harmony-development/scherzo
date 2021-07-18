@@ -246,20 +246,30 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 warn!("rate limits are disabled, please take care!");
                 scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
             }
+            let federation_config = config.federation.map(Arc::new);
 
             let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
-            let keys_manager = Arc::new(key::Manager::new(config.federation_key));
+            let keys_manager = federation_config
+                .as_ref()
+                .map(|conf| Arc::new(key::Manager::new(conf.key.clone())));
             let auth_server = AuthServer::new(
                 chat_tree.clone(),
                 auth_tree.clone(),
                 valid_sessions.clone(),
                 keys_manager.clone(),
+                federation_config.clone(),
             );
             let chat_server =
                 ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
             let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-            let sync_server =
-                SyncServer::new(chat_tree.clone(), sync_tree, keys_manager, dispatch_rx);
+            let sync_server = SyncServer::new(
+                chat_tree.clone(),
+                sync_tree,
+                keys_manager,
+                dispatch_rx,
+                federation_config,
+                config.host,
+            );
 
             let auth = AuthServiceServer::new(auth_server).filters();
             let chat = ChatServiceServer::new(chat_server).filters();
