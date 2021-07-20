@@ -27,7 +27,7 @@ paste = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.5"
 sha3 = "0.9"
-urlencoding = "2.0"
+urlencoding = "2.1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
 infer = { version = "0.5", default-features = false }
 dashmap = "4.0"
