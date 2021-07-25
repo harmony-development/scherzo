@@ -39,7 +39,7 @@ use triomphe::Arc;
 use crate::{
     append_list::AppendList,
     db::{self, chat::*, Batch},
-    impls::{auth, gen_rand_u64, sync::EventDispatch},
+    impls::{auth, gen_rand_u64, get_time_secs, sync::EventDispatch},
     set_proto_name, ServerError,
 };
 
@@ -284,15 +284,8 @@ impl chat_service_server::ChatService for ChatServer {
         };
         let buf = encode_protobuf_message(guild);
 
-        self.chat_tree
-            .chat_tree
-            .insert(guild_id.to_be_bytes().as_ref(), buf.as_ref())
-            .unwrap();
-
-        self.chat_tree
-            .chat_tree
-            .insert(&make_member_key(guild_id, user_id), &[])
-            .unwrap();
+        chat_insert!(guild_id.to_be_bytes() / buf);
+        chat_insert!(make_member_key(guild_id, user_id) / []);
 
         // Some basic default setup
         let everyone_role_id = self.chat_tree.add_guild_role_logic(
@@ -303,14 +296,8 @@ impl chat_service_server::ChatService for ChatServer {
                 ..Default::default()
             },
         )?;
-        self.chat_tree
-            .chat_tree
-            .insert(
-                &make_guild_default_role_key(guild_id),
-                // [tag:default_role_store]
-                everyone_role_id.to_be_bytes().as_ref(),
-            )
-            .unwrap();
+        // [tag:default_role_store]
+        chat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
         self.chat_tree.add_default_role_to(guild_id, user_id)?;
         let def_perms = PermissionList {
             permissions: ["messages.send", "messages.view"]
@@ -390,13 +377,7 @@ impl chat_service_server::ChatService for ChatServer {
         };
         let buf = encode_protobuf_message(invite);
 
-        self.chat_tree
-            .chat_tree
-            .insert(
-                &key,
-                &[guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
-            )
-            .unwrap();
+        chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
 
         Ok(CreateInviteResponse { name })
     }
@@ -663,7 +644,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let buf = encode_protobuf_message(guild_info);
-        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+        chat_insert!(key / buf);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -726,7 +707,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let buf = encode_protobuf_message(chan_info);
-        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+        chat_insert!(key / buf);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -824,7 +805,7 @@ impl chat_service_server::ChatService for ChatServer {
         message.edited_at = edited_at.clone();
 
         let buf = encode_protobuf_message(message);
-        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+        chat_insert!(key / buf);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1098,10 +1079,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::InviteExpired);
         }
 
-        self.chat_tree
-            .chat_tree
-            .insert(&make_member_key(guild_id, user_id), &[])
-            .unwrap();
+        chat_insert!(make_member_key(guild_id, user_id) / []);
         self.chat_tree.add_default_role_to(guild_id, user_id)?;
         invite.use_count += 1;
 
@@ -1139,13 +1117,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let buf = encode_protobuf_message(invite);
-        self.chat_tree
-            .chat_tree
-            .insert(
-                &key,
-                &[guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
-            )
-            .unwrap();
+        chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
 
         Ok(JoinGuildResponse { guild_id })
     }
@@ -1269,7 +1241,7 @@ impl chat_service_server::ChatService for ChatServer {
         let mut buf = BytesMut::with_capacity(message.encoded_len());
         // This can never fail, so we ignore the result
         let _ = message.encode(&mut buf);
-        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+        chat_insert!(key / buf);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1508,10 +1480,7 @@ impl chat_service_server::ChatService for ChatServer {
             }
 
             let ser_role = encode_protobuf_message(role);
-            self.chat_tree
-                .chat_tree
-                .insert(&key, ser_role.as_ref())
-                .unwrap();
+            chat_insert!(key / ser_role);
             Ok(())
         } else {
             Err(ServerError::NoRoleSpecified)
@@ -1766,7 +1735,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let buf = encode_protobuf_message(profile);
-        self.chat_tree.chat_tree.insert(&key, buf.as_ref()).unwrap();
+        chat_insert!(key / buf);
 
         self.send_event_through_chan(
             EventSub::Homeserver,
@@ -1868,17 +1837,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.kick_user_logic(guild_id, user_to_ban);
 
-        self.chat_tree
-            .chat_tree
-            .insert(
-                &make_banned_member_key(guild_id, user_to_ban),
-                &std::time::UNIX_EPOCH
-                    .elapsed()
-                    .unwrap_or_default()
-                    .as_secs()
-                    .to_be_bytes(),
-            )
-            .unwrap();
+        chat_insert!(make_banned_member_key(guild_id, user_to_ban) / get_time_secs().to_be_bytes());
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -2281,9 +2240,7 @@ impl ChatTree {
     ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
         let ser_ord_put = |ordering| {
             let serialized_ordering = self.serialize_list_u64_logic(ordering);
-            self.chat_tree
-                .insert(key, serialized_ordering.as_slice())
-                .unwrap();
+            cchat_insert!(key / serialized_ordering);
         };
 
         if previous_id != 0 {
@@ -2484,7 +2441,7 @@ impl ChatTree {
 
         let key = make_guild_user_roles_key(guild_id, user_id);
         let ser_roles = self.serialize_list_u64_logic(roles);
-        self.chat_tree.insert(&key, ser_roles.as_slice()).unwrap();
+        cchat_insert!(key / ser_roles);
 
         Ok(())
     }
@@ -2522,7 +2479,7 @@ impl ChatTree {
         };
         let role_id = role.role_id;
         let ser_role = encode_protobuf_message(role);
-        self.chat_tree.insert(&key, ser_role.as_ref()).unwrap();
+        cchat_insert!(key / ser_role);
         self.move_role_logic(guild_id, role_id, 0, 0)?;
         Ok(role_id)
     }
@@ -2534,9 +2491,9 @@ impl ChatTree {
         role_id: u64,
         perms: PermissionList,
     ) {
-        let put_perms = |key| {
+        let put_perms = |key: &[u8]| {
             let buf = encode_protobuf_message(perms);
-            self.chat_tree.insert(key, buf.as_ref()).unwrap();
+            cchat_insert!(key / buf);
         };
         // TODO: categories?
         if channel_id != 0 {
@@ -2573,7 +2530,7 @@ impl ChatTree {
             is_category,
         };
         let buf = encode_protobuf_message(channel);
-        self.chat_tree.insert(key.as_ref(), buf.as_ref()).unwrap();
+        cchat_insert!(key / buf);
 
         // Add from ordering list
         self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
@@ -2600,17 +2557,15 @@ impl ChatTree {
 
     /// Adds a guild to a user's guild list
     pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
-        self.chat_tree
-            .insert(
-                &[
-                    make_guild_list_key_prefix(user_id).as_ref(),
-                    guild_id.to_be_bytes().as_ref(),
-                    homeserver.as_bytes(),
-                ]
-                .concat(),
-                [].as_ref(),
-            )
-            .unwrap();
+        cchat_insert!(
+            [
+                make_guild_list_key_prefix(user_id).as_ref(),
+                guild_id.to_be_bytes().as_ref(),
+                homeserver.as_bytes(),
+            ]
+            .concat()
+                / []
+        );
     }
 
     /// Removes a guild from a user's guild list

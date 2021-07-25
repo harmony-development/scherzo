@@ -11,7 +11,7 @@ use harmony_rust_sdk::api::{
     },
     harmonytypes::UserStatus,
 };
-use scherzo_derive::{auth, rate};
+use scherzo_derive::{auth, chat_insert, rate};
 use sha3::Digest;
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
@@ -625,10 +625,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         user_name: username,
                                         ..Default::default()
                                     });
-                                    self.chat_tree
-                                        .chat_tree
-                                        .insert(&make_user_profile_key(user_id), buf.as_ref())
-                                        .unwrap();
+                                    chat_insert!(make_user_profile_key(user_id) / buf);
 
                                     tracing::debug!(
                                         "new user {} registered with email {}",
