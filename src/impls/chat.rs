@@ -4,7 +4,10 @@ use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{
-        event::{ChannelUpdated, GuildUpdated, LeaveReason},
+        event::{
+            ChannelUpdated, GuildUpdated, LeaveReason, RoleCreated, RoleDeleted, RoleMoved,
+            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
+        },
         *,
     },
     exports::{
@@ -1322,7 +1325,18 @@ impl chat_service_server::ChatService for ChatServer {
 
         if let Some(perms) = perms {
             self.chat_tree
-                .set_permissions_logic(guild_id, channel_id, role_id, perms);
+                .set_permissions_logic(guild_id, channel_id, role_id, perms.clone());
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                event::Event::RolePermsUpdated(RolePermissionsUpdated {
+                    guild_id,
+                    channel_id,
+                    role_id,
+                    perms: Some(perms),
+                }),
+                None,
+                EventContext::empty(),
+            );
             Ok(())
         } else {
             Err(ServerError::NoPermissionsSpecified)
@@ -1371,8 +1385,8 @@ impl chat_service_server::ChatService for ChatServer {
         let MoveRoleRequest {
             guild_id,
             role_id,
-            before_id,
-            after_id,
+            before_id: previous_id,
+            after_id: next_id,
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
@@ -1384,7 +1398,19 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         self.chat_tree
-            .move_role_logic(guild_id, role_id, before_id, after_id)?;
+            .move_role_logic(guild_id, role_id, previous_id, next_id)?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::RoleMoved(RoleMoved {
+                guild_id,
+                role_id,
+                previous_id,
+                next_id,
+            }),
+            None,
+            EventContext::empty(),
+        );
 
         Ok(MoveRoleResponse {})
     }
@@ -1430,7 +1456,19 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
 
         if let Some(role) = role {
-            let role_id = self.chat_tree.add_guild_role_logic(guild_id, role)?;
+            let role_id = self
+                .chat_tree
+                .add_guild_role_logic(guild_id, role.clone())?;
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                event::Event::RoleCreated(RoleCreated {
+                    guild_id,
+                    role_id,
+                    role: Some(role),
+                }),
+                None,
+                EventContext::empty(),
+            );
             Ok(AddGuildRoleResponse { role_id })
         } else {
             Err(ServerError::NoRoleSpecified)
@@ -1479,8 +1517,20 @@ impl chat_service_server::ChatService for ChatServer {
                 role.pingable = new_role.pingable;
             }
 
-            let ser_role = encode_protobuf_message(role);
+            let ser_role = encode_protobuf_message(role.clone());
             chat_insert!(key / ser_role);
+
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                event::Event::RoleUpdated(RoleUpdated {
+                    guild_id,
+                    role_id,
+                    role: Some(role),
+                }),
+                None,
+                EventContext::empty(),
+            );
+
             Ok(())
         } else {
             Err(ServerError::NoRoleSpecified)
@@ -1504,8 +1554,16 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .remove(&make_guild_role_key(guild_id, role_id))
             .unwrap()
-            .ok_or(ServerError::NoSuchRole { guild_id, role_id })
-            .map(|_| ())
+            .ok_or(ServerError::NoSuchRole { guild_id, role_id })?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::RoleDeleted(RoleDeleted { guild_id, role_id }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(())
     }
 
     #[rate(10, 5)]
@@ -1537,12 +1595,25 @@ impl chat_service_server::ChatService for ChatServer {
             user_id
         };
 
-        self.chat_tree.manage_user_roles_logic(
+        let role_ids = self.chat_tree.manage_user_roles_logic(
             guild_id,
             user_to_manage,
             give_role_ids,
             take_role_ids,
-        )
+        )?;
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::UserRolesUpdated(UserRolesUpdated {
+                guild_id,
+                user_id: user_to_manage,
+                role_ids,
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(())
     }
 
     #[rate(10, 5)]
@@ -2422,7 +2493,7 @@ impl ChatTree {
         user_id: u64,
         give_role_ids: Vec<u64>,
         take_role_ids: Vec<u64>,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<Vec<u64>, ServerError> {
         let mut roles = self.get_user_roles_logic(guild_id, user_id);
         for role_id in give_role_ids {
             if !self.does_role_exist(guild_id, role_id) {
@@ -2440,10 +2511,10 @@ impl ChatTree {
         }
 
         let key = make_guild_user_roles_key(guild_id, user_id);
-        let ser_roles = self.serialize_list_u64_logic(roles);
+        let ser_roles = self.serialize_list_u64_logic(roles.clone());
         cchat_insert!(key / ser_roles);
 
-        Ok(())
+        Ok(roles)
     }
 
     pub fn add_default_role_to(
