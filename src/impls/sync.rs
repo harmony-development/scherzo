@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::time::Duration;
 
 use ahash::RandomState;
+use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{async_trait, encode_protobuf_message, futures_util::TryFutureExt, Request},
@@ -29,10 +30,10 @@ pub struct EventDispatch {
     pub event: Event,
 }
 
-struct Clients(HashMap<SmolStr, PostboxServiceClient, RandomState>);
+struct Clients(DashMap<SmolStr, PostboxServiceClient, RandomState>);
 
 impl Clients {
-    fn get_client(&mut self, host: SmolStr) -> &mut PostboxServiceClient {
+    fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, PostboxServiceClient, RandomState> {
         self.0.entry(host.clone()).or_insert_with(|| {
             let http = reqwest::Client::new(); // each server gets its own http client
                                                // TODO: Handle url parsing error
@@ -69,68 +70,78 @@ impl SyncServer {
             host,
         };
         let sync2 = sync.clone();
+        let clients = Clients(DashMap::default());
 
         tokio::spawn(async move {
-            let mut clients = Clients(HashMap::default());
-
-            let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).map(|res| {
-                let (key, _) = res.unwrap();
-                let (_, host_raw) = key.split_at(HOST_PREFIX.len());
-                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-                SmolStr::new(host)
-            });
-
-            for host in hosts {
-                if sync2.is_host_allowed(&host).is_ok() {
-                    if let Ok(queue) = sync2
-                        .generate_request(())
-                        .map_err(|_| ())
-                        .and_then(|req| clients.get_client(host.clone()).pull(req).map_err(|_| ()))
-                        .await
-                    {
-                        for event in queue.events {
-                            sync2.push_logic(&host, event);
-                        }
-                    }
-                }
-            }
-
             loop {
-                while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
-                    if sync2.is_host_allowed(&host).is_ok() {
-                        let mut push_result = sync2
-                            .generate_request(event.clone())
-                            .map_err(|_| ())
-                            .and_then(|req| {
-                                clients.get_client(host.clone()).push(req).map_err(|_| ())
-                            })
-                            .await;
-                        let mut try_count = 0;
-                        while try_count < 5 && push_result.is_err() {
-                            push_result = sync2
-                                .generate_request(event.clone())
-                                .map_err(|_| ())
-                                .and_then(|req| {
-                                    clients.get_client(host.clone()).push(req).map_err(|_| ())
-                                })
-                                .await;
-                            try_count += 1;
+                tokio::select! {
+                    _ = async {
+                        let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).map(|res| {
+                            let (key, _) = res.unwrap();
+                            let (_, host_raw) = key.split_at(HOST_PREFIX.len());
+                            let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+                            SmolStr::new(host)
+                        });
+
+                        for host in hosts {
+                            if sync2.is_host_allowed(&host).is_ok() {
+                                let mut client = clients.get_client(host.clone());
+                                if let Ok(queue) = sync2
+                                    .generate_request(())
+                                    .map_err(|_| ())
+                                    .and_then(|req| {
+                                        client.pull(req).map_err(|_| ())
+                                    })
+                                    .await
+                                {
+                                    for event in queue.events {
+                                        sync2.push_logic(&host, event);
+                                    }
+                                }
+                            }
                         }
 
-                        if push_result.is_err() {
-                            // TODO: this is a waste, find a way to optimize this
-                            let mut queue = sync2.get_event_queue(&host);
-                            queue.events.push(event);
-                            let buf = encode_protobuf_message(queue);
-                            sync2
-                                .sync_tree
-                                .insert(&make_host_key(&host), buf.as_ref())
-                                .unwrap();
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    } => {}
+                    _ = async {
+                        while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
+                            if sync2.is_host_allowed(&host).is_ok() {
+                                let queue = sync2.get_event_queue(&host);
+                                if !queue.events.is_empty() {
+                                    sync2.push_to_event_queue(&host, queue, event);
+                                    continue;
+                                }
+
+                                let mut client = clients.get_client(host.clone());
+                                let mut push_result = sync2
+                                    .generate_request(event.clone())
+                                    .map_err(|_| ())
+                                    .and_then(|req| {
+                                        client.push(req).map_err(|_| ())
+                                    })
+                                    .await;
+                                let mut try_count = 0;
+                                while try_count < 5 && push_result.is_err() {
+                                    push_result = sync2
+                                        .generate_request(event.clone())
+                                        .map_err(|_| ())
+                                        .and_then(|req| {
+                                            client.push(req).map_err(|_| ())
+                                        })
+                                        .await;
+                                    try_count += 1;
+                                }
+
+                                if push_result.is_err() {
+                                    sync2.push_to_event_queue(&host, queue, event);
+                                }
+                            }
                         }
-                    }
+                    } => {}
                 }
             }
         });
+
         sync
     }
 
@@ -214,12 +225,25 @@ impl SyncServer {
     }
 
     fn get_event_queue(&self, host: &str) -> EventQueue {
-        self.sync_tree
-            .get(&make_host_key(host))
+        let key = make_host_key(host);
+        let queue = self
+            .sync_tree
+            .get(&key)
             .unwrap()
             .map_or_else(EventQueue::default, |val| {
                 EventQueue::decode(val.as_ref()).unwrap()
-            })
+            });
+        self.sync_tree.remove(&key).unwrap();
+        queue
+    }
+
+    fn push_to_event_queue(&self, host: &str, mut queue: EventQueue, event: Event) {
+        // TODO: this is a waste, find a way to optimize this
+        queue.events.push(event);
+        let buf = encode_protobuf_message(queue);
+        self.sync_tree
+            .insert(&make_host_key(host), buf.as_ref())
+            .unwrap();
     }
 }
 
