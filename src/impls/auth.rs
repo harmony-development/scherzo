@@ -222,10 +222,7 @@ impl auth_service_server::AuthService for AuthServer {
 
         let token = keys_manager.generate_token(data).await?;
 
-        Ok(FederateReply {
-            token: Some(token),
-            nonce: String::new(),
-        })
+        Ok(FederateReply { token: Some(token) })
     }
 
     #[rate(1, 5)]
@@ -298,13 +295,8 @@ impl auth_service_server::AuthService for AuthServer {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
 
-        let pem = pem::Pem {
-            contents: key.pk.to_vec(),
-            tag: key::KEY_TAG.to_string(),
-        };
-
         Ok(KeyReply {
-            key: pem::encode(&pem),
+            key: key.pk.to_vec(),
         })
     }
 

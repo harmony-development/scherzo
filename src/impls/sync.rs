@@ -134,10 +134,7 @@ impl SyncServer {
         sync
     }
 
-    async fn generate_request<Msg: prost::Message>(
-        &self,
-        msg: Msg,
-    ) -> Result<Request<Msg>, ServerError> {
+    async fn generate_request<Msg: Message>(&self, msg: Msg) -> Result<Request<Msg>, ServerError> {
         let data = AuthData {
             host: self.host.clone(),
             time: get_time_secs(),

@@ -4,10 +4,10 @@ use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use ed25519_compact::{KeyPair, PublicKey, Seed};
 use harmony_rust_sdk::api::{
-    auth::auth_service_client::AuthServiceClient, exports::hrpc::encode_protobuf_message,
+    auth::auth_service_client::AuthServiceClient,
+    exports::{hrpc::encode_protobuf_message, prost::Message},
     harmonytypes::Token,
 };
-use prost::Message;
 use reqwest::Url;
 use smol_str::SmolStr;
 
@@ -24,17 +24,6 @@ pub fn verify_token(token: &Token, pubkey: &PublicKey) -> Result<(), ServerError
     pubkey
         .verify(data, &sig)
         .map_err(|_| ServerError::CouldntVerifyTokenData)
-}
-
-fn parse_pem(key: String, host: SmolStr) -> Result<ed25519_compact::PublicKey, ServerError> {
-    let pem = pem::parse(key).map_err(|_| ServerError::CantGetHostKey(host.clone()))?;
-
-    if pem.tag != KEY_TAG {
-        return Err(ServerError::CantGetHostKey(host));
-    }
-
-    ed25519_compact::PublicKey::from_slice(pem.contents.as_slice())
-        .map_err(|_| ServerError::CantGetHostKey(host))
 }
 
 #[derive(Debug)]
@@ -100,7 +89,8 @@ impl Manager {
                 .await
                 .map_err(|_| ServerError::CantGetHostKey(host.clone()))?
                 .key;
-            let key = parse_pem(key, host.clone())?;
+            let key = ed25519_compact::PublicKey::from_slice(key.as_slice())
+                .map_err(|_| ServerError::CantGetHostKey(host.clone()))?;
             self.keys.insert(host, key);
             key
         };
