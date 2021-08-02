@@ -368,7 +368,7 @@ impl CustomError for ServerError {
         return encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),
             human_message: self.to_string(),
-            more_details: vec![],
+            more_details: Vec::new(),
         })
         .to_vec();
     }
