@@ -3,13 +3,13 @@
 
 use std::{
     fmt::{self, Display, Formatter, Write},
-    io::Error as IoError,
+    io::{Error as IoError, Read},
     sync::atomic::AtomicBool,
     time::Duration,
 };
 
 use harmony_rust_sdk::api::exports::hrpc::{
-    http,
+    encode_protobuf_message, http,
     server::{CustomError, StatusCode},
     url::ParseError as UrlParseError,
     warp::{self, reply::Response},
@@ -365,7 +365,12 @@ impl CustomError for ServerError {
             ServerError::FederationDisabled => "h.federation-disabled",
             ServerError::HostNotAllowed => "h.host-not-allowed",
         };
-        format!("{}\n{}", i18n_code, self).into_bytes()
+        return encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
+            identifier: i18n_code.into(),
+            human_message: self.to_string(),
+            more_details: Vec::new(),
+        })
+        .to_vec();
     }
 }
 
