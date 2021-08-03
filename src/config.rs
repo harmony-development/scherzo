@@ -12,6 +12,10 @@ const fn port_default() -> u16 {
     2289
 }
 
+const fn db_cache_limit_default() -> u64 {
+    1024 * 1024 * 1024
+}
+
 fn federation_config_default() -> Option<FederationConfig> {
     Some(FederationConfig::default())
 }
@@ -26,6 +30,10 @@ pub struct Config {
     pub disable_ratelimits: bool,
     #[serde(default = "port_default")]
     pub port: u16,
+    #[serde(default = "db_cache_limit_default")]
+    pub db_cache_limit: u64,
+    #[serde(default)]
+    pub sled_throughput_at_storage_cost: bool,
     #[serde(default)]
     pub media: MediaConfig,
     #[serde(default)]
@@ -41,6 +49,8 @@ impl Default for Config {
             disable_ratelimits: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
+            db_cache_limit: db_cache_limit_default(),
+            sled_throughput_at_storage_cost: false,
             media: MediaConfig::default(),
             tls: None,
             federation: federation_config_default(),
