@@ -1861,8 +1861,6 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<PreviewGuildRequest>,
     ) -> Result<PreviewGuildResponse, Self::Error> {
-        auth!();
-
         let PreviewGuildRequest { invite_id } = request.into_parts().0;
 
         let key = make_invite_key(&invite_id);
