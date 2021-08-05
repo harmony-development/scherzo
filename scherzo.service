@@ -3,12 +3,13 @@ Description=Scherzo Harmony Homeserver
 After=network.target
 
 [Service]
-Type=simple
-Restart=always
-RestartSec=1
+Type=oneshot
+RemainAfterExit=yes
 User=scherzo
 WorkingDirectory=/var/lib/scherzo
-ExecStart=/usr/bin/env scherzo
+ExecStart=/usr/bin/env tmux new-session -d -s scherzo /usr/bin/env scherzo
+ExecStop=/usr/bin/env tmux kill-server
+KillMode=none
 
 [Install]
 WantedBy=multi-user.target
