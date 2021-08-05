@@ -17,6 +17,7 @@ use harmony_rust_sdk::api::{
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
+use parking_lot::Mutex;
 use scherzo::{
     db::{
         chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
@@ -328,12 +329,16 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
                 }
             });
 
+            let motd = Arc::new(Mutex::new(String::new()));
             let serve = hrpc::warp::serve(
                 auth.or(chat)
                     .or(mediaproxy)
                     .or(rest)
                     .or(sync)
-                    .or(scherzo::impls::version())
+                    .or(scherzo::impls::about(
+                        config.server_description,
+                        motd.clone(),
+                    ))
                     .with(warp::trace::request())
                     .recover(hrpc::server::handle_rejection::<ServerError>)
                     .boxed(),

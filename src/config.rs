@@ -24,6 +24,8 @@ fn federation_config_default() -> Option<FederationConfig> {
 pub struct Config {
     #[serde(default)]
     pub host: String,
+    #[serde(default)]
+    pub server_description: String,
     #[serde(default = "listen_on_localhost_default")]
     pub listen_on_localhost: bool,
     #[serde(default)]
@@ -46,6 +48,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             host: String::new(),
+            server_description: String::new(),
             disable_ratelimits: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
