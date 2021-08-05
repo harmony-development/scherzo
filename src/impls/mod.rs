@@ -14,13 +14,11 @@ use harmony_rust_sdk::api::exports::{
     },
     prost::bytes::Bytes,
 };
-use parking_lot::Mutex;
 use rand::Rng;
 use reqwest::Response;
 use smol_str::SmolStr;
-use triomphe::Arc;
 
-use crate::ServerError;
+use crate::{ServerError, SharedConfig};
 
 fn get_time_secs() -> u64 {
     UNIX_EPOCH
@@ -90,7 +88,7 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         })
 }
 
-pub fn about(about_server: String, motd: Arc<Mutex<String>>) -> BoxedFilter<(impl Reply,)> {
+pub fn about(about_server: String, shared_config: SharedConfig) -> BoxedFilter<(impl Reply,)> {
     use harmony_rust_sdk::api::rest::About;
 
     const SCHERZO_VERSION: &str = git_version::git_version!(
@@ -106,7 +104,7 @@ pub fn about(about_server: String, motd: Arc<Mutex<String>>) -> BoxedFilter<(imp
                 server_name: "Scherzo".to_string(),
                 version: SCHERZO_VERSION.to_string(),
                 about_server: about_server.clone(),
-                message_of_the_day: motd.lock().clone(),
+                message_of_the_day: shared_config.lock().motd.clone(),
             })
         })
         .boxed()

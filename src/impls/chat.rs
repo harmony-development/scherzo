@@ -91,7 +91,7 @@ impl EventContext {
     }
 }
 
-struct EventBroadcast {
+pub struct EventBroadcast {
     sub: EventSub,
     event: event::Event,
     perm_check: Option<PermCheck<'static>>,
@@ -101,7 +101,7 @@ struct EventBroadcast {
 pub struct ChatServer {
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
-    broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
+    pub broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
     dispatch_tx: UnboundedSender<EventDispatch>,
 }
 

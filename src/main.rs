@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 
-use std::{convert::TryInto, time::Duration};
+use std::{convert::TryInto, path::Path, time::Duration};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
@@ -17,7 +17,7 @@ use harmony_rust_sdk::api::{
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
-use parking_lot::Mutex;
+use rustyline::{error::ReadlineError, Editor};
 use scherzo::{
     db::{
         chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
@@ -29,15 +29,20 @@ use scherzo::{
         mediaproxy::MediaproxyServer,
         sync::SyncServer,
     },
-    key, ServerError,
+    key, ServerError, SharedConfig, SharedConfigData,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::{
+    fmt::{
+        self,
+        time::{ChronoUtc, FormatTime},
+    },
+    prelude::*,
+};
 use triomphe::Arc;
 
 #[derive(Debug)]
 pub enum Command {
-    RunServer,
     GetInvites,
     GetInvite(String),
     GetMembers,
@@ -57,80 +62,39 @@ pub enum Command {
         channel_id: u64,
         message_id: u64,
     },
+    ShowLog(u64),
+    ChangeMotd(String),
+    ClearValidSessions,
+    Help,
+    Invalid(String),
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Command::Invalid(String::default())
+    }
 }
 
 // TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
 
-pub fn get_arg_as_u64(index: usize) -> Option<u64> {
-    std::env::args().nth(index).and_then(|id| id.parse().ok())
+pub fn get_arg(val: &str, index: usize) -> Option<&str> {
+    val.split_whitespace().nth(index)
+}
+
+pub fn get_arg_as_u64(val: &str, index: usize) -> Option<u64> {
+    val.split_whitespace()
+        .nth(index)
+        .and_then(|a| a.parse().ok())
 }
 
 #[tokio::main]
 async fn main() {
     let mut filter_level = Level::INFO;
     let mut db_path = "db".to_string();
-    let mut command = Command::RunServer;
 
     for (index, arg) in std::env::args().enumerate() {
         match arg.as_str() {
-            "get_invites" => command = Command::GetInvites,
-            "get_guilds" => command = Command::GetGuilds,
-            "get_members" => command = Command::GetMembers,
-            "get_guild" => {
-                if let Some(id) = get_arg_as_u64(index + 1) {
-                    command = Command::GetGuild(id);
-                }
-            }
-            "get_guild_members" => {
-                if let Some(id) = get_arg_as_u64(index + 1) {
-                    command = Command::GetGuildMembers(id);
-                }
-            }
-            "get_guild_channels" => {
-                if let Some(id) = get_arg_as_u64(index + 1) {
-                    command = Command::GetGuildChannels(id);
-                }
-            }
-            "get_guild_invites" => {
-                if let Some(id) = get_arg_as_u64(index + 1) {
-                    command = Command::GetGuildInvites(id);
-                }
-            }
-            "get_channel_messages" => {
-                if let (Some(guild_id), Some(channel_id)) =
-                    (get_arg_as_u64(index + 1), get_arg_as_u64(index + 2))
-                {
-                    command = Command::GetChannelMessages {
-                        guild_id,
-                        channel_id,
-                        before_message_id: get_arg_as_u64(index + 3),
-                    };
-                }
-            }
-            "get_message" => {
-                if let (Some(guild_id), Some(channel_id), Some(message_id)) = (
-                    get_arg_as_u64(index + 1),
-                    get_arg_as_u64(index + 2),
-                    get_arg_as_u64(index + 3),
-                ) {
-                    command = Command::GetMessage {
-                        guild_id,
-                        channel_id,
-                        message_id,
-                    };
-                }
-            }
-            "get_member" => {
-                if let Some(id) = get_arg_as_u64(index + 1) {
-                    command = Command::GetMember(id);
-                }
-            }
-            "get_invite" => {
-                if let Some(id) = std::env::args().nth(index + 1) {
-                    command = Command::GetInvite(id);
-                }
-            }
             "-v" | "--verbose" => filter_level = Level::TRACE,
             "-d" | "--debug" => filter_level = Level::DEBUG,
             "-q" | "--quiet" => filter_level = Level::WARN,
@@ -144,12 +108,68 @@ async fn main() {
         }
     }
 
-    if !matches!(command, Command::RunServer) {
-        filter_level = Level::WARN;
-    }
-
-    run_command(command, filter_level, db_path).await
+    run(filter_level, db_path).await
 }
+
+fn process_cmd(cmd: &str) -> Command {
+    match get_arg(cmd, 0).unwrap_or("") {
+        "get_invites" => Command::GetInvites,
+        "get_guilds" => Command::GetGuilds,
+        "get_members" => Command::GetMembers,
+        "get_guild" => get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuild),
+        "get_guild_members" => {
+            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildMembers)
+        }
+        "get_guild_channels" => {
+            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildChannels)
+        }
+        "get_guild_invites" => {
+            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildInvites)
+        }
+        "get_channel_messages" => get_arg_as_u64(cmd, 1)
+            .and_then(|id| get_arg_as_u64(cmd, 2).map(|id_2| (id, id_2)))
+            .map_or_else(Default::default, |(guild_id, channel_id)| {
+                Command::GetChannelMessages {
+                    guild_id,
+                    channel_id,
+                    before_message_id: get_arg_as_u64(cmd, 3),
+                }
+            }),
+        "get_message" => get_arg_as_u64(cmd, 1)
+            .and_then(|gid| {
+                get_arg_as_u64(cmd, 2)
+                    .and_then(|cid| get_arg_as_u64(cmd, 3).map(|mid| (gid, cid, mid)))
+            })
+            .map_or_else(Default::default, |(guild_id, channel_id, message_id)| {
+                Command::GetMessage {
+                    guild_id,
+                    channel_id,
+                    message_id,
+                }
+            }),
+        "get_member" => get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetMember),
+        "get_invite" => {
+            get_arg(cmd, 1).map_or_else(Default::default, |id| Command::GetInvite(id.to_string()))
+        }
+        "change_motd" => get_arg(cmd, 1).map_or_else(Default::default, |motd| {
+            Command::ChangeMotd(motd.to_string())
+        }),
+        "show_log" => get_arg_as_u64(cmd, 1).map_or_else(|| Command::ShowLog(20), Command::ShowLog),
+        "help" => Command::Help,
+        "clear_sessions" => Command::ClearValidSessions,
+        x => Command::Invalid(x.to_string()),
+    }
+}
+
+// TODO: write the rest of help text
+const HELP_TEXT: &str = r#"
+help key: command <argument: default> -> description
+
+help -> shows help text
+show_log <max_lines: 20> -> shows last log lines, limited by max_lines
+change_motd <new motd> -> changes the message of the day 
+clear_sessions -> clears all valid sessions from memory (not from DB)
+"#;
 
 #[cfg(feature = "sled")]
 fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
@@ -196,8 +216,7 @@ fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
     return Box::new(scherzo::db::noop::NoopDb);
 }
 
-pub async fn run_command(command: Command, filter_level: Level, db_path: String) {
-    let term_logger = fmt::layer();
+pub async fn run(filter_level: Level, db_path: String) {
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
@@ -211,14 +230,12 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
     #[cfg(not(feature = "console"))]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
-        .with(term_logger)
         .with(file_logger);
 
     #[cfg(feature = "console")]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
         .with(console_layer)
-        .with(term_logger)
         .with(file_logger);
 
     base_loggers.init();
@@ -273,94 +290,96 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
 
     let chat_tree = ChatTree { chat_tree };
 
-    match command {
-        Command::RunServer => {
-            let federation_config = config.federation.map(Arc::new);
+    let federation_config = config.federation.map(Arc::new);
 
-            let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
-            let keys_manager = federation_config
-                .as_ref()
-                .map(|conf| Arc::new(key::Manager::new(conf.key.clone())));
-            let auth_server = AuthServer::new(
-                chat_tree.clone(),
-                auth_tree.clone(),
-                valid_sessions.clone(),
-                keys_manager.clone(),
-                federation_config.clone(),
-            );
-            let chat_server =
-                ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
-            let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-            let sync_server = SyncServer::new(
-                chat_tree.clone(),
-                sync_tree,
-                keys_manager,
-                dispatch_rx,
-                federation_config,
-                config.host,
-            );
+    let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
+    let keys_manager = federation_config
+        .as_ref()
+        .map(|conf| Arc::new(key::Manager::new(conf.key.clone())));
+    let auth_server = AuthServer::new(
+        chat_tree.clone(),
+        auth_tree.clone(),
+        valid_sessions.clone(),
+        keys_manager.clone(),
+        federation_config.clone(),
+    );
+    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
+    let broadcast_send = chat_server.broadcast_send.clone();
+    let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
+    let sync_server = SyncServer::new(
+        chat_tree.clone(),
+        sync_tree,
+        keys_manager,
+        dispatch_rx,
+        federation_config,
+        config.host,
+    );
 
-            let auth = AuthServiceServer::new(auth_server).filters();
-            let chat = ChatServiceServer::new(chat_server).filters();
-            let rest = scherzo::impls::rest::rest(
-                Arc::new(config.media.media_root),
-                valid_sessions,
-                config.media.max_upload_length,
-            );
-            let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
-            let sync = PostboxServiceServer::new(sync_server).filters();
+    let auth = AuthServiceServer::new(auth_server).filters();
+    let chat = ChatServiceServer::new(chat_server).filters();
+    let rest = scherzo::impls::rest::rest(
+        Arc::new(config.media.media_root),
+        valid_sessions.clone(),
+        config.media.max_upload_length,
+    );
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
+    let sync = PostboxServiceServer::new(sync_server).filters();
 
-            std::thread::spawn(move || {
-                let span = info_span!("db_validate");
-                let _guard = span.enter();
-                info!("database integrity verification task is running");
-                loop {
-                    std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
-                    if let Err(err) = chat_tree
-                        .chat_tree
-                        .verify_integrity()
-                        .and_then(|_| auth_tree.verify_integrity())
-                    {
-                        error!("database integrity check failed: {}", err);
-                        break;
-                    } else {
-                        debug!("database integrity check successful");
-                    }
-                }
-            });
-
-            let motd = Arc::new(Mutex::new(String::new()));
-            let serve = hrpc::warp::serve(
-                auth.or(chat)
-                    .or(mediaproxy)
-                    .or(rest)
-                    .or(sync)
-                    .or(scherzo::impls::about(
-                        config.server_description,
-                        motd.clone(),
-                    ))
-                    .with(warp::trace::request())
-                    .recover(hrpc::server::handle_rejection::<ServerError>)
-                    .boxed(),
-            );
-
-            let addr = if config.listen_on_localhost {
-                ([127, 0, 0, 1], config.port)
+    let ctt = chat_tree.clone();
+    std::thread::spawn(move || {
+        let span = info_span!("db_validate");
+        let _guard = span.enter();
+        info!("database integrity verification task is running");
+        loop {
+            std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
+            if let Err(err) = ctt
+                .chat_tree
+                .verify_integrity()
+                .and_then(|_| auth_tree.verify_integrity())
+            {
+                error!("database integrity check failed: {}", err);
+                break;
             } else {
-                ([0, 0, 0, 0], config.port)
-            };
-
-            if let Some(tls_config) = config.tls {
-                serve
-                    .tls()
-                    .cert_path(tls_config.cert_file)
-                    .key_path(tls_config.key_file)
-                    .run(addr)
-                    .await
-            } else {
-                serve.run(addr).await
+                debug!("database integrity check successful");
             }
         }
+    });
+
+    let shared_config = SharedConfig::new(SharedConfigData::default().into());
+    let serve = hrpc::warp::serve(
+        auth.or(chat)
+            .or(mediaproxy)
+            .or(rest)
+            .or(sync)
+            .or(scherzo::impls::about(
+                config.server_description,
+                shared_config.clone(),
+            ))
+            .with(warp::trace::request())
+            .recover(hrpc::server::handle_rejection::<ServerError>)
+            .boxed(),
+    );
+
+    let addr = if config.listen_on_localhost {
+        ([127, 0, 0, 1], config.port)
+    } else {
+        ([0, 0, 0, 0], config.port)
+    };
+
+    if let Some(tls_config) = config.tls {
+        tokio::spawn(
+            serve
+                .tls()
+                .cert_path(tls_config.cert_file)
+                .key_path(tls_config.key_file)
+                .run(addr),
+        );
+    } else {
+        tokio::spawn(serve.run(addr));
+    }
+
+    let handle_cmd = |command| match command {
+        Command::Help => println!("{}", HELP_TEXT),
         Command::GetInvites => {
             let invites = chat_tree
                 .chat_tree
@@ -460,6 +479,72 @@ pub async fn run_command(command: Command, filter_level: Level, db_path: String)
         Command::GetGuildMembers(id) => {
             let members = chat_tree.get_guild_members_logic(id);
             println!("{:?}", members.members);
+        }
+        Command::ChangeMotd(string) => {
+            let mut guard = shared_config.lock();
+            guard.motd.clear();
+            guard.motd.push_str(&string);
+        }
+        Command::ShowLog(line_num) => {
+            let mut log_file_path = String::from("./logs/log.");
+            ChronoUtc::with_format("%Y-%m-%d-%H".to_string())
+                .format_time(&mut log_file_path)
+                .unwrap();
+            match std::fs::read_to_string(&log_file_path) {
+                Ok(log_file) => {
+                    let mut lines = log_file.lines().collect::<Vec<_>>();
+                    lines.drain(
+                        ..lines
+                            .len()
+                            .saturating_sub(lines.len().min(line_num as usize)),
+                    );
+                    lines.reverse();
+
+                    for line in lines {
+                        println!("{}", line);
+                    }
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::NotFound {
+                        println!("log file {} not yet created", log_file_path);
+                    } else {
+                        println!("log file {} cant be read: {}", log_file_path, err);
+                    }
+                }
+            }
+        }
+        Command::ClearValidSessions => valid_sessions.clear(),
+        Command::Invalid(x) => println!("invalid cmd: {}", x),
+    };
+
+    let mut rl = Editor::<()>::new();
+    let path = std::env::var("HOME")
+        .ok()
+        .map(|h| Path::new(&h).join(".cache/scherzo-shell-history"))
+        .unwrap_or_else(|| Path::new("/tmp/scherzo-shell-history").to_path_buf());
+    if rl.load_history(&path).is_err() && rl.load_history("/tmp/scherzo-shell-history").is_err() {
+        eprintln!("failed to load shell history");
+    }
+    loop {
+        let prompt = format!(
+            "({} streams) ({} valid sessions)> ",
+            broadcast_send.receiver_count(),
+            valid_sessions.len()
+        );
+        let readline = rl.readline(&prompt);
+        match readline {
+            Ok(line) => {
+                let command = process_cmd(&line);
+                handle_cmd(command);
+                rl.add_history_entry(line);
+            }
+            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
         }
     }
 }

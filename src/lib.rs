@@ -14,7 +14,9 @@ use harmony_rust_sdk::api::exports::hrpc::{
     url::ParseError as UrlParseError,
     warp::{self, reply::Response},
 };
+use parking_lot::Mutex;
 use smol_str::SmolStr;
+use triomphe::Arc;
 
 pub mod append_list;
 pub mod config;
@@ -35,6 +37,12 @@ pub fn set_proto_name(mut response: Response) -> Response {
 }
 
 pub type ServerResult<T> = Result<T, ServerError>;
+
+pub type SharedConfig = Arc<Mutex<SharedConfigData>>;
+#[derive(Default)]
+pub struct SharedConfigData {
+    pub motd: String,
+}
 
 #[derive(Debug)]
 pub enum ServerError {
