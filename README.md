@@ -15,6 +15,10 @@ One liner to start the latest master CI artifact:
 mkdir scherzo && cd scherzo && curl -L https://git.io/Jn9Lo > scherzo && chmod +x scherzo && ./scherzo
 ```
 
+## Configuration
+
+See the [example config](./example_config.toml) for a commented config file with all options available.
+
 ## Roadmap
 
 - Auth service: (implemented)
