@@ -79,6 +79,7 @@ allow = [
     "OpenSSL",
     "Zlib",
     "CC0-1.0",
+    "BSL-1.0",
 ]
 # List of explictly disallowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
