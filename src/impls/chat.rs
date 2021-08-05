@@ -2352,7 +2352,8 @@ impl ChatTree {
         before_message: u64,
     ) -> GetChannelMessagesResponse {
         let get_messages = |to: u64| {
-            let from = to.saturating_sub(25);
+            let to = if to > 1 { to - 1 } else { 1 };
+            let from = if to > 25 { to - 25 } else { 1 };
 
             let from_key = make_msg_key(guild_id, channel_id, from);
             let to_key = make_msg_key(guild_id, channel_id, to);
@@ -2382,17 +2383,19 @@ impl ChatTree {
                         messages: Vec::new(),
                     },
                     |last| {
-                        get_messages(u64::from_be_bytes(
-                            // Safety: cannot fail since the remainder after we split is a valid u64
-                            unsafe {
-                                last.unwrap()
-                                    .0
-                                    .split_at(prefix.len())
-                                    .1
-                                    .try_into()
-                                    .unwrap_unchecked()
-                            },
-                        ))
+                        get_messages(
+                            u64::from_be_bytes(
+                                // Safety: cannot fail since the remainder after we split is a valid u64
+                                unsafe {
+                                    last.unwrap()
+                                        .0
+                                        .split_at(prefix.len())
+                                        .1
+                                        .try_into()
+                                        .unwrap_unchecked()
+                                },
+                            ) + 1,
+                        )
                     },
                 )
             })
