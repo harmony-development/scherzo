@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#eb4e00a55fae4fc615c5df401059d59f9763d6aa"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#7343657e4d748ed5d3b7a440a42750795f2278e2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#eb4e00a55fae4fc615c5df401059d59f9763d6aa"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#7343657e4d748ed5d3b7a440a42750795f2278e2"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -1344,18 +1344,18 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2ac8b67553a7ca9457ce0e526948cad581819238f4a9d1ea74545851fa24f37"
+checksum = "b21b531851d1d86a90bd62dd79be87ce2d90b7bcb6afbae07813921d6156696a"
 dependencies = [
  "phf_shared",
 ]
 
 [[package]]
 name = "phf_codegen"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "963adb11cf22ee65dfd401cf75577c1aa0eca58c0b97f9337d2da61d3e640503"
+checksum = "3f8c56073a14f772740bd86231763732f7559635215bf75df9f26f1d713d99e0"
 dependencies = [
  "phf_generator",
  "phf_shared",
@@ -1363,9 +1363,9 @@ dependencies = [
 
 [[package]]
 name = "phf_generator"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fc1437ada0f3a97d538f0bb608137bf53c53969028cab74c89893e1e9a12f0e"
+checksum = "d43f3220d96e0080cc9ea234978ccd80d904eafb17be31bb0f76daaea6493082"
 dependencies = [
  "phf_shared",
  "rand",
@@ -1569,9 +1569,9 @@ dependencies = [
 
 [[package]]
 name = "redox_syscall"
-version = "0.2.9"
+version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ab49abadf3f9e1c4bc499e8845e152ad87d2ad2d30371841171169e9d75feee"
+checksum = "8383f39639269cde97d255a32bdb68c047337295414940c68bdd30c2e13203ff"
 dependencies = [
  "bitflags",
 ]
@@ -1940,9 +1940,9 @@ checksum = "729a25c17d72b06c68cb47955d44fda88ad2d3e7d77e025663fdd69b93dd71a1"
 
 [[package]]
 name = "slab"
-version = "0.4.3"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f173ac3d1a7e3b28003f40de0b5ce7fe2710f9b9dc3fc38664cebee46b3b6527"
+checksum = "c307a32c1c5c437f38c7fd45d753050587732ba8628319fbdf12a7e289ccc590"
 
 [[package]]
 name = "sled"

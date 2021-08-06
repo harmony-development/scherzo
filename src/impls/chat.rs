@@ -437,7 +437,25 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<CreateEmotePackRequest>,
     ) -> Result<CreateEmotePackResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let CreateEmotePackRequest { pack_name } = request.into_parts().0;
+
+        let pack_id = gen_rand_u64();
+        let key = make_emote_pack_key(pack_id);
+
+        let emote_pack = get_emote_packs_response::EmotePack {
+            pack_id,
+            pack_name,
+            pack_owner: user_id,
+        };
+        let data = encode_protobuf_message(emote_pack);
+
+        chat_insert!(key / data);
+
+        self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
+
+        Ok(CreateEmotePackResponse { pack_id })
     }
 
     #[rate(15, 5)]
@@ -589,7 +607,19 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetEmotePacksRequest>,
     ) -> Result<GetEmotePacksResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let packs = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(EMOTEPACK_PREFIX)
+            .map(|res| {
+                let (_, val) = res.unwrap();
+                get_emote_packs_response::EmotePack::decode(val.as_ref()).unwrap()
+            })
+            .collect();
+
+        Ok(GetEmotePacksResponse { packs })
     }
 
     #[rate(20, 5)]
@@ -597,7 +627,27 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<GetEmotePackEmotesRequest>,
     ) -> Result<GetEmotePackEmotesResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0;
+
+        let key = make_emote_pack_key(pack_id);
+
+        if chat_get!(key).is_none() {
+            return Err(ServerError::EmotePackNotFound);
+        }
+
+        let emotes = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(&key)
+            .map(|res| {
+                let (_, value) = res.unwrap();
+                get_emote_pack_emotes_response::Emote::decode(value.as_ref()).unwrap()
+            })
+            .collect();
+
+        Ok(GetEmotePackEmotesResponse { emotes })
     }
 
     #[rate(2, 5)]
@@ -831,7 +881,23 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<AddEmoteToPackRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let AddEmoteToPackRequest {
+            pack_id,
+            image_id,
+            name,
+        } = request.into_parts().0;
+
+        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
+
+        let emote_key = make_emote_pack_emote_key(pack_id, &image_id);
+        let emote = get_emote_pack_emotes_response::Emote { image_id, name };
+        let data = encode_protobuf_message(emote);
+
+        chat_insert!(emote_key / data);
+
+        Ok(())
     }
 
     #[rate(1, 15)]
@@ -1032,7 +1098,17 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<DeleteEmoteFromPackRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let DeleteEmoteFromPackRequest { pack_id, image_id } = request.into_parts().0;
+
+        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
+
+        let key = make_emote_pack_emote_key(pack_id, &image_id);
+
+        chat_remove!(key);
+
+        Ok(())
     }
 
     #[rate(5, 5)]
@@ -1040,7 +1116,25 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<DeleteEmotePackRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let DeleteEmotePackRequest { pack_id } = request.into_parts().0;
+
+        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
+
+        let key = make_emote_pack_key(pack_id);
+
+        let mut batch = db::Batch::default();
+        batch.remove(key);
+        for res in self.chat_tree.chat_tree.scan_prefix(&key) {
+            let (key, _) = res.unwrap();
+            batch.remove(key);
+        }
+        self.chat_tree.chat_tree.apply_batch(batch).unwrap();
+
+        self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
+
+        Ok(())
     }
 
     #[rate(10, 5)]
@@ -1048,7 +1142,27 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         request: Request<DequipEmotePackRequest>,
     ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+        auth!();
+
+        let DequipEmotePackRequest { pack_id } = request.into_parts().0;
+
+        self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
+
+        Ok(())
+    }
+
+    #[rate(10, 5)]
+    async fn equip_emote_pack(
+        &self,
+        request: Request<EquipEmotePackRequest>,
+    ) -> Result<(), Self::Error> {
+        auth!();
+
+        let EquipEmotePackRequest { pack_id } = request.into_parts().0;
+
+        self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
+
+        Ok(())
     }
 
     #[rate(5, 5)]
@@ -2670,5 +2784,37 @@ impl ChatTree {
             .unwrap()
             // Safety: we store u64's only for these keys
             .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+    }
+
+    pub fn check_if_emote_pack_owner(
+        &self,
+        pack_id: u64,
+        user_id: u64,
+    ) -> Result<get_emote_packs_response::EmotePack, ServerError> {
+        let key = make_emote_pack_key(pack_id);
+
+        let pack = if let Some(data) = cchat_get!(key) {
+            let pack = get_emote_packs_response::EmotePack::decode(data.as_ref()).unwrap();
+
+            if pack.pack_owner != user_id {
+                return Err(ServerError::NotEmotePackOwner);
+            }
+
+            pack
+        } else {
+            return Err(ServerError::EmotePackNotFound);
+        };
+
+        Ok(pack)
+    }
+
+    pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
+        let key = make_equipped_emote_key(user_id, pack_id);
+        cchat_remove!(key);
+    }
+
+    pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
+        let key = make_equipped_emote_key(user_id, pack_id);
+        cchat_insert!(key / &[]);
     }
 }

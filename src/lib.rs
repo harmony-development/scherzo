@@ -125,6 +125,8 @@ pub enum ServerError {
     InvalidToken,
     FederationDisabled,
     HostNotAllowed,
+    EmotePackNotFound,
+    NotEmotePackOwner,
 }
 
 impl Display for ServerError {
@@ -254,6 +256,8 @@ impl Display for ServerError {
             ),
             ServerError::FederationDisabled => write!(f, "federation is disabled on this server"),
             ServerError::HostNotAllowed => write!(f, "host is not allowed on this server"),
+            ServerError::EmotePackNotFound => write!(f, "emote pack is not found"),
+            ServerError::NotEmotePackOwner => write!(f, "you are not the owner of this emote pack"),
         }
     }
 }
@@ -297,7 +301,9 @@ impl CustomError for ServerError {
             | ServerError::InvalidTokenSignature
             | ServerError::InvalidTime
             | ServerError::CouldntVerifyTokenData
-            | ServerError::InvalidToken => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidToken
+            | ServerError::EmotePackNotFound
+            | ServerError::NotEmotePackOwner => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -372,6 +378,8 @@ impl CustomError for ServerError {
             ServerError::InvalidToken => "h.bad-token",
             ServerError::FederationDisabled => "h.federation-disabled",
             ServerError::HostNotAllowed => "h.host-not-allowed",
+            ServerError::NotEmotePackOwner => "h.not-emote-pack-owner",
+            ServerError::EmotePackNotFound => "h.emote-pack-not-found",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),

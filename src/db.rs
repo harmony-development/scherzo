@@ -88,6 +88,7 @@ pub mod chat {
     pub const USER_PREFIX: &[u8] = b"user_";
     pub const FOREIGN_PREFIX: &[u8] = b"fuser_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
+    pub const EMOTEPACK_PREFIX: &[u8] = b"emotep_";
 
     // message
 
@@ -233,6 +234,32 @@ pub mod chat {
     pub fn make_invite_key(name: &str) -> Vec<u8> {
         [INVITE_PREFIX, name.as_bytes()].concat()
     }
+
+    // emote
+
+    pub const fn make_emote_pack_key(pack_id: u64) -> [u8; 15] {
+        concat_static(&[EMOTEPACK_PREFIX, &pack_id.to_be_bytes()])
+    }
+
+    pub fn make_emote_pack_emote_key(pack_id: u64, image_id: &str) -> Vec<u8> {
+        [
+            EMOTEPACK_PREFIX,
+            &pack_id.to_be_bytes(),
+            image_id.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
+        concat_static(&[
+            USER_PREFIX,
+            &user_id.to_be_bytes(),
+            &[9],
+            &pack_id.to_be_bytes(),
+        ])
+    }
+
+    // emote
 }
 
 pub mod auth {
