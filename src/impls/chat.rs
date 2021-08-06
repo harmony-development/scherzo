@@ -2545,7 +2545,12 @@ impl ChatTree {
                 perms
                     .permissions
                     .into_iter()
-                    .filter(|perm| perm.matches.starts_with(check_for))
+                    .filter(|perm| {
+                        perm.matches
+                            .split('.')
+                            .zip(check_for.split('.'))
+                            .all(|(m, c)| m == "*" || c == m)
+                    })
                     .any(|perm| matches!(perm.mode(), permission::Mode::Allow))
             })
         };
