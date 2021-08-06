@@ -23,8 +23,7 @@ See the [example config](./example_config.toml) for a commented config file with
 
 - Auth service: (implemented)
     - dynamic auth is implemented (login and register by email)
-- Chat service: (almost implemented)
-    - everything except emote APIs are implemented
+- Chat service: (implemented)
 - Mediaproxy service: (implemented)
 - Voice service: (not started)
 - Rest APIs: (implemented)
