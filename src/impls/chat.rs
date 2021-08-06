@@ -5,8 +5,8 @@ use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{
         event::{
-            ChannelUpdated, GuildUpdated, LeaveReason, RoleCreated, RoleDeleted, RoleMoved,
-            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
+            ChannelUpdated, GuildUpdated, LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted,
+            RoleMoved, RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
         },
         *,
     },
@@ -1440,6 +1440,31 @@ impl chat_service_server::ChatService for ChatServer {
         if let Some(perms) = perms {
             self.chat_tree
                 .set_permissions_logic(guild_id, channel_id, role_id, perms.clone());
+            let members = self.chat_tree.get_guild_members_logic(guild_id).members;
+            let for_users = members
+                .iter()
+                .filter_map(|user_id| {
+                    self.chat_tree
+                        .get_user_roles_logic(guild_id, *user_id)
+                        .contains(&role_id)
+                        .then(|| *user_id)
+                })
+                .collect::<Vec<_>>();
+            for perm in &perms.permissions {
+                if let Some(perm_mode) = permission::Mode::from_i32(perm.mode) {
+                    self.send_event_through_chan(
+                        EventSub::Guild(guild_id),
+                        event::Event::PermissionUpdated(PermissionUpdated {
+                            guild_id,
+                            channel_id,
+                            query: perm.matches.clone(),
+                            ok: permission::Mode::Allow == perm_mode,
+                        }),
+                        None,
+                        EventContext::new(for_users.clone()),
+                    );
+                }
+            }
             self.send_event_through_chan(
                 EventSub::Guild(guild_id),
                 event::Event::RolePermsUpdated(RolePermissionsUpdated {
@@ -1448,7 +1473,12 @@ impl chat_service_server::ChatService for ChatServer {
                     role_id,
                     perms: Some(perms),
                 }),
-                None,
+                Some(PermCheck {
+                    guild_id,
+                    channel_id: 0,
+                    check_for: "guild.manage",
+                    must_be_guild_owner: false,
+                }),
                 EventContext::empty(),
             );
             Ok(())
