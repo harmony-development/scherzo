@@ -609,13 +609,40 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<GetEmotePacksResponse, Self::Error> {
         auth!();
 
+        let prefix = make_equipped_emote_prefix(user_id);
+        let equipped_packs = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(&prefix)
+            .filter_map(|res| {
+                let (key, _) = res.unwrap();
+                (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
+                    // Safety: since it will always be 8 bytes left afterwards
+                    u64::from_be_bytes(unsafe {
+                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+
         let packs = self
             .chat_tree
             .chat_tree
             .scan_prefix(EMOTEPACK_PREFIX)
-            .map(|res| {
-                let (_, val) = res.unwrap();
-                get_emote_packs_response::EmotePack::decode(val.as_ref()).unwrap()
+            .filter_map(|res| {
+                let (key, val) = res.unwrap();
+                let pack_id = (key.len() == make_emote_pack_key(0).len()).then(|| {
+                    // Safety: since it will always be 8 bytes left afterwards
+                    u64::from_be_bytes(unsafe {
+                        key.split_at(EMOTEPACK_PREFIX.len())
+                            .1
+                            .try_into()
+                            .unwrap_unchecked()
+                    })
+                })?;
+                equipped_packs
+                    .contains(&pack_id)
+                    .then(|| get_emote_packs_response::EmotePack::decode(val.as_ref()).unwrap())
             })
             .collect();
 

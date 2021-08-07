@@ -250,13 +250,12 @@ pub mod chat {
         .concat()
     }
 
-    pub fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
-        concat_static(&[
-            USER_PREFIX,
-            &user_id.to_be_bytes(),
-            &[9],
-            &pack_id.to_be_bytes(),
-        ])
+    pub const fn make_equipped_emote_prefix(user_id: u64) -> [u8; 14] {
+        concat_static(&[USER_PREFIX, &user_id.to_be_bytes(), &[9]])
+    }
+
+    pub const fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
+        concat_static(&[&make_equipped_emote_prefix(user_id), &pack_id.to_be_bytes()])
     }
 
     // emote
