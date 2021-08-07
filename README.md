@@ -2,6 +2,8 @@
 
 Harmony server implemented in Rust.
 
+It uses [warp](https://github.com/seanmonstar/warp) for serving HTTP via [hrpc-rs](https://github.com/harmony-development/hrpc-rs), and currently supports [sled](https://github.com/spacejam/sled) as a database backend.
+
 ## Deploy
 
 With docker (or podman):
