@@ -2498,15 +2498,20 @@ impl ChatTree {
 
         let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
         let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
+            ordering.insert(index, 0);
             if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
-                ordering.swap(channel_index, index);
-            } else {
-                ordering.insert(index, id);
+                ordering.remove(channel_index);
+            }
+            unsafe {
+                *ordering
+                    .iter_mut()
+                    .find(|oid| 0.eq(*oid))
+                    .unwrap_unchecked() = id;
             }
         };
 
         if let Some(index) = maybe_ord_index(previous_id) {
-            maybe_replace_with(&mut ordering, index + 1);
+            maybe_replace_with(&mut ordering, index.saturating_add(1));
         } else if let Some(index) = maybe_ord_index(next_id) {
             maybe_replace_with(&mut ordering, index);
         }
