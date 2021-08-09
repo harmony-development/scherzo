@@ -303,13 +303,18 @@ impl chat_service_server::ChatService for ChatServer {
         chat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
         self.chat_tree.add_default_role_to(guild_id, user_id)?;
         let def_perms = PermissionList {
-            permissions: ["messages.send", "messages.view"]
-                .iter()
-                .map(|m| Permission {
-                    matches: m.to_string(),
-                    mode: permission::Mode::Allow.into(),
-                })
-                .collect(),
+            permissions: [
+                "messages.send",
+                "messages.view",
+                "roles.get",
+                "roles.user.get",
+            ]
+            .iter()
+            .map(|m| Permission {
+                matches: m.to_string(),
+                mode: permission::Mode::Allow.into(),
+            })
+            .collect(),
         };
         self.chat_tree
             .set_permissions_logic(guild_id, 0, everyone_role_id, def_perms.clone());
