@@ -59,7 +59,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
         .and(warp::path("media"))
         .and(warp::path("download"))
         .and(warp::path::param::<String>())
-        .and(rate(10, 5))
+        .and(rate(20, 5))
         .and_then(move |id: String| {
             async fn make_request(
                 http_client: &reqwest::Client,

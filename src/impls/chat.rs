@@ -807,7 +807,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    #[rate(2, 5)]
+    #[rate(10, 5)]
     async fn update_channel_order(
         &self,
         request: Request<UpdateChannelOrderRequest>,
