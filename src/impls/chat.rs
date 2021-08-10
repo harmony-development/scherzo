@@ -2550,7 +2550,7 @@ impl ChatTree {
                 .collect();
 
             GetChannelMessagesResponse {
-                reached_top: from == 0,
+                reached_top: from == 1,
                 messages,
             }
         };
