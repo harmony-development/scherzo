@@ -49,6 +49,7 @@ pub enum Command {
     GetMember(u64),
     GetGuilds,
     GetGuild(u64),
+    GetGuildRoles(u64),
     GetGuildInvites(u64),
     GetGuildChannels(u64),
     GetGuildMembers(u64),
@@ -119,6 +120,9 @@ fn process_cmd(cmd: &str) -> Command {
         "get_guild" => get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuild),
         "get_guild_members" => {
             get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildMembers)
+        }
+        "get_guild_roles" => {
+            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildRoles)
         }
         "get_guild_channels" => {
             get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildChannels)
@@ -475,6 +479,10 @@ pub async fn run(filter_level: Level, db_path: String) {
         Command::GetMember(id) => {
             let member = chat_tree.get_user_logic(id);
             println!("{:#?}", member);
+        }
+        Command::GetGuildRoles(id) => {
+            let roles = chat_tree.get_guild_roles_logic(id);
+            println!("{:#?}", roles)
         }
         Command::GetGuildMembers(id) => {
             let members = chat_tree.get_guild_members_logic(id);

@@ -1604,16 +1604,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.get", false)?;
 
-        let prefix = make_guild_role_prefix(guild_id);
-        let roles = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, val) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
-            })
-            .collect();
+        let roles = self.chat_tree.get_guild_roles_logic(guild_id);
 
         Ok(GetGuildRolesResponse { roles })
     }
@@ -2888,5 +2879,16 @@ impl ChatTree {
     pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
         let key = make_equipped_emote_key(user_id, pack_id);
         cchat_insert!(key / &[]);
+    }
+
+    pub fn get_guild_roles_logic(&self, guild_id: u64) -> Vec<Role> {
+        let prefix = make_guild_role_prefix(guild_id);
+        self.chat_tree
+            .scan_prefix(&prefix)
+            .flat_map(|res| {
+                let (key, val) = res.unwrap();
+                (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
+            })
+            .collect()
     }
 }
