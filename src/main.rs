@@ -50,6 +50,11 @@ pub enum Command {
     GetGuilds,
     GetGuild(u64),
     GetGuildRoles(u64),
+    GetRolePerms {
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+    },
     GetGuildInvites(u64),
     GetGuildChannels(u64),
     GetGuildMembers(u64),
@@ -124,6 +129,16 @@ fn process_cmd(cmd: &str) -> Command {
         "get_guild_roles" => {
             get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildRoles)
         }
+        "get_role_perms" => get_arg_as_u64(cmd, 1)
+            .and_then(|guild_id| get_arg_as_u64(cmd, 2).map(|role_id| (guild_id, role_id)))
+            .map(|(gid, rid)| (gid, rid, get_arg_as_u64(cmd, 3).unwrap_or(0)))
+            .map_or_else(Default::default, |(guild_id, role_id, channel_id)| {
+                Command::GetRolePerms {
+                    guild_id,
+                    role_id,
+                    channel_id,
+                }
+            }),
         "get_guild_channels" => {
             get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildChannels)
         }
@@ -523,6 +538,14 @@ pub async fn run(filter_level: Level, db_path: String) {
         }
         Command::ClearValidSessions => valid_sessions.clear(),
         Command::Invalid(x) => println!("invalid cmd: {}", x),
+        Command::GetRolePerms {
+            guild_id,
+            channel_id,
+            role_id,
+        } => {
+            let perms = chat_tree.get_permissions_logic(guild_id, channel_id, role_id);
+            println!("{:#?}", perms);
+        }
     };
 
     let mut rl = Editor::<()>::new();

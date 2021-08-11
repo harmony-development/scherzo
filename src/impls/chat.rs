@@ -1543,10 +1543,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let perms = self
             .chat_tree
-            .chat_tree
-            .get(&make_guild_role_perms_key(guild_id, role_id))
-            .unwrap()
-            .map(db::deser_perm_list);
+            .get_permissions_logic(guild_id, channel_id, role_id);
 
         Ok(GetPermissionsResponse { perms })
     }
@@ -2890,5 +2887,20 @@ impl ChatTree {
                 (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
             })
             .collect()
+    }
+
+    pub fn get_permissions_logic(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+    ) -> Option<PermissionList> {
+        let gkey = make_guild_role_perms_key(guild_id, role_id);
+        let ckey = make_guild_channel_roles_key(guild_id, channel_id, role_id);
+        let key = channel_id
+            .eq(&0)
+            .then(|| gkey.as_ref())
+            .unwrap_or_else(|| ckey.as_ref());
+        cchat_get!(key).map(db::deser_perm_list)
     }
 }
