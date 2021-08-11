@@ -1412,37 +1412,32 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<QueryPermissionsResponse, Self::Error> {
         auth!();
 
-        let QueryPermissionsRequest {
-            guild_id,
-            channel_id,
-            check_for,
-            r#as,
-        } = request.into_parts().0;
+        self.chat_tree
+            .query_has_permission_request(user_id, request.into_parts().0)
+    }
 
-        self.chat_tree.check_guild_user(guild_id, user_id)?;
+    async fn batch_query_has_permission(
+        &self,
+        request: Request<BatchQueryPermissionsRequest>,
+    ) -> Result<BatchQueryPermissionsResponse, Self::Error> {
+        auth!();
 
-        let as_other = r#as != 0;
-        let check_as = if as_other { r#as } else { user_id };
+        let BatchQueryPermissionsRequest { requests } = request.into_parts().0;
 
-        if as_other {
-            self.chat_tree.check_perms(
-                guild_id,
-                channel_id,
-                user_id,
-                "permissions.query",
-                false,
-            )?;
-        }
-
-        if check_for.is_empty() {
-            return Err(ServerError::EmptyPermissionQuery);
-        }
-
-        Ok(QueryPermissionsResponse {
-            ok: self
-                .chat_tree
-                .check_perms(guild_id, channel_id, check_as, &check_for, false)
-                .is_ok(),
+        Ok(BatchQueryPermissionsResponse {
+            responses: requests
+                .into_iter()
+                .map(|request| {
+                    self.chat_tree
+                        .query_has_permission_request(user_id, request)
+                })
+                .try_fold::<_, _, Result<Vec<QueryPermissionsResponse>, ServerError>>(
+                    Vec::new(),
+                    |mut total, item| {
+                        total.push(item?);
+                        Ok(total)
+                    },
+                )?,
         })
     }
 
@@ -1812,11 +1807,11 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetUserRolesResponse { roles })
     }
 
+    type StreamEventsValidationType = u64;
+
     fn stream_events_on_upgrade(&self, response: Response) -> Response {
         set_proto_name(response)
     }
-
-    type StreamEventsValidationType = u64;
 
     async fn stream_events_validation(
         &self,
@@ -2902,5 +2897,37 @@ impl ChatTree {
             .then(|| gkey.as_ref())
             .unwrap_or_else(|| ckey.as_ref());
         cchat_get!(key).map(db::deser_perm_list)
+    }
+
+    pub fn query_has_permission_request(
+        &self,
+        user_id: u64,
+        request: QueryPermissionsRequest,
+    ) -> Result<QueryPermissionsResponse, ServerError> {
+        let QueryPermissionsRequest {
+            guild_id,
+            channel_id,
+            check_for,
+            r#as,
+        } = request;
+
+        self.check_guild_user(guild_id, user_id)?;
+
+        let as_other = r#as != 0;
+        let check_as = if as_other { r#as } else { user_id };
+
+        if as_other {
+            self.check_perms(guild_id, channel_id, user_id, "permissions.query", false)?;
+        }
+
+        if check_for.is_empty() {
+            return Err(ServerError::EmptyPermissionQuery);
+        }
+
+        Ok(QueryPermissionsResponse {
+            ok: self
+                .check_perms(guild_id, channel_id, check_as, &check_for, false)
+                .is_ok(),
+        })
     }
 }

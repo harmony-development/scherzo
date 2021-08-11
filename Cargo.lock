@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c2dbd66f5d077e3860203e33b8144037732e8cd8"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#30c066b210b06d142d7e14e9ecafd404a4795dd5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c2dbd66f5d077e3860203e33b8144037732e8cd8"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#30c066b210b06d142d7e14e9ecafd404a4795dd5"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -846,9 +846,9 @@ dependencies = [
 
 [[package]]
 name = "http-body"
-version = "0.4.2"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60daa14be0e0786db0f03a9e57cb404c9d756eed2b6c62b9ea98ec5743ec75a9"
+checksum = "399c583b2979440c60be0821a6199eca73bc3c8dcd9d070d75ac726e2c6186e5"
 dependencies = [
  "bytes",
  "http",
@@ -1035,9 +1035,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.98"
+version = "0.2.99"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "320cfe77175da3a483efed4bc0adc1968ca050b098ce4f2f1c13a56626128790"
+checksum = "a7f823d141fe0a24df1e23b4af4e3c7ba9e5966ec514ea068c93024aa7deb765"
 
 [[package]]
 name = "lock_api"
@@ -1344,18 +1344,18 @@ dependencies = [
 
 [[package]]
 name = "phf"
-version = "0.9.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b21b531851d1d86a90bd62dd79be87ce2d90b7bcb6afbae07813921d6156696a"
+checksum = "b2ac8b67553a7ca9457ce0e526948cad581819238f4a9d1ea74545851fa24f37"
 dependencies = [
  "phf_shared",
 ]
 
 [[package]]
 name = "phf_codegen"
-version = "0.9.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f8c56073a14f772740bd86231763732f7559635215bf75df9f26f1d713d99e0"
+checksum = "963adb11cf22ee65dfd401cf75577c1aa0eca58c0b97f9337d2da61d3e640503"
 dependencies = [
  "phf_generator",
  "phf_shared",
@@ -2233,9 +2233,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b584f064fdfc50017ec39162d5aebce49912f1eb16fd128e04b7f4ce4907c7e5"
+checksum = "796c5e1cd49905e65dd8e700d4cb1dffcbfdb4fc9d017de08c1a537afd83627c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2264,9 +2264,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d12faebbe071b06f486be82cc9318350814fdd07fcb28f3690840cd770599283"
+checksum = "12b52d07035516c2b74337d2ac7746075e7dcae7643816c1b12c5ff8a7484c08"
 dependencies = [
  "proc-macro2",
  "prost-build",
