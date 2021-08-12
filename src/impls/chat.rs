@@ -5,9 +5,9 @@ use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{
         event::{
-            ChannelUpdated, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated, LeaveReason,
-            PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved, RolePermissionsUpdated,
-            RoleUpdated, UserRolesUpdated,
+            ChannelUpdated, EmotePackAdded, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated,
+            LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved,
+            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
         },
         *,
     },
@@ -1213,6 +1213,13 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
 
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),
+            None,
+            EventContext::new(vec![user_id]),
+        );
+
         Ok(())
     }
 
@@ -1225,7 +1232,19 @@ impl chat_service_server::ChatService for ChatServer {
 
         let EquipEmotePackRequest { pack_id } = request.into_parts().0;
 
-        self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
+        let key = make_emote_pack_key(pack_id);
+        if let Some(data) = chat_get!(key) {
+            let pack = EmotePack::decode(data.as_ref()).unwrap();
+            self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
+            self.send_event_through_chan(
+                EventSub::Homeserver,
+                event::Event::EmotePackAdded(EmotePackAdded { pack: Some(pack) }),
+                None,
+                EventContext::new(vec![user_id]),
+            );
+        } else {
+            return Err(ServerError::EmotePackNotFound);
+        }
 
         Ok(())
     }
