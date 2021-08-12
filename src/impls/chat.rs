@@ -1416,6 +1416,7 @@ impl chat_service_server::ChatService for ChatServer {
             .query_has_permission_request(user_id, request.into_parts().0)
     }
 
+    #[rate(30, 5)]
     async fn batch_query_has_permission(
         &self,
         request: Request<BatchQueryPermissionsRequest>,
