@@ -455,11 +455,19 @@ impl chat_service_server::ChatService for ChatServer {
             pack_name,
             pack_owner: user_id,
         };
-        let data = encode_protobuf_message(emote_pack);
+        let data = encode_protobuf_message(emote_pack.clone());
 
         chat_insert!(key / data);
 
         self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::EmotePackAdded(EmotePackAdded {
+                pack: Some(emote_pack),
+            }),
+            None,
+            EventContext::new(vec![user_id]),
+        );
 
         Ok(CreateEmotePackResponse { pack_id })
     }
@@ -664,19 +672,19 @@ impl chat_service_server::ChatService for ChatServer {
 
         let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0;
 
-        let key = make_emote_pack_key(pack_id);
+        let pack_key = make_emote_pack_key(pack_id);
 
-        if chat_get!(key).is_none() {
+        if chat_get!(pack_key).is_none() {
             return Err(ServerError::EmotePackNotFound);
         }
 
         let emotes = self
             .chat_tree
             .chat_tree
-            .scan_prefix(&key)
-            .map(|res| {
-                let (_, value) = res.unwrap();
-                Emote::decode(value.as_ref()).unwrap()
+            .scan_prefix(&pack_key)
+            .flat_map(|res| {
+                let (key, value) = res.unwrap();
+                (key.len() > pack_key.len()).then(|| Emote::decode(value.as_ref()).unwrap())
             })
             .collect();
 
