@@ -449,7 +449,7 @@ impl chat_service_server::ChatService for ChatServer {
         let pack_id = gen_rand_u64();
         let key = make_emote_pack_key(pack_id);
 
-        let emote_pack = get_emote_packs_response::EmotePack {
+        let emote_pack = EmotePack {
             pack_id,
             pack_name,
             pack_owner: user_id,
@@ -647,7 +647,7 @@ impl chat_service_server::ChatService for ChatServer {
                 })?;
                 equipped_packs
                     .contains(&pack_id)
-                    .then(|| get_emote_packs_response::EmotePack::decode(val.as_ref()).unwrap())
+                    .then(|| EmotePack::decode(val.as_ref()).unwrap())
             })
             .collect();
 
@@ -675,7 +675,7 @@ impl chat_service_server::ChatService for ChatServer {
             .scan_prefix(&key)
             .map(|res| {
                 let (_, value) = res.unwrap();
-                get_emote_pack_emotes_response::Emote::decode(value.as_ref()).unwrap()
+                Emote::decode(value.as_ref()).unwrap()
             })
             .collect();
 
@@ -924,7 +924,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
 
         let emote_key = make_emote_pack_emote_key(pack_id, &image_id);
-        let emote = get_emote_pack_emotes_response::Emote { image_id, name };
+        let emote = Emote { image_id, name };
         let data = encode_protobuf_message(emote);
 
         chat_insert!(emote_key / data);
@@ -2846,11 +2846,11 @@ impl ChatTree {
         &self,
         pack_id: u64,
         user_id: u64,
-    ) -> Result<get_emote_packs_response::EmotePack, ServerError> {
+    ) -> Result<EmotePack, ServerError> {
         let key = make_emote_pack_key(pack_id);
 
         let pack = if let Some(data) = cchat_get!(key) {
-            let pack = get_emote_packs_response::EmotePack::decode(data.as_ref()).unwrap();
+            let pack = EmotePack::decode(data.as_ref()).unwrap();
 
             if pack.pack_owner != user_id {
                 return Err(ServerError::NotEmotePackOwner);
