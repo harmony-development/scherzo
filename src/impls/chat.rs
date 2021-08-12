@@ -5,8 +5,9 @@ use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{
         event::{
-            ChannelUpdated, GuildUpdated, LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted,
-            RoleMoved, RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
+            ChannelUpdated, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated, LeaveReason,
+            PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved, RolePermissionsUpdated,
+            RoleUpdated, UserRolesUpdated,
         },
         *,
     },
@@ -925,9 +926,21 @@ impl chat_service_server::ChatService for ChatServer {
 
         let emote_key = make_emote_pack_emote_key(pack_id, &image_id);
         let emote = Emote { image_id, name };
-        let data = encode_protobuf_message(emote);
+        let data = encode_protobuf_message(emote.clone());
 
         chat_insert!(emote_key / data);
+
+        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
+                pack_id,
+                added_emotes: vec![emote],
+                deleted_emotes: Vec::new(),
+            }),
+            None,
+            EventContext::new(equipped_users),
+        );
 
         Ok(())
     }
@@ -1140,6 +1153,18 @@ impl chat_service_server::ChatService for ChatServer {
 
         chat_remove!(key);
 
+        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
+                pack_id,
+                added_emotes: Vec::new(),
+                deleted_emotes: vec![image_id],
+            }),
+            None,
+            EventContext::new(equipped_users),
+        );
+
         Ok(())
     }
 
@@ -1165,6 +1190,14 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
         self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
+
+        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
+        self.send_event_through_chan(
+            EventSub::Homeserver,
+            event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),
+            None,
+            EventContext::new(equipped_users),
+        );
 
         Ok(())
     }
@@ -2930,5 +2963,38 @@ impl ChatTree {
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .is_ok(),
         })
+    }
+
+    pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> Vec<u64> {
+        let mut result = Vec::new();
+        for user_id in self.chat_tree.scan_prefix(USER_PREFIX).filter_map(|res| {
+            let (key, _) = res.unwrap();
+            (key.len() == make_user_profile_key(0).len()).then(|| {
+                u64::from_be_bytes(unsafe {
+                    key.split_at(USER_PREFIX.len())
+                        .1
+                        .try_into()
+                        .unwrap_unchecked()
+                })
+            })
+        }) {
+            let prefix = make_equipped_emote_prefix(user_id);
+            if self
+                .chat_tree
+                .scan_prefix(&prefix)
+                .filter_map(|res| {
+                    let (key, _) = res.unwrap();
+                    (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
+                        u64::from_be_bytes(unsafe {
+                            key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                        })
+                    })
+                })
+                .any(|id| id == pack_id)
+            {
+                result.push(user_id);
+            }
+        }
+        result
     }
 }
