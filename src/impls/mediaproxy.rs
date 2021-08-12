@@ -91,6 +91,12 @@ impl MediaproxyServer {
                 .headers()
                 .get(&http::header::CONTENT_DISPOSITION)
                 .and_then(|val| val.to_str().ok())
+                .map(|s| {
+                    const FILENAME: &str = "filename=";
+                    s.find(FILENAME)
+                        .and_then(|f| s.get(f + FILENAME.len()..))
+                        .unwrap_or(s)
+                })
                 .or_else(|| {
                     url.path_segments()
                         .and_then(Iterator::last)
