@@ -79,7 +79,8 @@ impl MediaproxyServer {
         let is_html = response
             .headers()
             .get(&http::header::CONTENT_TYPE)
-            .map_or(false, |v| v.as_bytes().eq_ignore_ascii_case(b"text/html"));
+            .and_then(|v| v.as_bytes().get(0..9))
+            .map_or(false, |v| v.eq_ignore_ascii_case(b"text/html"));
 
         let metadata = if is_html {
             let html = response.text().await?;
@@ -90,7 +91,11 @@ impl MediaproxyServer {
                 .headers()
                 .get(&http::header::CONTENT_DISPOSITION)
                 .and_then(|val| val.to_str().ok())
-                .or_else(|| url.path_segments().and_then(Iterator::last))
+                .or_else(|| {
+                    url.path_segments()
+                        .and_then(Iterator::last)
+                        .filter(|n| !n.is_empty())
+                })
                 .unwrap_or("unknown")
                 .into();
             Metadata::Media {
@@ -126,10 +131,16 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         let FetchLinkMetadataRequest { url } = request.into_parts().0;
 
         let data = match self.fetch_metadata(url).await? {
-            Metadata::Site(html) => Data::IsSite(SiteMetadata {
+            Metadata::Site(mut html) => Data::IsSite(SiteMetadata {
                 page_title: html.title.unwrap_or_default(),
                 description: html.description.unwrap_or_default(),
                 url: html.url.unwrap_or_default(),
+                image: html
+                    .opengraph
+                    .images
+                    .pop()
+                    .map(|og| og.url)
+                    .unwrap_or_default(),
                 ..Default::default()
             }),
             Metadata::Media { filename, mimetype } => Data::IsMedia(MediaMetadata {
