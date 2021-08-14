@@ -1,6 +1,6 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
-use reqwest::{Client, Url};
+use reqwest::{Client, StatusCode, Url};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use webpage::HTML;
@@ -74,7 +74,17 @@ impl MediaproxyServer {
         }
 
         let url: Url = raw_url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = self.http.get(url.as_ref()).send().await?;
+        let response = match self.http.get(url.as_ref()).send().await {
+            Ok(response) => response,
+            Err(err) => {
+                let err = if err.status() == Some(StatusCode::NOT_FOUND) {
+                    ServerError::LinkNotFound(url)
+                } else {
+                    ServerError::ReqwestError(err)
+                };
+                return Err(err);
+            }
+        };
 
         let is_html = response
             .headers()

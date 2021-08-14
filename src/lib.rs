@@ -15,6 +15,7 @@ use harmony_rust_sdk::api::exports::hrpc::{
     warp::{self, reply::Response},
 };
 use parking_lot::Mutex;
+use reqwest::Url;
 use smol_str::SmolStr;
 use triomphe::Arc;
 
@@ -127,6 +128,7 @@ pub enum ServerError {
     HostNotAllowed,
     EmotePackNotFound,
     NotEmotePackOwner,
+    LinkNotFound(Url),
 }
 
 impl Display for ServerError {
@@ -258,6 +260,9 @@ impl Display for ServerError {
             ServerError::HostNotAllowed => write!(f, "host is not allowed on this server"),
             ServerError::EmotePackNotFound => write!(f, "emote pack is not found"),
             ServerError::NotEmotePackOwner => write!(f, "you are not the owner of this emote pack"),
+            ServerError::LinkNotFound(url) => {
+                write!(f, "metadata requested for link {} not found", url)
+            }
         }
     }
 }
@@ -313,7 +318,7 @@ impl CustomError for ServerError {
             | ServerError::CantGetKey
             | ServerError::CantGetHostKey(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
-            ServerError::MediaNotFound => StatusCode::NOT_FOUND,
+            ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
         }
     }
@@ -367,7 +372,9 @@ impl CustomError for ServerError {
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
-            ServerError::MediaNotFound => return Self::NOT_FOUND_ERROR.1.to_vec(),
+            ServerError::MediaNotFound | ServerError::LinkNotFound(_) => {
+                return Self::NOT_FOUND_ERROR.1.to_vec()
+            }
             ServerError::InvalidUrl(_) => "h.bad-url",
             ServerError::InviteExpired => "h.bad-invite-id",
             ServerError::FailedToAuthSync => "h.bad-auth",
