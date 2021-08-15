@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem::size_of, ops::Not};
+use std::{convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf, str::FromStr};
 
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
@@ -20,7 +20,9 @@ use harmony_rust_sdk::api::{
         },
         prost::{bytes::BytesMut, Message},
     },
-    harmonytypes::{content, Content, ContentText, Message as HarmonyMessage, Metadata},
+    harmonytypes::{
+        content, Content, ContentText, Message as HarmonyMessage, Metadata, Minithumbnail, Photo,
+    },
     sync::{
         event::{
             Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
@@ -28,7 +30,9 @@ use harmony_rust_sdk::api::{
         },
         Event as DispatchEvent,
     },
+    Hmc,
 };
+use image::GenericImageView;
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
@@ -43,7 +47,7 @@ use triomphe::Arc;
 use crate::{
     append_list::AppendList,
     db::{self, chat::*, Batch},
-    impls::{auth, gen_rand_u64, get_time_secs, sync::EventDispatch},
+    impls::{auth, gen_rand_u64, get_time_secs, rest::get_file_full, sync::EventDispatch},
     set_proto_name, ServerError,
 };
 
@@ -100,6 +104,7 @@ pub struct EventBroadcast {
 }
 
 pub struct ChatServer {
+    media_root: Arc<PathBuf>,
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
     pub broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
@@ -108,6 +113,7 @@ pub struct ChatServer {
 
 impl ChatServer {
     pub fn new(
+        media_root: Arc<PathBuf>,
         chat_tree: ChatTree,
         valid_sessions: auth::SessionMap,
         dispatch_tx: UnboundedSender<EventDispatch>,
@@ -115,6 +121,7 @@ impl ChatServer {
         // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
         let (tx, _) = broadcast::channel(1000);
         Self {
+            media_root,
             valid_sessions,
             chat_tree,
             broadcast_send: tx,
@@ -1433,6 +1440,117 @@ impl chat_service_server::ChatService for ChatServer {
 
         let created_at = Some(std::time::SystemTime::now().into());
         let edited_at = None;
+
+        let inner_content = content.and_then(|c| c.content);
+        let content = if let Some(content) = inner_content {
+            let content = match content {
+                content::Content::PhotosMessage(mut photos) => {
+                    for photo in photos.photos.drain(..).collect::<Vec<_>>() {
+                        // TODO: return error for invalid hmc
+                        if let Ok(hmc) = Hmc::from_str(&photo.hmc) {
+                            const FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
+
+                            // TODO: check if the hmc host matches ours, if not fetch the image from the other host
+                            let id = hmc.id();
+
+                            let image_jpeg_id = format!("{}_{}", id, "jpeg");
+                            let image_jpeg_path = self.media_root.join(&image_jpeg_id);
+                            let minithumbnail_jpeg_id = format!("{}_{}", id, "jpegthumb");
+                            let minithumbnail_jpeg_path =
+                                self.media_root.join(&minithumbnail_jpeg_id);
+
+                            let ((file_size, isize, image_id), minithumbnail) =
+                                if image_jpeg_path.exists() && minithumbnail_jpeg_path.exists() {
+                                    let minifile = BufReader::new(
+                                        tokio::fs::File::open(&minithumbnail_jpeg_path)
+                                            .await?
+                                            .into_std()
+                                            .await,
+                                    );
+                                    let mut minireader = image::io::Reader::new(minifile);
+                                    minireader.set_format(FORMAT);
+                                    let minisize = minireader
+                                        .into_dimensions()
+                                        .map_err(|_| ServerError::InternalServerError)?;
+                                    let minithumbnail_jpeg =
+                                        tokio::fs::read(&minithumbnail_jpeg_path).await?;
+
+                                    let ifile = tokio::fs::File::open(&image_jpeg_path).await?;
+                                    let file_size = ifile.metadata().await?.len();
+                                    let ifile = BufReader::new(ifile.into_std().await);
+                                    let mut ireader = image::io::Reader::new(ifile);
+                                    ireader.set_format(FORMAT);
+                                    let isize = ireader
+                                        .into_dimensions()
+                                        .map_err(|_| ServerError::InternalServerError)?;
+
+                                    (
+                                        (file_size as u32, isize, image_jpeg_id),
+                                        Minithumbnail {
+                                            width: minisize.0,
+                                            height: minisize.1,
+                                            data: minithumbnail_jpeg,
+                                        },
+                                    )
+                                } else {
+                                    let (_, _, data, _) =
+                                        get_file_full(self.media_root.as_path(), id).await?;
+
+                                    if image::guess_format(&data).is_err() {
+                                        return Err(ServerError::NotAnImage);
+                                    }
+
+                                    let image = image::load_from_memory(&data)
+                                        .map_err(|_| ServerError::InternalServerError)?;
+                                    let image_size = image.dimensions();
+                                    let mut image_jpeg = Vec::new();
+                                    image
+                                        .write_to(&mut image_jpeg, FORMAT)
+                                        .map_err(|_| ServerError::InternalServerError)?;
+                                    let file_size = image_jpeg.len();
+                                    tokio::fs::write(&image_jpeg_path, image_jpeg).await?;
+
+                                    let minithumbnail = image.thumbnail(64, 64);
+                                    let minithumb_size = minithumbnail.dimensions();
+                                    let mut minithumbnail_jpeg = Vec::new();
+                                    minithumbnail
+                                        .write_to(&mut minithumbnail_jpeg, FORMAT)
+                                        .map_err(|_| ServerError::InternalServerError)?;
+                                    tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
+                                        .await?;
+
+                                    (
+                                        (file_size as u32, image_size, image_jpeg_id),
+                                        Minithumbnail {
+                                            width: minithumb_size.0,
+                                            height: minithumb_size.1,
+                                            data: minithumbnail_jpeg,
+                                        },
+                                    )
+                                };
+
+                            photos.photos.push(Photo {
+                                hmc: image_id,
+                                minithumbnail: Some(minithumbnail),
+                                width: isize.0,
+                                height: isize.1,
+                                file_size: file_size as u32,
+                                ..photo
+                            });
+                        } else {
+                            photos.photos.push(photo);
+                        }
+                    }
+                    content::Content::PhotosMessage(photos)
+                }
+                _ => content,
+            };
+            Some(Content {
+                content: Some(content),
+            })
+        } else {
+            None
+        };
 
         let message = HarmonyMessage {
             metadata,

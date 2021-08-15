@@ -34,7 +34,10 @@ use harmony_rust_sdk::api::{
 use reqwest::{header::HeaderValue, StatusCode, Url};
 use sha3::Digest;
 use smol_str::SmolStr;
-use tokio::io::{AsyncBufReadExt, AsyncSeekExt, BufReader};
+use tokio::{
+    fs::File,
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader},
+};
 use tokio_util::io::poll_read_buf;
 use tracing::info;
 use triomphe::Arc;
@@ -216,27 +219,12 @@ pub fn upload(
                             .ok_or_else(|| reject(ServerError::MissingFiles))?
                             .map_err(reject)?;
                         let data = data.chunk();
-                        let id = format!("{:x}", sha3::Sha3_256::digest(data));
-                        let path = media_root.join(&id);
-                        if path.exists() {
-                            return Ok(format!(r#"{{ "id": "{}" }}"#, id));
-                        }
-                        // [tag:ascii_filename_upload]
-                        let name = param.get("filename").map_or("unknown", |a| a.as_str());
-                        // [tag:ascii_mimetype_upload]
-                        let content_type = param
-                            .get("contentType")
-                            .map_or("application/octet-stream", |a| a.as_str());
-                        let data = [
-                            name.as_bytes(),
-                            &[SEPERATOR],
-                            content_type.as_bytes(),
-                            &[SEPERATOR],
-                            data,
-                        ]
-                        .concat();
+                        let name = param.get("filename").map(SmolStr::as_str);
+                        let content_type = param.get("contentType").map(SmolStr::as_str);
 
-                        tokio::fs::write(path, data).await.map_err(reject)?;
+                        let id = write_file(media_root.as_path(), data, name, content_type, None)
+                            .await
+                            .map_err(reject)?;
 
                         Ok(format!(r#"{{ "id": "{}" }}"#, id))
                     } else {
@@ -260,12 +248,41 @@ unsafe fn disposition_header(name: &str) -> HeaderValue {
     ))
 }
 
-async fn get_file(
+pub async fn write_file(
     media_root: &Path,
-    id: &str,
-) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, HeaderValue), ServerError> {
+    data: &[u8],
+    name: Option<&str>,
+    content_type: Option<&str>,
+    write_to: Option<PathBuf>,
+) -> Result<String, ServerError> {
+    let id = format!("{:x}", sha3::Sha3_256::digest(data));
+    let path = write_to.unwrap_or_else(|| media_root.join(&id));
+    if path.exists() {
+        return Ok(id);
+    }
+    // [tag:ascii_filename_upload]
+    let name = name.unwrap_or("unknown");
+    // [tag:ascii_mimetype_upload]
+    let content_type = content_type
+        .or_else(|| infer::get(data).map(|t| t.mime_type()))
+        .unwrap_or("application/octet-stream");
+    let data = [
+        name.as_bytes(),
+        &[SEPERATOR],
+        content_type.as_bytes(),
+        &[SEPERATOR],
+        data,
+    ]
+    .concat();
+
+    tokio::fs::write(path, data).await?;
+
+    Ok(id)
+}
+
+pub async fn get_file_handle(media_root: &Path, id: &str) -> Result<(File, Metadata), ServerError> {
     let file_path = media_root.join(id);
-    let mut file = tokio::fs::File::open(file_path).await.map_err(|err| {
+    let file = tokio::fs::File::open(file_path).await.map_err(|err| {
         if let std::io::ErrorKind::NotFound = err.kind() {
             ServerError::MediaNotFound
         } else {
@@ -273,7 +290,13 @@ async fn get_file(
         }
     })?;
     let metadata = file.metadata().await?;
-    let mut buf_reader = BufReader::new(&mut file);
+    Ok((file, metadata))
+}
+
+pub async fn read_bufs(
+    file: &mut File,
+) -> Result<(Vec<u8>, Vec<u8>, BufReader<&mut File>), ServerError> {
+    let mut buf_reader = BufReader::new(file);
 
     let mut filename_raw = Vec::with_capacity(20);
     buf_reader.read_until(SEPERATOR, &mut filename_raw).await?;
@@ -283,9 +306,51 @@ async fn get_file(
     buf_reader.read_until(SEPERATOR, &mut mimetype_raw).await?;
     mimetype_raw.pop();
 
+    Ok((filename_raw, mimetype_raw, buf_reader))
+}
+
+pub async fn get_file_full(
+    media_root: &Path,
+    id: &str,
+) -> Result<(String, String, Vec<u8>, u64), ServerError> {
+    let (mut file, metadata) = get_file_handle(media_root, id).await?;
+    let (filename_raw, mimetype_raw, mut buf_reader) = read_bufs(&mut file).await?;
+
+    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata);
+    let size = end - start;
+    let mut file_raw = Vec::with_capacity(size as usize);
+    buf_reader.read_to_end(&mut file_raw).await?;
+
+    unsafe {
+        Ok((
+            String::from_utf8_unchecked(filename_raw),
+            String::from_utf8_unchecked(mimetype_raw),
+            file_raw,
+            size,
+        ))
+    }
+}
+
+pub fn calculate_range(
+    filename_raw: &[u8],
+    mimetype_raw: &[u8],
+    metadata: &Metadata,
+) -> (u64, u64) {
     // + 2 is because we need to factor in the 2 b'\n' seperators
     let start = (filename_raw.len() + mimetype_raw.len()) as u64 + 2;
     let end = metadata.len();
+
+    (start, end)
+}
+
+pub async fn get_file(
+    media_root: &Path,
+    id: &str,
+) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, HeaderValue), ServerError> {
+    let (mut file, metadata) = get_file_handle(media_root, id).await?;
+    let (filename_raw, mimetype_raw, _) = read_bufs(&mut file).await?;
+
+    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata);
     let mimetype: Bytes = mimetype_raw.into();
 
     let disposition = unsafe {

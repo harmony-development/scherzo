@@ -310,6 +310,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let chat_tree = ChatTree { chat_tree };
 
     let federation_config = config.federation.map(Arc::new);
+    let media_root = Arc::new(config.media.media_root);
 
     let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
     let keys_manager = federation_config
@@ -322,7 +323,12 @@ pub async fn run(filter_level: Level, db_path: String) {
         keys_manager.clone(),
         federation_config.clone(),
     );
-    let chat_server = ChatServer::new(chat_tree.clone(), valid_sessions.clone(), dispatch_tx);
+    let chat_server = ChatServer::new(
+        media_root.clone(),
+        chat_tree.clone(),
+        valid_sessions.clone(),
+        dispatch_tx,
+    );
     let broadcast_send = chat_server.broadcast_send.clone();
     let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
     let sync_server = SyncServer::new(
@@ -337,7 +343,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let auth = AuthServiceServer::new(auth_server).filters();
     let chat = ChatServiceServer::new(chat_server).filters();
     let rest = scherzo::impls::rest::rest(
-        Arc::new(config.media.media_root),
+        media_root,
         valid_sessions.clone(),
         config.media.max_upload_length,
     );
