@@ -21,8 +21,10 @@ use harmony_rust_sdk::api::{
         prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{
-        content, Content, ContentText, Message as HarmonyMessage, Metadata, Minithumbnail, Photo,
+        content, Attachment, Content, ContentText, Message as HarmonyMessage, Metadata,
+        Minithumbnail, Photo,
     },
+    rest::FileId,
     sync::{
         event::{
             Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
@@ -47,7 +49,11 @@ use triomphe::Arc;
 use crate::{
     append_list::AppendList,
     db::{self, chat::*, Batch},
-    impls::{auth, gen_rand_u64, get_time_secs, rest::get_file_full, sync::EventDispatch},
+    impls::{
+        auth, gen_rand_u64, get_time_secs,
+        rest::{calculate_range, get_file_full, get_file_handle, read_bufs},
+        sync::EventDispatch,
+    },
     set_proto_name, ServerError,
 };
 
@@ -1542,6 +1548,59 @@ impl chat_service_server::ChatService for ChatServer {
                         }
                     }
                     content::Content::PhotosMessage(photos)
+                }
+                content::Content::FilesMessage(mut files) => {
+                    for attachment in files.attachments.drain(..).collect::<Vec<_>>() {
+                        if let Ok(id) = FileId::from_str(&attachment.id) {
+                            let media_root = self.media_root.as_path();
+                            let fill_file_local = move |attachment: Attachment, id: String| async move {
+                                let (mut file, metadata) = get_file_handle(media_root, &id).await?;
+                                let (filename_raw, mimetype_raw, _) = read_bufs(&mut file).await?;
+                                let (start, end) =
+                                    calculate_range(&filename_raw, &mimetype_raw, &metadata);
+                                let size = end - start;
+
+                                Result::<_, ServerError>::Ok(Attachment {
+                                    name: attachment
+                                        .name
+                                        .is_empty()
+                                        .then(|| unsafe {
+                                            String::from_utf8_unchecked(filename_raw)
+                                        })
+                                        .unwrap_or(attachment.name),
+                                    size: attachment
+                                        .size
+                                        .eq(&0)
+                                        .then(|| size as i32)
+                                        .unwrap_or(attachment.size),
+                                    r#type: attachment
+                                        .r#type
+                                        .is_empty()
+                                        .then(|| unsafe {
+                                            String::from_utf8_unchecked(mimetype_raw)
+                                        })
+                                        .unwrap_or(attachment.r#type),
+                                    ..attachment
+                                })
+                            };
+                            match id {
+                                FileId::Hmc(hmc) => {
+                                    // TODO: fetch file from remote host if its not local
+                                    let id = hmc.id();
+                                    files
+                                        .attachments
+                                        .push(fill_file_local(attachment, id.to_string()).await?);
+                                }
+                                FileId::Id(id) => files
+                                    .attachments
+                                    .push(fill_file_local(attachment, id).await?),
+                                _ => files.attachments.push(attachment),
+                            }
+                        } else {
+                            files.attachments.push(attachment);
+                        }
+                    }
+                    content::Content::FilesMessage(files)
                 }
                 _ => content,
             };
