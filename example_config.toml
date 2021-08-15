@@ -1,4 +1,4 @@
-# Where this server is hosted.
+# The host where this server his hosted. Eg. `harmonyapp.io` or `harmonyapp.io:4444`.
 host = ""
 # Whether to listen on `localhost` or `0.0.0.0` (useful for docker).
 listen_on_localhost = true

@@ -295,28 +295,34 @@ pub async fn get_file_handle(media_root: &Path, id: &str) -> Result<(File, Metad
 
 pub async fn read_bufs(
     file: &mut File,
+    is_jpeg: bool,
 ) -> Result<(Vec<u8>, Vec<u8>, BufReader<&mut File>), ServerError> {
     let mut buf_reader = BufReader::new(file);
 
-    let mut filename_raw = Vec::with_capacity(20);
-    buf_reader.read_until(SEPERATOR, &mut filename_raw).await?;
-    filename_raw.pop();
+    if is_jpeg {
+        Ok((b"unknown.jpg".to_vec(), b"image/jpeg".to_vec(), buf_reader))
+    } else {
+        let mut filename_raw = Vec::with_capacity(20);
+        buf_reader.read_until(SEPERATOR, &mut filename_raw).await?;
+        filename_raw.pop();
 
-    let mut mimetype_raw = Vec::with_capacity(20);
-    buf_reader.read_until(SEPERATOR, &mut mimetype_raw).await?;
-    mimetype_raw.pop();
+        let mut mimetype_raw = Vec::with_capacity(20);
+        buf_reader.read_until(SEPERATOR, &mut mimetype_raw).await?;
+        mimetype_raw.pop();
 
-    Ok((filename_raw, mimetype_raw, buf_reader))
+        Ok((filename_raw, mimetype_raw, buf_reader))
+    }
 }
 
 pub async fn get_file_full(
     media_root: &Path,
     id: &str,
 ) -> Result<(String, String, Vec<u8>, u64), ServerError> {
+    let is_jpeg = is_id_jpeg(id);
     let (mut file, metadata) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, mut buf_reader) = read_bufs(&mut file).await?;
+    let (filename_raw, mimetype_raw, mut buf_reader) = read_bufs(&mut file, is_jpeg).await?;
 
-    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata);
+    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
     let size = end - start;
     let mut file_raw = Vec::with_capacity(size as usize);
     buf_reader.read_to_end(&mut file_raw).await?;
@@ -335,22 +341,30 @@ pub fn calculate_range(
     filename_raw: &[u8],
     mimetype_raw: &[u8],
     metadata: &Metadata,
+    is_jpeg: bool,
 ) -> (u64, u64) {
     // + 2 is because we need to factor in the 2 b'\n' seperators
-    let start = (filename_raw.len() + mimetype_raw.len()) as u64 + 2;
+    let start = is_jpeg
+        .then(|| (filename_raw.len() + mimetype_raw.len()) as u64 + 2)
+        .unwrap_or(0);
     let end = metadata.len();
 
     (start, end)
+}
+
+pub fn is_id_jpeg(id: &str) -> bool {
+    id.ends_with("_jpeg")
 }
 
 pub async fn get_file(
     media_root: &Path,
     id: &str,
 ) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, HeaderValue), ServerError> {
+    let is_jpeg = is_id_jpeg(id);
     let (mut file, metadata) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, _) = read_bufs(&mut file).await?;
+    let (filename_raw, mimetype_raw, _) = read_bufs(&mut file, is_jpeg).await?;
 
-    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata);
+    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
     let mimetype: Bytes = mimetype_raw.into();
 
     let disposition = unsafe {

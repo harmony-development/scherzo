@@ -324,6 +324,7 @@ pub async fn run(filter_level: Level, db_path: String) {
         federation_config.clone(),
     );
     let chat_server = ChatServer::new(
+        config.host.clone(),
         media_root.clone(),
         chat_tree.clone(),
         valid_sessions.clone(),

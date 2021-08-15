@@ -51,7 +51,7 @@ use crate::{
     db::{self, chat::*, Batch},
     impls::{
         auth, gen_rand_u64, get_time_secs,
-        rest::{calculate_range, get_file_full, get_file_handle, read_bufs},
+        rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
     set_proto_name, ServerError,
@@ -110,6 +110,7 @@ pub struct EventBroadcast {
 }
 
 pub struct ChatServer {
+    host: String,
     media_root: Arc<PathBuf>,
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
@@ -119,6 +120,7 @@ pub struct ChatServer {
 
 impl ChatServer {
     pub fn new(
+        host: String,
         media_root: Arc<PathBuf>,
         chat_tree: ChatTree,
         valid_sessions: auth::SessionMap,
@@ -127,6 +129,7 @@ impl ChatServer {
         // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
         let (tx, _) = broadcast::channel(1000);
         Self {
+            host,
             media_root,
             valid_sessions,
             chat_tree,
@@ -1465,7 +1468,7 @@ impl chat_service_server::ChatService for ChatServer {
                             let minithumbnail_jpeg_path =
                                 self.media_root.join(&minithumbnail_jpeg_id);
 
-                            let ((file_size, isize, image_id), minithumbnail) =
+                            let ((file_size, isize), minithumbnail) =
                                 if image_jpeg_path.exists() && minithumbnail_jpeg_path.exists() {
                                     let minifile = BufReader::new(
                                         tokio::fs::File::open(&minithumbnail_jpeg_path)
@@ -1491,7 +1494,7 @@ impl chat_service_server::ChatService for ChatServer {
                                         .map_err(|_| ServerError::InternalServerError)?;
 
                                     (
-                                        (file_size as u32, isize, image_jpeg_id),
+                                        (file_size as u32, isize),
                                         Minithumbnail {
                                             width: minisize.0,
                                             height: minisize.1,
@@ -1526,7 +1529,7 @@ impl chat_service_server::ChatService for ChatServer {
                                         .await?;
 
                                     (
-                                        (file_size as u32, image_size, image_jpeg_id),
+                                        (file_size as u32, image_size),
                                         Minithumbnail {
                                             width: minithumb_size.0,
                                             height: minithumb_size.1,
@@ -1536,7 +1539,7 @@ impl chat_service_server::ChatService for ChatServer {
                                 };
 
                             photos.photos.push(Photo {
-                                hmc: image_id,
+                                hmc: Hmc::new(&self.host, image_jpeg_id).unwrap().into(),
                                 minithumbnail: Some(minithumbnail),
                                 width: isize.0,
                                 height: isize.1,
@@ -1554,10 +1557,16 @@ impl chat_service_server::ChatService for ChatServer {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
                             let media_root = self.media_root.as_path();
                             let fill_file_local = move |attachment: Attachment, id: String| async move {
+                                let is_jpeg = is_id_jpeg(&id);
                                 let (mut file, metadata) = get_file_handle(media_root, &id).await?;
-                                let (filename_raw, mimetype_raw, _) = read_bufs(&mut file).await?;
-                                let (start, end) =
-                                    calculate_range(&filename_raw, &mimetype_raw, &metadata);
+                                let (filename_raw, mimetype_raw, _) =
+                                    read_bufs(&mut file, is_jpeg).await?;
+                                let (start, end) = calculate_range(
+                                    &filename_raw,
+                                    &mimetype_raw,
+                                    &metadata,
+                                    is_jpeg,
+                                );
                                 let size = end - start;
 
                                 Result::<_, ServerError>::Ok(Attachment {
