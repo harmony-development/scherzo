@@ -49,14 +49,16 @@ pub fn rest(
     media_root: Arc<PathBuf>,
     sessions: SessionMap,
     max_length: u64,
+    host: String,
 ) -> BoxedFilter<(impl Reply,)> {
-    download(media_root.clone())
+    download(media_root.clone(), host)
         .or(upload(sessions, media_root, max_length))
         .boxed()
 }
 
-pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
+pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Reply,)> {
     let http_client = reqwest::Client::new();
+    let host: SmolStr = host.into();
     warp::get()
         .and(warp::path("_harmony"))
         .and(warp::path("media"))
@@ -82,6 +84,7 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                         }
                     })
             }
+            let host = host.clone();
             let id = urlencoding::decode(&id).unwrap_or_else(|_| Cow::Borrowed(id.as_str()));
             let media_root = media_root.clone();
             let http_client = http_client.clone();
@@ -126,32 +129,39 @@ pub fn download(media_root: Arc<PathBuf>) -> BoxedFilter<(impl Reply,)> {
                     }
                     FileId::Hmc(hmc) => {
                         info!("Serving HMC from {}", hmc);
-                        // Safety: this is always valid, since HMC is a valid URL
-                        let url = unsafe {
-                            format!(
-                                "https://{}:{}/_harmony/media/download/{}",
-                                hmc.server(),
-                                hmc.port(),
-                                hmc.id()
-                            )
-                            .parse()
-                            .unwrap_unchecked()
-                        };
-                        let resp = make_request(&http_client, url).await?;
-                        let (disposition, mimetype) =
-                            extract_file_info_from_download_response(resp.headers())
-                                .map(|(name, mimetype, _)| {
-                                    (unsafe { disposition_header(name) }, mimetype.clone())
-                                })
-                                .map_err(|e| reject(ServerError::Unexpected(e.into())))?;
-                        let len = get_content_length(&resp);
-                        let data_stream = resp.bytes_stream();
-                        Ok((
-                            disposition,
-                            mimetype,
-                            warp::hyper::Body::wrap_stream(data_stream),
-                            len,
-                        ))
+                        if format!("{}:{}", hmc.server(), hmc.port()) == host.as_str() {
+                            info!("Serving local media with id {}", hmc.id());
+                            Ok(get_file(media_root.as_ref(), hmc.id())
+                                .await
+                                .map_err(reject)?)
+                        } else {
+                            // Safety: this is always valid, since HMC is a valid URL
+                            let url = unsafe {
+                                format!(
+                                    "https://{}:{}/_harmony/media/download/{}",
+                                    hmc.server(),
+                                    hmc.port(),
+                                    hmc.id()
+                                )
+                                .parse()
+                                .unwrap_unchecked()
+                            };
+                            let resp = make_request(&http_client, url).await?;
+                            let (disposition, mimetype) =
+                                extract_file_info_from_download_response(resp.headers())
+                                    .map(|(name, mimetype, _)| {
+                                        (unsafe { disposition_header(name) }, mimetype.clone())
+                                    })
+                                    .map_err(|e| reject(ServerError::Unexpected(e.into())))?;
+                            let len = get_content_length(&resp);
+                            let data_stream = resp.bytes_stream();
+                            Ok((
+                                disposition,
+                                mimetype,
+                                warp::hyper::Body::wrap_stream(data_stream),
+                                len,
+                            ))
+                        }
                     }
                     FileId::Id(id) => {
                         info!("Serving local media with id {}", id);

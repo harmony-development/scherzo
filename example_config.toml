@@ -1,4 +1,5 @@
-# The host where this server his hosted. Eg. `harmonyapp.io` or `harmonyapp.io:4444`.
+# The host where this server his hosted. Eg. `harmonyapp.io:2289` or `harmonyapp.io:4444`.
+# A port must always be specified.
 host = ""
 # Whether to listen on `localhost` or `0.0.0.0` (useful for docker).
 listen_on_localhost = true

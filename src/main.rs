@@ -338,7 +338,7 @@ pub async fn run(filter_level: Level, db_path: String) {
         keys_manager,
         dispatch_rx,
         federation_config,
-        config.host,
+        config.host.clone(),
     );
 
     let auth = AuthServiceServer::new(auth_server).filters();
@@ -347,6 +347,7 @@ pub async fn run(filter_level: Level, db_path: String) {
         media_root,
         valid_sessions.clone(),
         config.media.max_upload_length,
+        config.host,
     );
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
