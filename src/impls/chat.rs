@@ -897,6 +897,10 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
 
+        if new_content.is_empty() {
+            return Err(ServerError::MessageContentCantBeEmpty);
+        }
+
         let (mut message, key) = self
             .chat_tree
             .get_message_logic(guild_id, channel_id, message_id)?;
@@ -1453,7 +1457,16 @@ impl chat_service_server::ChatService for ChatServer {
         let inner_content = content.and_then(|c| c.content);
         let content = if let Some(content) = inner_content {
             let content = match content {
+                content::Content::TextMessage(text) => {
+                    if text.content.is_empty() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    content::Content::TextMessage(text)
+                }
                 content::Content::PhotosMessage(mut photos) => {
+                    if photos.photos.is_empty() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
                     for photo in photos.photos.drain(..).collect::<Vec<_>>() {
                         // TODO: return error for invalid hmc
                         if let Ok(hmc) = Hmc::from_str(&photo.hmc) {
@@ -1553,6 +1566,9 @@ impl chat_service_server::ChatService for ChatServer {
                     content::Content::PhotosMessage(photos)
                 }
                 content::Content::FilesMessage(mut files) => {
+                    if files.attachments.is_empty() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
                     for attachment in files.attachments.drain(..).collect::<Vec<_>>() {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
                             let media_root = self.media_root.as_path();
@@ -1611,13 +1627,18 @@ impl chat_service_server::ChatService for ChatServer {
                     }
                     content::Content::FilesMessage(files)
                 }
-                _ => content,
+                content::Content::EmbedMessage(embed) => {
+                    if embed.embeds.is_none() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    content::Content::EmbedMessage(embed)
+                }
             };
             Some(Content {
                 content: Some(content),
             })
         } else {
-            None
+            return Err(ServerError::MessageContentCantBeEmpty);
         };
 
         let message = HarmonyMessage {

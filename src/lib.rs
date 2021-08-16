@@ -129,6 +129,7 @@ pub enum ServerError {
     EmotePackNotFound,
     NotEmotePackOwner,
     LinkNotFound(Url),
+    MessageContentCantBeEmpty,
 }
 
 impl Display for ServerError {
@@ -263,6 +264,7 @@ impl Display for ServerError {
             ServerError::LinkNotFound(url) => {
                 write!(f, "metadata requested for link {} not found", url)
             }
+            ServerError::MessageContentCantBeEmpty => write!(f, "message content cannot be empty"),
         }
     }
 }
@@ -308,7 +310,8 @@ impl CustomError for ServerError {
             | ServerError::CouldntVerifyTokenData
             | ServerError::InvalidToken
             | ServerError::EmotePackNotFound
-            | ServerError::NotEmotePackOwner => StatusCode::BAD_REQUEST,
+            | ServerError::NotEmotePackOwner
+            | ServerError::MessageContentCantBeEmpty => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -387,6 +390,7 @@ impl CustomError for ServerError {
             ServerError::HostNotAllowed => "h.host-not-allowed",
             ServerError::NotEmotePackOwner => "h.not-emote-pack-owner",
             ServerError::EmotePackNotFound => "h.emote-pack-not-found",
+            ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),
