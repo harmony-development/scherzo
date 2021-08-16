@@ -27,6 +27,11 @@ pub mod key;
 
 pub static DISABLE_RATELIMITS: AtomicBool = AtomicBool::new(false);
 pub const HARMONY_PROTO_NAME: &str = "harmony";
+pub const SCHERZO_VERSION: &str = git_version::git_version!(
+    prefix = "git:",
+    cargo_prefix = "cargo:",
+    fallback = "unknown"
+);
 
 pub fn set_proto_name(mut response: Response) -> Response {
     response

@@ -35,6 +35,8 @@ pub struct Config {
     #[serde(default = "db_cache_limit_default")]
     pub db_cache_limit: u64,
     #[serde(default)]
+    pub db_backup_path: Option<PathBuf>,
+    #[serde(default)]
     pub sled_throughput_at_storage_cost: bool,
     #[serde(default)]
     pub media: MediaConfig,
@@ -53,6 +55,7 @@ impl Default for Config {
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
             db_cache_limit: db_cache_limit_default(),
+            db_backup_path: None,
             sled_throughput_at_storage_cost: false,
             media: MediaConfig::default(),
             tls: None,

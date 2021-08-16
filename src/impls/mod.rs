@@ -18,7 +18,7 @@ use rand::Rng;
 use reqwest::Response;
 use smol_str::SmolStr;
 
-use crate::{ServerError, SharedConfig};
+use crate::{ServerError, SharedConfig, SCHERZO_VERSION};
 
 fn get_time_secs() -> u64 {
     UNIX_EPOCH
@@ -90,12 +90,6 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
 
 pub fn about(about_server: String, shared_config: SharedConfig) -> BoxedFilter<(impl Reply,)> {
     use harmony_rust_sdk::api::rest::About;
-
-    const SCHERZO_VERSION: &str = git_version::git_version!(
-        prefix = "git:",
-        cargo_prefix = "cargo:",
-        fallback = "unknown"
-    );
 
     warp::get()
         .and(warp::path!("_harmony" / "about"))

@@ -1,6 +1,12 @@
 #![recursion_limit = "256"]
 
-use std::{convert::TryInto, path::Path, time::Duration};
+use std::{
+    convert::TryInto,
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+    time::Duration,
+};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
@@ -21,6 +27,7 @@ use rustyline::{error::ReadlineError, Editor};
 use scherzo::{
     db::{
         chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
+        migration::{apply_migrations, get_db_version},
         Db,
     },
     impls::{
@@ -29,7 +36,7 @@ use scherzo::{
         mediaproxy::MediaproxyServer,
         sync::SyncServer,
     },
-    key, ServerError, SharedConfig, SharedConfigData,
+    key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{
@@ -73,6 +80,7 @@ pub enum Command {
     ClearValidSessions,
     Help,
     Invalid(String),
+    GetVersionInfo,
 }
 
 impl Default for Command {
@@ -176,6 +184,7 @@ fn process_cmd(cmd: &str) -> Command {
         "show_log" => get_arg_as_u64(cmd, 1).map_or_else(|| Command::ShowLog(20), Command::ShowLog),
         "help" => Command::Help,
         "clear_sessions" => Command::ClearValidSessions,
+        "version" => Command::GetVersionInfo,
         x => Command::Invalid(x.to_string()),
     }
 }
@@ -185,6 +194,7 @@ const HELP_TEXT: &str = r#"
 help key: command <argument: default> -> description
 
 help -> shows help text
+version -> shows version information
 show_log <max_lines: 20> -> shows last log lines, limited by max_lines
 change_motd <new motd> -> changes the message of the day 
 clear_sessions -> clears all valid sessions from memory (not from DB)
@@ -300,6 +310,27 @@ pub async fn run(filter_level: Level, db_path: String) {
         config.db_cache_limit,
         config.sled_throughput_at_storage_cost,
     );
+    let (current_db_version, needs_migration) = get_db_version(db.as_ref())
+        .expect("something went wrong while checking if the db needs migrations!!!");
+    if needs_migration {
+        // Backup db before attempting to apply migrations
+        let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
+        let db_backup_path = config.db_backup_path.map_or_else(
+            || Path::new(&db_backup_name).to_path_buf(),
+            |path| path.join(&db_backup_name),
+        );
+        warn!(
+            "preparing to migrate the database, backing up to {:?}!",
+            db_backup_path
+        );
+        copy_dir_all(Path::new(&db_path).to_path_buf(), db_backup_path)
+            .await
+            .expect("could not backup the db, so not applying migrations!!!");
+
+        warn!("applying database migrations!");
+        apply_migrations(db.as_ref(), current_db_version)
+            .expect("something went wrong while applying the migrations!!!");
+    }
 
     let valid_sessions = Arc::new(DashMap::default());
 
@@ -406,6 +437,13 @@ pub async fn run(filter_level: Level, db_path: String) {
     }
 
     let handle_cmd = |command| match command {
+        Command::GetVersionInfo => {
+            let db_version = get_db_version(db.as_ref()).unwrap().0;
+            println!(
+                "scherzo version {}, database version {}",
+                SCHERZO_VERSION, db_version
+            );
+        }
         Command::Help => println!("{}", HELP_TEXT),
         Command::GetInvites => {
             let invites = chat_tree
@@ -586,4 +624,22 @@ pub async fn run(filter_level: Level, db_path: String) {
             }
         }
     }
+}
+
+use tokio::fs;
+
+fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::io::Result<()>>>> {
+    Box::pin(async move {
+        fs::create_dir_all(&dst).await?;
+        let mut dir = fs::read_dir(src.clone()).await?;
+        while let Some(entry) = dir.next_entry().await? {
+            let ty = entry.file_type().await?;
+            if ty.is_dir() {
+                copy_dir_all(entry.path(), dst.join(entry.file_name())).await?;
+            } else {
+                fs::copy(entry.path(), dst.join(entry.file_name())).await?;
+            }
+        }
+        Ok(())
+    })
 }

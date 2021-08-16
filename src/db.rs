@@ -18,6 +18,7 @@ use harmony_rust_sdk::api::{
     harmonytypes::Message as HarmonyMessage,
 };
 
+pub mod migration;
 pub mod noop;
 #[cfg(feature = "sled")]
 pub mod sled;
