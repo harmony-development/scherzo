@@ -135,6 +135,8 @@ pub enum ServerError {
     NotEmotePackOwner,
     LinkNotFound(Url),
     MessageContentCantBeEmpty,
+    InviteExists(String),
+    InviteNameEmpty,
 }
 
 impl Display for ServerError {
@@ -270,6 +272,8 @@ impl Display for ServerError {
                 write!(f, "metadata requested for link {} not found", url)
             }
             ServerError::MessageContentCantBeEmpty => write!(f, "message content cannot be empty"),
+            ServerError::InviteExists(name) => write!(f, "invite {} already exists", name),
+            ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
         }
     }
 }
@@ -316,7 +320,9 @@ impl CustomError for ServerError {
             | ServerError::InvalidToken
             | ServerError::EmotePackNotFound
             | ServerError::NotEmotePackOwner
-            | ServerError::MessageContentCantBeEmpty => StatusCode::BAD_REQUEST,
+            | ServerError::MessageContentCantBeEmpty
+            | ServerError::InviteExists(_)
+            | ServerError::InviteNameEmpty => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -368,7 +374,7 @@ impl CustomError for ServerError {
             ServerError::NoSuchMessage { .. } => "h.bad-message-id",
             ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
             ServerError::NoSuchGuild(_) => "h.bad-guild-id",
-            ServerError::NoSuchInvite(_) => "h.bad-invite-id",
+            ServerError::NoSuchInvite(_) | ServerError::InviteNameEmpty => "h.bad-invite-id",
             ServerError::NoSuchUser(_) => "h.bad-user-id",
             ServerError::SessionExpired => "h.bad-session",
             ServerError::EmptyPermissionQuery => "h.permission-query-empty",
@@ -396,6 +402,7 @@ impl CustomError for ServerError {
             ServerError::NotEmotePackOwner => "h.not-emote-pack-owner",
             ServerError::EmotePackNotFound => "h.emote-pack-not-found",
             ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
+            ServerError::InviteExists(_) => "h.invite-exists",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),

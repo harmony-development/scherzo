@@ -395,6 +395,14 @@ impl chat_service_server::ChatService for ChatServer {
 
         let key = make_invite_key(name.as_str());
 
+        if name.is_empty() {
+            return Err(ServerError::InviteNameEmpty);
+        }
+
+        if chat_get!(key).is_some() {
+            return Err(ServerError::InviteExists(name));
+        }
+
         let invite = get_guild_invites_response::Invite {
             possible_uses,
             use_count: 0,
