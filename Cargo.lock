@@ -244,7 +244,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#4f92ee322de101d9615f64047326e514bfa8ed55"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#b394675adf99dd7a0886ab24cecbf1ca5d014c73"
 dependencies = [
  "prost",
  "prost-types",
@@ -256,7 +256,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#4f92ee322de101d9615f64047326e514bfa8ed55"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#b394675adf99dd7a0886ab24cecbf1ca5d014c73"
 dependencies = [
  "console-api",
  "futures",
@@ -1062,9 +1062,9 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "jobserver"
-version = "0.1.23"
+version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5ca711fd837261e14ec9e674f092cbb931d3fa1482b017ae59328ddc6f3212b"
+checksum = "af25a77299a7f711a01975c35a6a424eb6862092cc2d6c72c4ed6cbc56dfc1fa"
 dependencies = [
  "libc",
 ]
