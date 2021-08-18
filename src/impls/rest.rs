@@ -98,12 +98,15 @@ pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Rep
                             .headers()
                             .get(&http::header::CONTENT_TYPE)
                             .and_then(|v| {
-                                const IMAGE: &[u8] = b"image";
-                                (v.len() > IMAGE.len()
-                                    && IMAGE
-                                        .iter()
-                                        .zip(v.as_bytes().iter().take(5))
-                                        .all(|(a, b)| a == b))
+                                const ALLOWED_TYPES: [&[u8]; 3] = [b"image", b"audio", b"video"];
+                                const LEN: usize = 5;
+                                let compare = |t: &[u8]| {
+                                    t.iter()
+                                        .zip(v.as_bytes().iter().take(LEN))
+                                        .all(|(a, b)| a == b)
+                                };
+                                (v.len() > LEN
+                                    && std::array::IntoIter::new(ALLOWED_TYPES).any(compare))
                                 .then(|| v.clone())
                             });
 
@@ -124,7 +127,7 @@ pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Rep
                                 len,
                             ))
                         } else {
-                            Err(reject(ServerError::NotAnImage))
+                            Err(reject(ServerError::NotMedia))
                         }
                     }
                     FileId::Hmc(hmc) => {

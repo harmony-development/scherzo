@@ -137,6 +137,7 @@ pub enum ServerError {
     MessageContentCantBeEmpty,
     InviteExists(String),
     InviteNameEmpty,
+    NotMedia,
 }
 
 impl Display for ServerError {
@@ -274,6 +275,7 @@ impl Display for ServerError {
             ServerError::MessageContentCantBeEmpty => write!(f, "message content cannot be empty"),
             ServerError::InviteExists(name) => write!(f, "invite {} already exists", name),
             ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
+            ServerError::NotMedia => write!(f, "the requested URL does not point to media"),
         }
     }
 }
@@ -322,7 +324,8 @@ impl CustomError for ServerError {
             | ServerError::NotEmotePackOwner
             | ServerError::MessageContentCantBeEmpty
             | ServerError::InviteExists(_)
-            | ServerError::InviteNameEmpty => StatusCode::BAD_REQUEST,
+            | ServerError::InviteNameEmpty
+            | ServerError::NotMedia => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -385,7 +388,8 @@ impl CustomError for ServerError {
             ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
             ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
             ServerError::TooFast(_) => "h.rate-limited",
-            ServerError::NotAnImage => return "not-an-image".as_bytes().to_vec(),
+            ServerError::NotAnImage => "h.not-an-image",
+            ServerError::NotMedia => return "not-media".as_bytes().to_vec(),
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => {
                 return Self::NOT_FOUND_ERROR.1.to_vec()
             }
