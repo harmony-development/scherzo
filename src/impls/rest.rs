@@ -355,8 +355,8 @@ pub fn calculate_range(
 ) -> (u64, u64) {
     // + 2 is because we need to factor in the 2 b'\n' seperators
     let start = is_jpeg
-        .then(|| (filename_raw.len() + mimetype_raw.len()) as u64 + 2)
-        .unwrap_or(0);
+        .then(|| 0)
+        .unwrap_or_else(|| (filename_raw.len() + mimetype_raw.len()) as u64 + 2);
     let end = metadata.len();
 
     (start, end)
