@@ -244,7 +244,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#b394675adf99dd7a0886ab24cecbf1ca5d014c73"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#ef9eafad1e54acd6221d644e26ae7c01ce2eaed9"
 dependencies = [
  "prost",
  "prost-types",
@@ -256,7 +256,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#b394675adf99dd7a0886ab24cecbf1ca5d014c73"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#ef9eafad1e54acd6221d644e26ae7c01ce2eaed9"
 dependencies = [
  "console-api",
  "futures",
@@ -749,7 +749,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#40f698ed22b9e258ca2082d8dfbccb11eb694540"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#46aa5e755ef1295004cf4d93c1205f885943bf2a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -759,7 +759,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#40f698ed22b9e258ca2082d8dfbccb11eb694540"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#46aa5e755ef1295004cf4d93c1205f885943bf2a"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -2509,9 +2509,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-core"
-version = "0.1.18"
+version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9ff14f98b1a4b289c6248a023c1c2fa1491062964e9fed67ab29c4e4da4a052"
+checksum = "2ca517f43f0fb96e0c3072ed5c275fe5eece87e8cb52f4a77b69226d3b1c9df8"
 dependencies = [
  "lazy_static",
 ]

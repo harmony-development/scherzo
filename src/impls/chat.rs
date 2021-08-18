@@ -9,6 +9,7 @@ use harmony_rust_sdk::api::{
             LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved,
             RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
         },
+        get_channel_messages_request::Direction,
         *,
     },
     exports::{
@@ -598,7 +599,9 @@ impl chat_service_server::ChatService for ChatServer {
         let GetChannelMessagesRequest {
             guild_id,
             channel_id,
-            before_message,
+            message_id,
+            direction,
+            count,
         } = request.into_parts().0;
 
         self.chat_tree
@@ -606,9 +609,13 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, channel_id, user_id, "messages.view", false)?;
 
-        Ok(self
-            .chat_tree
-            .get_channel_messages_logic(guild_id, channel_id, before_message))
+        Ok(self.chat_tree.get_channel_messages_logic(
+            guild_id,
+            channel_id,
+            message_id,
+            Direction::from_i32(direction).unwrap_or_default(),
+            count,
+        ))
     }
 
     #[rate(10, 5)]
@@ -2789,11 +2796,44 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        before_message: u64,
+        message_id: u64,
+        direction: Direction,
+        count: u32,
     ) -> GetChannelMessagesResponse {
+        let prefix = make_msg_prefix(guild_id, channel_id);
+        let get_last_message_id = || {
+            self.chat_tree.scan_prefix(&prefix).last().map(|last| {
+                u64::from_be_bytes(
+                    // Safety: cannot fail since the remainder after we split is a valid u64
+                    unsafe {
+                        last.unwrap()
+                            .0
+                            .split_at(prefix.len())
+                            .1
+                            .try_into()
+                            .unwrap_unchecked()
+                    },
+                )
+            })
+        };
+
         let get_messages = |to: u64| {
-            let to = if to > 1 { to - 1 } else { 1 };
-            let from = if to > 25 { to - 25 } else { 1 };
+            let count = count
+                .eq(&0)
+                .then(|| {
+                    matches!(direction, Direction::Around)
+                        .then(|| 12)
+                        .unwrap_or(25)
+                })
+                .unwrap_or(count as u64);
+            let to = (to > 1).then(|| to - 1).unwrap_or(1);
+            let to_before = || (to > count).then(|| to - count).unwrap_or(1);
+            let to_after = || (to + count).min(get_last_message_id().unwrap_or(1));
+            let (from, to) = match direction {
+                Direction::Before => (to_before(), to),
+                Direction::After => (to, to_after()),
+                Direction::Around => (to_before(), to_after()),
+            };
 
             let from_key = make_msg_key(guild_id, channel_id, from);
             let to_key = make_msg_key(guild_id, channel_id, to);
@@ -2814,32 +2854,17 @@ impl ChatTree {
             }
         };
 
-        let prefix = make_msg_prefix(guild_id, channel_id);
-        (before_message == 0)
+        (message_id == 0)
             .then(|| {
-                self.chat_tree.scan_prefix(&prefix).last().map_or_else(
+                get_last_message_id().map_or_else(
                     || GetChannelMessagesResponse {
                         reached_top: true,
                         messages: Vec::new(),
                     },
-                    |last| {
-                        get_messages(
-                            u64::from_be_bytes(
-                                // Safety: cannot fail since the remainder after we split is a valid u64
-                                unsafe {
-                                    last.unwrap()
-                                        .0
-                                        .split_at(prefix.len())
-                                        .1
-                                        .try_into()
-                                        .unwrap_unchecked()
-                                },
-                            ) + 1,
-                        )
-                    },
+                    |last| get_messages(last + 1),
                 )
             })
-            .unwrap_or_else(|| get_messages(before_message))
+            .unwrap_or_else(|| get_messages(message_id))
     }
 
     pub fn get_user_roles_logic(&self, guild_id: u64, user_id: u64) -> Vec<u64> {

@@ -528,6 +528,8 @@ pub async fn run(filter_level: Level, db_path: String) {
                 guild_id,
                 channel_id,
                 before_message_id.unwrap_or(0),
+                Default::default(),
+                0,
             );
             for message in messages.messages {
                 println!("{:?}", message);
