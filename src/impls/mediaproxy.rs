@@ -74,7 +74,7 @@ impl MediaproxyServer {
         }
 
         let url: Url = raw_url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = match self.http.get(url.as_ref()).send().await {
+        let response = match self.http.get(url.as_ref()).send().await?.error_for_status() {
             Ok(response) => response,
             Err(err) => {
                 let err = if err.status() == Some(StatusCode::NOT_FOUND) {
