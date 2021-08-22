@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
         event::{
             ChannelUpdated, EmotePackAdded, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated,
             LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved,
-            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
+            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated, ChannelsReordered
         },
         get_channel_messages_request::Direction,
         *,
@@ -315,8 +315,18 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let key = make_guild_chan_ordering_key(guild_id);
-        let serialized_ordering = self.chat_tree.serialize_list_u64_logic(channel_ids);
+        let serialized_ordering = self.chat_tree.serialize_list_u64_logic(channel_ids.clone());
         chat_insert!(key / serialized_ordering);
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::ChannelsReordered(ChannelsReordered {
+                guild_id,
+                channel_ids
+            }),
+            None,
+            EventContext::empty(),
+        );
 
         Ok(())
     }
