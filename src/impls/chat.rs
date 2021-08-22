@@ -1,15 +1,19 @@
-use std::{convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf, str::FromStr};
+use std::{
+    cmp::Ordering, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf,
+    str::FromStr,
+};
 
 use event::MessageUpdated;
 use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
     chat::{
         event::{
-            ChannelUpdated, EmotePackAdded, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated,
-            LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved,
-            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated, ChannelsReordered
+            ChannelUpdated, ChannelsReordered, EmotePackAdded, EmotePackDeleted,
+            EmotePackEmotesUpdated, GuildUpdated, LeaveReason, PermissionUpdated, RoleCreated,
+            RoleDeleted, RoleMoved, RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
         },
         get_channel_messages_request::Direction,
+        permission::Mode,
         *,
     },
     exports::{
@@ -270,7 +274,7 @@ impl chat_service_server::ChatService for ChatServer {
     #[rate(1, 5)]
     async fn update_all_channel_order(
         &self,
-        request: Request<UpdateAllChannelOrderRequest>
+        request: Request<UpdateAllChannelOrderRequest>,
     ) -> Result<(), Self::Error> {
         auth!();
 
@@ -289,7 +293,10 @@ impl chat_service_server::ChatService for ChatServer {
             let exists = self.chat_tree.does_channel_exist(guild_id, id);
 
             if !exists {
-                return Err(ServerError::NoSuchChannel{guild_id, channel_id: id})
+                return Err(ServerError::NoSuchChannel {
+                    guild_id,
+                    channel_id: id,
+                });
             }
         }
 
@@ -300,17 +307,16 @@ impl chat_service_server::ChatService for ChatServer {
             .scan_prefix(&prefix)
             .flat_map(|res| {
                 let (key, value) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>())
-                    .then(|| {
-                        // Safety: this unwrap is safe since we only store valid Channel message
-                        unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() }
-                    })
+                (key.len() == prefix.len() + size_of::<u64>()).then(|| {
+                    // Safety: this unwrap is safe since we only store valid Channel message
+                    unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() }
+                })
             })
             .collect::<Vec<_>>();
 
         for it in channels {
             if !channel_ids.contains(&it.channel_id) {
-                return Err(ServerError::UnderSpecifiedChannels)
+                return Err(ServerError::UnderSpecifiedChannels);
             }
         }
 
@@ -322,7 +328,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventSub::Guild(guild_id),
             event::Event::ChannelsReordered(ChannelsReordered {
                 guild_id,
-                channel_ids
+                channel_ids,
             }),
             None,
             EventContext::empty(),
@@ -2944,6 +2950,45 @@ impl ChatTree {
             })
     }
 
+    pub fn compare_perms(perms: PermissionList, check_for: &str) -> Option<bool> {
+        let mut matching_perms = perms
+            .permissions
+            .into_iter()
+            .filter(|perm| {
+                perm.matches
+                    .split('.')
+                    .zip(check_for.split('.'))
+                    .all(|(m, c)| m == "*" || c == m)
+            })
+            .collect::<Vec<_>>();
+
+        matching_perms.sort_unstable_by(|p, op| {
+            let get_depth = |perm: &Permission| perm.matches.chars().filter(|c| '.'.eq(c)).count();
+            let ord = get_depth(p).cmp(&get_depth(op));
+
+            if let Ordering::Equal = ord {
+                let p_split = p.matches.split('.');
+                let op_split = op.matches.split('.');
+                match (p_split.last(), op_split.last()) {
+                    (Some(p_last), Some(op_last)) => match (p_last, op_last) {
+                        ("*", _) => Ordering::Less,
+                        (_, "*") => Ordering::Greater,
+                        _ => Ordering::Equal,
+                    },
+                    (None, Some(_)) => Ordering::Less,
+                    (Some(_), None) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                }
+            } else {
+                ord
+            }
+        });
+
+        matching_perms
+            .pop()
+            .map(|p| matches!(p.mode(), Mode::Allow))
+    }
+
     pub fn query_has_permission_logic(
         &self,
         guild_id: u64,
@@ -2954,35 +2999,26 @@ impl ChatTree {
         let key = make_guild_user_roles_key(guild_id, user_id);
         let user_roles = self.get_list_u64_logic(&key);
 
-        let is_ok = |key: &[u8]| {
-            self.chat_tree.get(key).unwrap().map_or(false, |raw_perms| {
+        let is_allowed = |key: &[u8]| {
+            self.chat_tree.get(key).unwrap().and_then(|raw_perms| {
                 let perms = db::deser_perm_list(raw_perms);
-                perms
-                    .permissions
-                    .into_iter()
-                    .filter(|perm| {
-                        perm.matches
-                            .split('.')
-                            .zip(check_for.split('.'))
-                            .all(|(m, c)| m == "*" || c == m)
-                    })
-                    .any(|perm| matches!(perm.mode(), permission::Mode::Allow))
+                Self::compare_perms(perms, check_for)
             })
         };
 
         if channel_id != 0 {
             for role_id in &user_roles {
                 let key = &make_guild_channel_roles_key(guild_id, channel_id, *role_id);
-                if is_ok(key) {
-                    return true;
+                if let Some(ok) = is_allowed(key) {
+                    return ok;
                 }
             }
         }
 
         for role_id in user_roles {
             let key = &make_guild_role_perms_key(guild_id, role_id);
-            if is_ok(key) {
-                return true;
+            if let Some(ok) = is_allowed(key) {
+                return ok;
             }
         }
 
@@ -3327,5 +3363,176 @@ impl ChatTree {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use harmony_rust_sdk::api::chat::{permission::Mode, Permission, PermissionList};
+
+    use crate::impls::chat::ChatTree;
+
+    #[test]
+    fn test_perm_compare_equal_allow() {
+        let ok = ChatTree::compare_perms(
+            PermissionList {
+                permissions: vec![Permission {
+                    matches: "messages.send".to_string(),
+                    mode: Mode::Allow.into(),
+                }],
+            },
+            "messages.send",
+        );
+        assert_eq!(ok, Some(true));
+    }
+
+    #[test]
+    fn test_perm_compare_equal_deny() {
+        let ok = ChatTree::compare_perms(
+            PermissionList {
+                permissions: vec![Permission {
+                    matches: "messages.send".to_string(),
+                    mode: Mode::Deny.into(),
+                }],
+            },
+            "messages.send",
+        );
+        assert_eq!(ok, Some(false));
+    }
+
+    #[test]
+    fn test_perm_compare_nonequal_allow() {
+        let ok = ChatTree::compare_perms(
+            PermissionList {
+                permissions: vec![Permission {
+                    matches: "messages.sendd".to_string(),
+                    mode: Mode::Allow.into(),
+                }],
+            },
+            "messages.send",
+        );
+        assert_eq!(ok, None);
+    }
+
+    #[test]
+    fn test_perm_compare_nonequal_deny() {
+        let ok = ChatTree::compare_perms(
+            PermissionList {
+                permissions: vec![Permission {
+                    matches: "messages.sendd".to_string(),
+                    mode: Mode::Deny.into(),
+                }],
+            },
+            "messages.send",
+        );
+        assert_eq!(ok, None);
+    }
+
+    #[test]
+    fn test_perm_compare_glob_allow() {
+        let perms = PermissionList {
+            permissions: vec![Permission {
+                matches: "messages.*".to_string(),
+                mode: Mode::Allow.into(),
+            }],
+        };
+        let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
+        assert_eq!(ok, Some(true));
+        let ok = ChatTree::compare_perms(perms, "messages.view");
+        assert_eq!(ok, Some(true));
+    }
+
+    #[test]
+    fn test_perm_compare_glob_deny() {
+        let perms = PermissionList {
+            permissions: vec![Permission {
+                matches: "messages.*".to_string(),
+                mode: Mode::Deny.into(),
+            }],
+        };
+        let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
+        assert_eq!(ok, Some(false));
+        let ok = ChatTree::compare_perms(perms, "messages.view");
+        assert_eq!(ok, Some(false));
+    }
+
+    #[test]
+    fn test_perm_compare_specific_deny() {
+        let perms = PermissionList {
+            permissions: vec![
+                Permission {
+                    matches: "messages.*".to_string(),
+                    mode: Mode::Allow.into(),
+                },
+                Permission {
+                    matches: "messages.send".to_string(),
+                    mode: Mode::Deny.into(),
+                },
+            ],
+        };
+        let ok = ChatTree::compare_perms(perms, "messages.send");
+        assert_eq!(ok, Some(false));
+    }
+
+    #[test]
+    fn test_perm_compare_specific_allow() {
+        let perms = PermissionList {
+            permissions: vec![
+                Permission {
+                    matches: "messages.*".to_string(),
+                    mode: Mode::Deny.into(),
+                },
+                Permission {
+                    matches: "messages.send".to_string(),
+                    mode: Mode::Allow.into(),
+                },
+            ],
+        };
+        let ok = ChatTree::compare_perms(perms, "messages.send");
+        assert_eq!(ok, Some(true));
+    }
+
+    #[test]
+    fn test_perm_compare_depth_allow() {
+        let perms = PermissionList {
+            permissions: vec![
+                Permission {
+                    matches: "messages.*".to_string(),
+                    mode: Mode::Deny.into(),
+                },
+                Permission {
+                    matches: "messages.send.*".to_string(),
+                    mode: Mode::Deny.into(),
+                },
+                Permission {
+                    matches: "messages.send.send".to_string(),
+                    mode: Mode::Allow.into(),
+                },
+            ],
+        };
+        let ok = ChatTree::compare_perms(perms, "messages.send.send");
+        assert_eq!(ok, Some(true));
+    }
+
+    #[test]
+    fn test_perm_compare_depth_deny() {
+        let perms = PermissionList {
+            permissions: vec![
+                Permission {
+                    matches: "messages.*".to_string(),
+                    mode: Mode::Allow.into(),
+                },
+                Permission {
+                    matches: "messages.send.*".to_string(),
+                    mode: Mode::Allow.into(),
+                },
+                Permission {
+                    matches: "messages.send.send".to_string(),
+                    mode: Mode::Deny.into(),
+                },
+            ],
+        };
+        let ok = ChatTree::compare_perms(perms, "messages.send.send");
+        assert_eq!(ok, Some(false));
     }
 }
