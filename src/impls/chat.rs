@@ -302,11 +302,9 @@ impl chat_service_server::ChatService for ChatServer {
                 let (key, value) = res.unwrap();
                 (key.len() == prefix.len() + size_of::<u64>())
                     .then(|| {
-                        (true)
                         // Safety: this unwrap is safe since we only store valid Channel message
-                        .then(|| unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() })
+                        unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() }
                     })
-                    .flatten()
             })
             .collect::<Vec<_>>();
 
