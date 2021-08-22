@@ -95,6 +95,7 @@ pub enum ServerError {
         guild_id: u64,
         channel_id: u64,
     },
+    UnderSpecifiedChannels,
     NoSuchInvite(SmolStr),
     NoSuchUser(u64),
     InternalServerError,
@@ -188,6 +189,7 @@ impl Display for ServerError {
                 "channel {} does not exist in guild {}",
                 channel_id, guild_id
             ),
+            ServerError::UnderSpecifiedChannels => write!(f, "not all required channels specified"),
             ServerError::ChannelAlreadyExists {
                 guild_id,
                 channel_id,
@@ -325,6 +327,7 @@ impl CustomError for ServerError {
             | ServerError::MessageContentCantBeEmpty
             | ServerError::InviteExists(_)
             | ServerError::InviteNameEmpty
+            | ServerError::UnderSpecifiedChannels
             | ServerError::NotMedia => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
@@ -376,6 +379,7 @@ impl CustomError for ServerError {
             ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
             ServerError::NoSuchMessage { .. } => "h.bad-message-id",
             ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
+            ServerError::UnderSpecifiedChannels => "h.underspecified-channels",
             ServerError::NoSuchGuild(_) => "h.bad-guild-id",
             ServerError::NoSuchInvite(_) | ServerError::InviteNameEmpty => "h.bad-invite-id",
             ServerError::NoSuchUser(_) => "h.bad-user-id",
