@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
         event::{
             ChannelUpdated, EmotePackAdded, EmotePackDeleted, EmotePackEmotesUpdated, GuildUpdated,
             LeaveReason, PermissionUpdated, RoleCreated, RoleDeleted, RoleMoved,
-            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
+            RolePermissionsUpdated, RoleUpdated, UserRolesUpdated, ChannelsReordered
         },
         get_channel_messages_request::Direction,
         *,
@@ -266,6 +266,70 @@ impl ChatServer {
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
 impl chat_service_server::ChatService for ChatServer {
     type Error = ServerError;
+
+    #[rate(1, 5)]
+    async fn update_all_channel_order(
+        &self,
+        request: Request<UpdateAllChannelOrderRequest>
+    ) -> Result<(), Self::Error> {
+        auth!();
+
+        let UpdateAllChannelOrderRequest {
+            guild_id,
+            channel_ids,
+        } = request.into_parts().0;
+
+        self.chat_tree.check_guild_user(guild_id, user_id)?;
+        self.chat_tree
+            .check_perms(guild_id, 0, user_id, "channels.manage.move", false)?;
+
+        for channel_id in &channel_ids {
+            let id = *channel_id;
+
+            let exists = self.chat_tree.does_channel_exist(guild_id, id);
+
+            if !exists {
+                return Err(ServerError::NoSuchChannel{guild_id, channel_id: id})
+            }
+        }
+
+        let prefix = make_guild_chan_prefix(guild_id);
+        let channels = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(&prefix)
+            .flat_map(|res| {
+                let (key, value) = res.unwrap();
+                (key.len() == prefix.len() + size_of::<u64>())
+                    .then(|| {
+                        // Safety: this unwrap is safe since we only store valid Channel message
+                        unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() }
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        for it in channels {
+            if !channel_ids.contains(&it.channel_id) {
+                return Err(ServerError::UnderSpecifiedChannels)
+            }
+        }
+
+        let key = make_guild_chan_ordering_key(guild_id);
+        let serialized_ordering = self.chat_tree.serialize_list_u64_logic(channel_ids.clone());
+        chat_insert!(key / serialized_ordering);
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::ChannelsReordered(ChannelsReordered {
+                guild_id,
+                channel_ids
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(())
+    }
 
     #[rate(1, 5)]
     async fn create_guild(
