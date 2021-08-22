@@ -52,6 +52,9 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
+    - name: Test
+      run: cargo test --target x86_64-unknown-linux-musl
+
     - name: Build
       run: cargo build --release --target x86_64-unknown-linux-musl
     
