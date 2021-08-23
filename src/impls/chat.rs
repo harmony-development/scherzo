@@ -1821,13 +1821,19 @@ impl chat_service_server::ChatService for ChatServer {
             self.chat_tree
                 .set_permissions_logic(guild_id, channel_id, role_id, perms.clone());
             let members = self.chat_tree.get_guild_members_logic(guild_id).members;
+            let guild_owner = self.chat_tree.get_guild_owner(guild_id)?;
             let for_users = members
                 .iter()
                 .filter_map(|user_id| {
-                    self.chat_tree
-                        .get_user_roles_logic(guild_id, *user_id)
-                        .contains(&role_id)
-                        .then(|| *user_id)
+                    guild_owner
+                        .ne(user_id)
+                        .then(|| {
+                            self.chat_tree
+                                .get_user_roles_logic(guild_id, *user_id)
+                                .contains(&role_id)
+                                .then(|| *user_id)
+                        })
+                        .flatten()
                 })
                 .collect::<Vec<_>>();
             for perm in &perms.permissions {
@@ -2533,19 +2539,22 @@ impl ChatTree {
             .unwrap()
     }
 
+    pub fn get_guild_owner(&self, guild_id: u64) -> Result<u64, ServerError> {
+        self.chat_tree
+            .get(guild_id.to_be_bytes().as_ref())
+            .unwrap()
+            .map_or_else(
+                || Err(ServerError::NoSuchGuild(guild_id)),
+                |raw| Ok(db::deser_guild(raw).guild_owner),
+            )
+    }
+
     pub fn is_user_guild_owner(
         &self,
         guild_id: u64,
         user_id: u64,
     ) -> Result<bool, <ChatServer as chat_service_server::ChatService>::Error> {
-        let guild_info =
-            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
-                db::deser_guild(guild_raw)
-            } else {
-                return Err(ServerError::NoSuchGuild(guild_id));
-            };
-
-        Ok(guild_info.guild_owner == user_id)
+        self.get_guild_owner(guild_id).map(|owner| owner == user_id)
     }
 
     pub fn check_guild_user_channel(
