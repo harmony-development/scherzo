@@ -3372,70 +3372,47 @@ mod tests {
 
     use crate::impls::chat::ChatTree;
 
+    fn mk_perms<const LEN: usize>(arr: [(&'static str, Mode); LEN]) -> PermissionList {
+        let permissions = std::array::IntoIter::new(arr)
+            .map(|(matches, mode)| Permission {
+                matches: matches.to_string(),
+                mode: mode.into(),
+            })
+            .collect();
+        PermissionList { permissions }
+    }
+
     #[test]
     fn test_perm_compare_equal_allow() {
-        let ok = ChatTree::compare_perms(
-            PermissionList {
-                permissions: vec![Permission {
-                    matches: "messages.send".to_string(),
-                    mode: Mode::Allow.into(),
-                }],
-            },
-            "messages.send",
-        );
+        let ok =
+            ChatTree::compare_perms(mk_perms([("messages.send", Mode::Allow)]), "messages.send");
         assert_eq!(ok, Some(true));
     }
 
     #[test]
     fn test_perm_compare_equal_deny() {
-        let ok = ChatTree::compare_perms(
-            PermissionList {
-                permissions: vec![Permission {
-                    matches: "messages.send".to_string(),
-                    mode: Mode::Deny.into(),
-                }],
-            },
-            "messages.send",
-        );
+        let ok =
+            ChatTree::compare_perms(mk_perms([("messages.send", Mode::Deny)]), "messages.send");
         assert_eq!(ok, Some(false));
     }
 
     #[test]
     fn test_perm_compare_nonequal_allow() {
-        let ok = ChatTree::compare_perms(
-            PermissionList {
-                permissions: vec![Permission {
-                    matches: "messages.sendd".to_string(),
-                    mode: Mode::Allow.into(),
-                }],
-            },
-            "messages.send",
-        );
+        let ok =
+            ChatTree::compare_perms(mk_perms([("messages.sendd", Mode::Allow)]), "messages.send");
         assert_eq!(ok, None);
     }
 
     #[test]
     fn test_perm_compare_nonequal_deny() {
-        let ok = ChatTree::compare_perms(
-            PermissionList {
-                permissions: vec![Permission {
-                    matches: "messages.sendd".to_string(),
-                    mode: Mode::Deny.into(),
-                }],
-            },
-            "messages.send",
-        );
+        let ok =
+            ChatTree::compare_perms(mk_perms([("messages.sendd", Mode::Deny)]), "messages.send");
         assert_eq!(ok, None);
     }
 
     #[test]
     fn test_perm_compare_glob_allow() {
-        let perms = PermissionList {
-            permissions: vec![Permission {
-                matches: "messages.*".to_string(),
-                mode: Mode::Allow.into(),
-            }],
-        };
+        let perms = mk_perms([("messages.*", Mode::Allow)]);
         let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
         assert_eq!(ok, Some(true));
         let ok = ChatTree::compare_perms(perms, "messages.view");
@@ -3444,12 +3421,7 @@ mod tests {
 
     #[test]
     fn test_perm_compare_glob_deny() {
-        let perms = PermissionList {
-            permissions: vec![Permission {
-                matches: "messages.*".to_string(),
-                mode: Mode::Deny.into(),
-            }],
-        };
+        let perms = mk_perms([("messages.*", Mode::Deny)]);
         let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
         assert_eq!(ok, Some(false));
         let ok = ChatTree::compare_perms(perms, "messages.view");
@@ -3458,80 +3430,36 @@ mod tests {
 
     #[test]
     fn test_perm_compare_specific_deny() {
-        let perms = PermissionList {
-            permissions: vec![
-                Permission {
-                    matches: "messages.*".to_string(),
-                    mode: Mode::Allow.into(),
-                },
-                Permission {
-                    matches: "messages.send".to_string(),
-                    mode: Mode::Deny.into(),
-                },
-            ],
-        };
+        let perms = mk_perms([("messages.*", Mode::Allow), ("messages.send", Mode::Deny)]);
         let ok = ChatTree::compare_perms(perms, "messages.send");
         assert_eq!(ok, Some(false));
     }
 
     #[test]
     fn test_perm_compare_specific_allow() {
-        let perms = PermissionList {
-            permissions: vec![
-                Permission {
-                    matches: "messages.*".to_string(),
-                    mode: Mode::Deny.into(),
-                },
-                Permission {
-                    matches: "messages.send".to_string(),
-                    mode: Mode::Allow.into(),
-                },
-            ],
-        };
+        let perms = mk_perms([("messages.*", Mode::Deny), ("messages.send", Mode::Allow)]);
         let ok = ChatTree::compare_perms(perms, "messages.send");
         assert_eq!(ok, Some(true));
     }
 
     #[test]
     fn test_perm_compare_depth_allow() {
-        let perms = PermissionList {
-            permissions: vec![
-                Permission {
-                    matches: "messages.*".to_string(),
-                    mode: Mode::Deny.into(),
-                },
-                Permission {
-                    matches: "messages.send.*".to_string(),
-                    mode: Mode::Deny.into(),
-                },
-                Permission {
-                    matches: "messages.send.send".to_string(),
-                    mode: Mode::Allow.into(),
-                },
-            ],
-        };
+        let perms = mk_perms([
+            ("messages.*", Mode::Deny),
+            ("messages.send", Mode::Deny),
+            ("messages.send.send", Mode::Allow),
+        ]);
         let ok = ChatTree::compare_perms(perms, "messages.send.send");
         assert_eq!(ok, Some(true));
     }
 
     #[test]
     fn test_perm_compare_depth_deny() {
-        let perms = PermissionList {
-            permissions: vec![
-                Permission {
-                    matches: "messages.*".to_string(),
-                    mode: Mode::Allow.into(),
-                },
-                Permission {
-                    matches: "messages.send.*".to_string(),
-                    mode: Mode::Allow.into(),
-                },
-                Permission {
-                    matches: "messages.send.send".to_string(),
-                    mode: Mode::Deny.into(),
-                },
-            ],
-        };
+        let perms = mk_perms([
+            ("messages.*", Mode::Allow),
+            ("messages.send", Mode::Allow),
+            ("messages.send.send", Mode::Deny),
+        ]);
         let ok = ChatTree::compare_perms(perms, "messages.send.send");
         assert_eq!(ok, Some(false));
     }
