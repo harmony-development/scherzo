@@ -3009,16 +3009,20 @@ impl ChatTree {
         if channel_id != 0 {
             for role_id in &user_roles {
                 let key = &make_guild_channel_roles_key(guild_id, channel_id, *role_id);
-                if let Some(ok) = is_allowed(key) {
-                    return ok;
+                if let Some(allow) = is_allowed(key) {
+                    if allow {
+                        return true;
+                    }
                 }
             }
         }
 
         for role_id in user_roles {
             let key = &make_guild_role_perms_key(guild_id, role_id);
-            if let Some(ok) = is_allowed(key) {
-                return ok;
+            if let Some(allow) = is_allowed(key) {
+                if allow {
+                    return true;
+                }
             }
         }
 
