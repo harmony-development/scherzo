@@ -40,6 +40,7 @@ use harmony_rust_sdk::api::{
     Hmc,
 };
 use image::GenericImageView;
+use rand::Rng;
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
@@ -288,16 +289,7 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, 0, user_id, "channels.manage.move", false)?;
 
         for channel_id in &channel_ids {
-            let id = *channel_id;
-
-            let exists = self.chat_tree.does_channel_exist(guild_id, id);
-
-            if !exists {
-                return Err(ServerError::NoSuchChannel {
-                    guild_id,
-                    channel_id: id,
-                });
-            }
+            self.chat_tree.does_channel_exist(guild_id, *channel_id)?;
         }
 
         let prefix = make_guild_chan_prefix(guild_id);
@@ -355,14 +347,15 @@ impl chat_service_server::ChatService for ChatServer {
         ) = request.into_parts();
 
         let guild_id = {
-            let mut guild_id = gen_rand_u64();
+            let mut rng = rand::thread_rng();
+            let mut guild_id = rng.gen_range(1..u64::MAX);
             while self
                 .chat_tree
                 .chat_tree
                 .contains_key(&guild_id.to_be_bytes())
                 .unwrap()
             {
-                guild_id = gen_rand_u64();
+                guild_id = rng.gen_range(1..u64::MAX);
             }
             guild_id
         };
@@ -816,9 +809,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::NoSuchGuild(guild_id));
         };
 
-        if !self.chat_tree.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild { guild_id, user_id });
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_id)?;
 
         self.chat_tree.check_perms(
             guild_id,
@@ -1383,9 +1374,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserBanned);
         }
 
-        if self.chat_tree.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserAlreadyInGuild);
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_id)?;
 
         let is_infinite = invite.possible_uses == -1;
 
@@ -1919,10 +1908,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
-
-        if !self.chat_tree.does_role_exist(guild_id, role_id) {
-            return Err(ServerError::NoSuchRole { guild_id, role_id });
-        }
+        self.chat_tree.does_role_exist(guild_id, role_id)?;
 
         self.chat_tree
             .move_role_logic(guild_id, role_id, previous_id, next_id)?;
@@ -2099,12 +2085,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
-        if !self.chat_tree.is_user_in_guild(guild_id, user_to_manage) {
-            return Err(ServerError::UserNotInGuild {
-                guild_id,
-                user_id: user_to_manage,
-            });
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_to_manage)?;
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.user.manage", false)?;
         let user_to_manage = if user_to_manage != 0 {
@@ -2147,12 +2128,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
-        if !self.chat_tree.is_user_in_guild(guild_id, user_to_fetch) {
-            return Err(ServerError::UserNotInGuild {
-                guild_id,
-                user_id: user_to_fetch,
-            });
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_to_fetch)?;
         let fetch_user = (user_to_fetch == 0)
             .then(|| user_id)
             .unwrap_or(user_to_fetch);
@@ -2413,12 +2389,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
-        if !self.chat_tree.is_user_in_guild(guild_id, user_to_ban) {
-            return Err(ServerError::UserNotInGuild {
-                guild_id,
-                user_id: user_to_ban,
-            });
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "user.manage.ban", false)?;
 
@@ -2450,12 +2421,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
-        if !self.chat_tree.is_user_in_guild(guild_id, user_to_kick) {
-            return Err(ServerError::UserNotInGuild {
-                guild_id,
-                user_id: user_to_kick,
-            });
-        }
+        self.chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "user.manage.kick", false)?;
 
@@ -2503,34 +2469,47 @@ pub struct ChatTree {
 }
 
 impl ChatTree {
-    pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
+    pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&make_member_key(guild_id, user_id))
             .unwrap()
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::UserNotInGuild { guild_id, user_id }))
     }
 
-    pub fn does_user_exist(&self, user_id: u64) -> bool {
+    pub fn does_user_exist(&self, user_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&make_user_profile_key(user_id))
             .unwrap()
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::NoSuchUser(user_id)))
     }
 
-    pub fn does_guild_exist(&self, guild_id: u64) -> bool {
+    pub fn does_guild_exist(&self, guild_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&guild_id.to_be_bytes())
             .unwrap()
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::NoSuchGuild(guild_id)))
     }
 
-    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> bool {
+    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&make_chan_key(guild_id, channel_id))
             .unwrap()
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::NoSuchChannel {
+                guild_id,
+                channel_id,
+            }))
     }
 
-    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> bool {
+    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&make_guild_role_key(guild_id, role_id))
             .unwrap()
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::NoSuchRole { guild_id, role_id }))
     }
 
     pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
@@ -2549,11 +2528,7 @@ impl ChatTree {
             )
     }
 
-    pub fn is_user_guild_owner(
-        &self,
-        guild_id: u64,
-        user_id: u64,
-    ) -> Result<bool, <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn is_user_guild_owner(&self, guild_id: u64, user_id: u64) -> Result<bool, ServerError> {
         self.get_guild_owner(guild_id).map(|owner| owner == user_id)
     }
 
@@ -2562,53 +2537,24 @@ impl ChatTree {
         guild_id: u64,
         user_id: u64,
         channel_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<(), ServerError> {
         self.check_guild_user(guild_id, user_id)?;
-
-        if channel_id == 0 || !self.does_channel_exist(guild_id, channel_id) {
-            return Err(ServerError::NoSuchChannel {
-                guild_id,
-                channel_id,
-            });
-        }
-
-        Ok(())
+        self.does_channel_exist(guild_id, channel_id)
     }
 
-    pub fn check_guild_user(
-        &self,
-        guild_id: u64,
-        user_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn check_guild_user(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
         self.check_guild(guild_id)?;
-
-        if user_id == 0 || !self.is_user_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserNotInGuild { guild_id, user_id });
-        }
-
-        Ok(())
+        self.is_user_in_guild(guild_id, user_id)
     }
 
-    pub fn check_guild(
-        &self,
-        guild_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
-        if guild_id == 0 || !self.does_guild_exist(guild_id) {
-            return Err(ServerError::NoSuchGuild(guild_id));
-        }
-
-        Ok(())
+    #[inline(always)]
+    pub fn check_guild(&self, guild_id: u64) -> Result<(), ServerError> {
+        self.does_guild_exist(guild_id)
     }
 
-    pub fn check_user(
-        &self,
-        user_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
-        if user_id == 0 || !self.does_user_exist(user_id) {
-            return Err(ServerError::NoSuchUser(user_id));
-        }
-
-        Ok(())
+    #[inline(always)]
+    pub fn check_user(&self, user_id: u64) -> Result<(), ServerError> {
+        self.does_user_exist(user_id)
     }
 
     pub fn get_message_logic(
@@ -2616,8 +2562,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-    ) -> Result<(HarmonyMessage, [u8; 26]), <ChatServer as chat_service_server::ChatService>::Error>
-    {
+    ) -> Result<(HarmonyMessage, [u8; 26]), ServerError> {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
         let message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
@@ -2633,10 +2578,7 @@ impl ChatTree {
         Ok((message, key))
     }
 
-    pub fn get_user_logic(
-        &self,
-        user_id: u64,
-    ) -> Result<GetUserResponse, <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn get_user_logic(&self, user_id: u64) -> Result<GetUserResponse, ServerError> {
         let key = make_user_profile_key(user_id);
 
         let profile = if let Some(profile_raw) = self.chat_tree.get(&key).unwrap() {
@@ -2648,10 +2590,7 @@ impl ChatTree {
         Ok(profile)
     }
 
-    pub fn get_guild_logic(
-        &self,
-        guild_id: u64,
-    ) -> Result<GetGuildResponse, <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn get_guild_logic(&self, guild_id: u64) -> Result<GetGuildResponse, ServerError> {
         let guild =
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
                 db::deser_guild(guild_raw)
@@ -2782,16 +2721,12 @@ impl ChatTree {
         role_id: u64,
         previous_id: u64,
         next_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<(), ServerError> {
         self.update_order_logic(
             role_id,
             previous_id,
             next_id,
-            |role_id| {
-                self.does_role_exist(guild_id, role_id)
-                    .then(|| ())
-                    .ok_or(ServerError::NoSuchRole { guild_id, role_id })
-            },
+            |role_id| self.does_role_exist(guild_id, role_id),
             &make_guild_role_ordering_key(guild_id),
         )
     }
@@ -2802,19 +2737,12 @@ impl ChatTree {
         channel_id: u64,
         previous_id: u64,
         next_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<(), ServerError> {
         self.update_order_logic(
             channel_id,
             previous_id,
             next_id,
-            |channel_id| {
-                self.does_channel_exist(guild_id, channel_id)
-                    .then(|| ())
-                    .ok_or(ServerError::NoSuchChannel {
-                        guild_id,
-                        channel_id,
-                    })
-            },
+            |channel_id| self.does_channel_exist(guild_id, channel_id),
             &make_guild_chan_ordering_key(guild_id),
         )
     }
@@ -2827,7 +2755,7 @@ impl ChatTree {
         next_id: u64,
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<(), ServerError> {
         let ser_ord_put = |ordering| {
             let serialized_ordering = self.serialize_list_u64_logic(ordering);
             cchat_insert!(key / serialized_ordering);
@@ -3045,7 +2973,7 @@ impl ChatTree {
         user_id: u64,
         check_for: &str,
         must_be_guild_owner: bool,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<(), ServerError> {
         let is_owner = self.is_user_guild_owner(guild_id, user_id)?;
         if must_be_guild_owner {
             if is_owner {
@@ -3080,15 +3008,11 @@ impl ChatTree {
     ) -> Result<Vec<u64>, ServerError> {
         let mut roles = self.get_user_roles_logic(guild_id, user_id);
         for role_id in give_role_ids {
-            if !self.does_role_exist(guild_id, role_id) {
-                return Err(ServerError::NoSuchRole { guild_id, role_id });
-            }
+            self.does_role_exist(guild_id, role_id)?;
             roles.push(role_id);
         }
         for role_id in take_role_ids {
-            if !self.does_role_exist(guild_id, role_id) {
-                return Err(ServerError::NoSuchRole { guild_id, role_id });
-            }
+            self.does_role_exist(guild_id, role_id)?;
             if let Some(index) = roles.iter().position(|oid| role_id.eq(oid)) {
                 roles.remove(index);
             }
@@ -3101,11 +3025,7 @@ impl ChatTree {
         Ok(roles)
     }
 
-    pub fn add_default_role_to(
-        &self,
-        guild_id: u64,
-        user_id: u64,
-    ) -> Result<(), <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn add_default_role_to(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
         if let Some(raw) = self
             .chat_tree
             .get(&make_guild_default_role_key(guild_id))
@@ -3118,16 +3038,13 @@ impl ChatTree {
         Ok(())
     }
 
-    pub fn add_guild_role_logic(
-        &self,
-        guild_id: u64,
-        mut role: Role,
-    ) -> Result<u64, <ChatServer as chat_service_server::ChatService>::Error> {
+    pub fn add_guild_role_logic(&self, guild_id: u64, mut role: Role) -> Result<u64, ServerError> {
         let key = {
-            role.role_id = gen_rand_u64();
+            let mut rng = rand::thread_rng();
+            role.role_id = rng.gen_range(1..u64::MAX);
             let mut key = make_guild_role_key(guild_id, role.role_id);
             while self.chat_tree.contains_key(&key).unwrap() {
-                role.role_id = gen_rand_u64();
+                role.role_id = rng.gen_range(1..u64::MAX);
                 key = make_guild_role_key(guild_id, role.role_id);
             }
             key
@@ -3166,12 +3083,13 @@ impl ChatTree {
         metadata: Option<Metadata>,
         previous_id: u64,
         next_id: u64,
-    ) -> Result<u64, <ChatServer as chat_service_server::ChatService>::Error> {
+    ) -> Result<u64, ServerError> {
         let channel_id = {
-            let mut channel_id = gen_rand_u64();
+            let mut rng = rand::thread_rng();
+            let mut channel_id = rng.gen_range(1..=u64::MAX);
             let mut key = make_chan_key(guild_id, channel_id);
             while self.chat_tree.contains_key(&key).unwrap() {
-                channel_id = gen_rand_u64();
+                channel_id = rng.gen_range(1..=u64::MAX);
                 key = make_chan_key(guild_id, channel_id);
             }
             channel_id
