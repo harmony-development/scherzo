@@ -1374,7 +1374,10 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::UserBanned);
         }
 
-        self.chat_tree.is_user_in_guild(guild_id, user_id)?;
+        self.chat_tree
+            .is_user_in_guild(guild_id, user_id)
+            .ok()
+            .map_or(Ok(()), |_| Err(ServerError::UserAlreadyInGuild))?;
 
         let is_infinite = invite.possible_uses == -1;
 
