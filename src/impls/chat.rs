@@ -2607,7 +2607,7 @@ impl ChatTree {
     pub fn get_guild_invites_logic(&self, guild_id: u64) -> GetGuildInvitesResponse {
         let invites = self
             .chat_tree
-            .scan_prefix(b"invite_")
+            .scan_prefix(INVITE_PREFIX)
             .map(|res| {
                 let (_, value) = res.unwrap();
                 let (id_raw, invite_raw) = value.split_at(size_of::<u64>());

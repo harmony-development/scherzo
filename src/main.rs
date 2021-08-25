@@ -446,15 +446,14 @@ pub async fn run(filter_level: Level, db_path: String) {
         }
         Command::Help => println!("{}", HELP_TEXT),
         Command::GetInvites => {
-            let invites = chat_tree
-                .chat_tree
-                .scan_prefix(INVITE_PREFIX)
-                .flatten()
-                .map(|(k, v)| {
-                    let invite_id = std::str::from_utf8(k.split_at(INVITE_PREFIX.len()).1).unwrap();
-                    let invite_data = Invite::decode(v.as_ref()).unwrap();
-                    (invite_id.to_string(), invite_data)
-                });
+            let invites = chat_tree.chat_tree.scan_prefix(INVITE_PREFIX).map(|res| {
+                let (_, value) = res.unwrap();
+                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                // Safety: this unwrap cannot fail since we split at u64 boundary
+                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                let invite = scherzo::db::deser_invite(invite_raw.into());
+                (id, invite)
+            });
 
             for (id, data) in invites {
                 println!("{}: {:?}", id, data);
