@@ -2457,12 +2457,27 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "user.manage.unban", false)?;
 
-        self.chat_tree
-            .chat_tree
-            .remove(&make_banned_member_key(guild_id, user_to_unban))
-            .unwrap();
+        chat_remove!(make_banned_member_key(guild_id, user_to_unban));
 
         Ok(())
+    }
+
+    async fn get_pinned_messages(
+        &self,
+        request: Request<GetPinnedMessagesRequest>,
+    ) -> Result<GetPinnedMessagesResponse, Self::Error> {
+        Err(ServerError::NotImplemented)
+    }
+
+    async fn pin_message(&self, request: Request<PinMessageRequest>) -> Result<(), Self::Error> {
+        Err(ServerError::NotImplemented)
+    }
+
+    async fn unpin_message(
+        &self,
+        request: Request<UnpinMessageRequest>,
+    ) -> Result<(), Self::Error> {
+        Err(ServerError::NotImplemented)
     }
 }
 
