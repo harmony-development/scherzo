@@ -26,8 +26,8 @@ use harmony_rust_sdk::api::{
         prost::{bytes::BytesMut, Message},
     },
     harmonytypes::{
-        content, Attachment, Content, ContentText, Message as HarmonyMessage, Metadata,
-        Minithumbnail, Photo,
+        content, Attachment, Content, ContentText, ItemPosition, Message as HarmonyMessage,
+        Metadata, Minithumbnail, Photo,
     },
     rest::FileId,
     sync::{
@@ -490,8 +490,7 @@ impl chat_service_server::ChatService for ChatServer {
             guild_id,
             channel_name,
             is_category,
-            previous_id,
-            next_id,
+            position,
             metadata,
         } = request.into_parts().0;
 
@@ -504,8 +503,7 @@ impl chat_service_server::ChatService for ChatServer {
             channel_name.clone(),
             is_category,
             metadata.clone(),
-            previous_id,
-            next_id,
+            position.clone(),
         )?;
 
         self.send_event_through_chan(
@@ -514,8 +512,7 @@ impl chat_service_server::ChatService for ChatServer {
                 guild_id,
                 channel_id,
                 name: channel_name,
-                previous_id,
-                next_id,
+                position,
                 is_category,
                 metadata,
             }),
@@ -795,11 +792,8 @@ impl chat_service_server::ChatService for ChatServer {
         let UpdateGuildInformationRequest {
             guild_id,
             new_guild_name,
-            update_guild_name,
             new_guild_picture,
-            update_guild_picture,
-            metadata,
-            update_metadata,
+            new_metadata,
         } = request.into_parts().0;
 
         let key = guild_id.to_be_bytes();
@@ -819,14 +813,14 @@ impl chat_service_server::ChatService for ChatServer {
             false,
         )?;
 
-        if update_guild_name {
-            guild_info.guild_name = new_guild_name.clone();
+        if let Some(new_guild_name) = new_guild_name.clone() {
+            guild_info.guild_name = new_guild_name;
         }
-        if update_guild_picture {
-            guild_info.guild_picture = new_guild_picture.clone();
+        if let Some(new_guild_picture) = new_guild_picture.clone() {
+            guild_info.guild_picture = new_guild_picture;
         }
-        if update_metadata {
-            guild_info.metadata = metadata.clone();
+        if let Some(new_metadata) = new_metadata.clone() {
+            guild_info.metadata = Some(new_metadata);
         }
 
         let buf = encode_protobuf_message(guild_info);
@@ -836,12 +830,9 @@ impl chat_service_server::ChatService for ChatServer {
             EventSub::Guild(guild_id),
             event::Event::EditedGuild(GuildUpdated {
                 guild_id,
-                update_picture: update_guild_picture,
-                picture: new_guild_picture,
-                update_name: update_guild_name,
-                name: new_guild_name,
-                update_metadata,
-                metadata,
+                new_name: new_guild_name,
+                new_picture: new_guild_picture,
+                new_metadata,
             }),
             None,
             EventContext::empty(),
@@ -860,10 +851,8 @@ impl chat_service_server::ChatService for ChatServer {
         let UpdateChannelInformationRequest {
             guild_id,
             channel_id,
-            name,
-            update_name,
-            metadata,
-            update_metadata,
+            new_name,
+            new_metadata,
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
@@ -885,11 +874,11 @@ impl chat_service_server::ChatService for ChatServer {
             });
         };
 
-        if update_name {
-            chan_info.channel_name = name.clone();
+        if let Some(new_name) = new_name.clone() {
+            chan_info.channel_name = new_name;
         }
-        if update_metadata {
-            chan_info.metadata = metadata.clone();
+        if let Some(new_metadata) = new_metadata.clone() {
+            chan_info.metadata = Some(new_metadata);
         }
 
         let buf = encode_protobuf_message(chan_info);
@@ -900,10 +889,8 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::EditedChannel(ChannelUpdated {
                 guild_id,
                 channel_id,
-                name,
-                update_name,
-                metadata,
-                update_metadata,
+                new_name,
+                new_metadata,
                 ..Default::default()
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
@@ -923,8 +910,7 @@ impl chat_service_server::ChatService for ChatServer {
         let UpdateChannelOrderRequest {
             guild_id,
             channel_id,
-            previous_id,
-            next_id,
+            new_position,
         } = request.into_parts().0;
 
         self.chat_tree
@@ -932,17 +918,17 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, channel_id, user_id, "channels.manage.move", false)?;
 
-        self.chat_tree
-            .update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
+        if let Some(position) = new_position.clone() {
+            self.chat_tree
+                .update_channel_order_logic(guild_id, channel_id, position)?
+        }
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             event::Event::EditedChannel(ChannelUpdated {
                 guild_id,
                 channel_id,
-                previous_id,
-                next_id,
-                update_order: true,
+                new_position,
                 ..Default::default()
             }),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
@@ -1004,7 +990,7 @@ impl chat_service_server::ChatService for ChatServer {
                 channel_id,
                 message_id,
                 edited_at,
-                content: new_content,
+                new_content,
             })),
             Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
             EventContext::empty(),
@@ -1849,7 +1835,7 @@ impl chat_service_server::ChatService for ChatServer {
                     guild_id,
                     channel_id,
                     role_id,
-                    perms: Some(perms),
+                    new_perms: Some(perms),
                 }),
                 Some(PermCheck {
                     guild_id,
@@ -1904,8 +1890,7 @@ impl chat_service_server::ChatService for ChatServer {
         let MoveRoleRequest {
             guild_id,
             role_id,
-            before_id: previous_id,
-            after_id: next_id,
+            new_position,
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
@@ -1913,16 +1898,16 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
         self.chat_tree.does_role_exist(guild_id, role_id)?;
 
-        self.chat_tree
-            .move_role_logic(guild_id, role_id, previous_id, next_id)?;
+        if let Some(pos) = new_position.clone() {
+            self.chat_tree.move_role_logic(guild_id, role_id, pos)?;
+        }
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             event::Event::RoleMoved(RoleMoved {
                 guild_id,
                 role_id,
-                previous_id,
-                next_id,
+                new_position,
             }),
             None,
             EventContext::empty(),
@@ -1991,57 +1976,52 @@ impl chat_service_server::ChatService for ChatServer {
 
         let ModifyGuildRoleRequest {
             guild_id,
-            role: maybe_role,
-            modify_name,
-            modify_color,
-            modify_hoist,
-            modify_pingable,
+            role_id,
+            new_name,
+            new_color,
+            new_hoist,
+            new_pingable,
         } = request.into_parts().0;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
             .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
 
-        if let Some(new_role) = maybe_role {
-            let role_id = new_role.role_id;
-            let key = make_guild_role_key(guild_id, role_id);
-            let mut role = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
-                db::deser_role(raw)
-            } else {
-                return Err(ServerError::NoSuchRole { guild_id, role_id });
-            };
-
-            if modify_name {
-                role.name = new_role.name;
-            }
-            if modify_color {
-                role.color = new_role.color;
-            }
-            if modify_hoist {
-                role.hoist = new_role.hoist;
-            }
-            if modify_pingable {
-                role.pingable = new_role.pingable;
-            }
-
-            let ser_role = encode_protobuf_message(role.clone());
-            chat_insert!(key / ser_role);
-
-            self.send_event_through_chan(
-                EventSub::Guild(guild_id),
-                event::Event::RoleUpdated(RoleUpdated {
-                    guild_id,
-                    role_id,
-                    role: Some(role),
-                }),
-                None,
-                EventContext::empty(),
-            );
-
-            Ok(())
+        let key = make_guild_role_key(guild_id, role_id);
+        let mut role = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
+            db::deser_role(raw)
         } else {
-            Err(ServerError::NoRoleSpecified)
+            return Err(ServerError::NoSuchRole { guild_id, role_id });
+        };
+
+        if let Some(new_name) = new_name {
+            role.name = new_name;
         }
+        if let Some(new_color) = new_color {
+            role.color = new_color;
+        }
+        if let Some(new_hoist) = new_hoist {
+            role.hoist = new_hoist;
+        }
+        if let Some(new_pingable) = new_pingable {
+            role.pingable = new_pingable;
+        }
+
+        let ser_role = encode_protobuf_message(role.clone());
+        chat_insert!(key / ser_role);
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            event::Event::RoleUpdated(RoleUpdated {
+                guild_id,
+                role_id,
+                new_role: Some(role),
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(())
     }
 
     #[rate(10, 5)]
@@ -2097,7 +2077,7 @@ impl chat_service_server::ChatService for ChatServer {
             user_id
         };
 
-        let role_ids = self.chat_tree.manage_user_roles_logic(
+        let new_role_ids = self.chat_tree.manage_user_roles_logic(
             guild_id,
             user_to_manage,
             give_role_ids,
@@ -2109,7 +2089,7 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::UserRolesUpdated(UserRolesUpdated {
                 guild_id,
                 user_id: user_to_manage,
-                role_ids,
+                new_role_ids,
             }),
             None,
             EventContext::empty(),
@@ -2271,13 +2251,9 @@ impl chat_service_server::ChatService for ChatServer {
 
         let ProfileUpdateRequest {
             new_username,
-            update_username,
             new_avatar,
-            update_avatar,
             new_status,
-            update_status,
-            is_bot,
-            update_is_bot,
+            new_is_bot,
         } = request.into_parts().0;
 
         let key = make_user_profile_key(user_id);
@@ -2289,17 +2265,17 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap()
             .map_or_else(GetUserResponse::default, db::deser_profile);
 
-        if update_username {
-            profile.user_name = new_username.clone();
+        if let Some(new_username) = new_username.clone() {
+            profile.user_name = new_username;
         }
-        if update_avatar {
-            profile.user_avatar = new_avatar.clone();
+        if let Some(new_avatar) = new_avatar.clone() {
+            profile.user_avatar = new_avatar;
         }
-        if update_status {
+        if let Some(new_status) = new_status {
             profile.user_status = new_status;
         }
-        if update_is_bot {
-            profile.is_bot = is_bot;
+        if let Some(new_is_bot) = new_is_bot {
+            profile.is_bot = new_is_bot;
         }
 
         let buf = encode_protobuf_message(profile);
@@ -2310,13 +2286,9 @@ impl chat_service_server::ChatService for ChatServer {
             event::Event::ProfileUpdated(event::ProfileUpdated {
                 user_id,
                 new_username,
-                update_username,
                 new_avatar,
-                update_avatar,
                 new_status,
-                update_status,
-                is_bot,
-                update_is_bot,
+                new_is_bot,
             }),
             None,
             EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)),
@@ -2737,13 +2709,11 @@ impl ChatTree {
         &self,
         guild_id: u64,
         role_id: u64,
-        previous_id: u64,
-        next_id: u64,
+        position: impl Into<Place>,
     ) -> Result<(), ServerError> {
         self.update_order_logic(
             role_id,
-            previous_id,
-            next_id,
+            position,
             |role_id| self.does_role_exist(guild_id, role_id),
             &make_guild_role_ordering_key(guild_id),
         )
@@ -2753,13 +2723,11 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        previous_id: u64,
-        next_id: u64,
+        position: impl Into<Place>,
     ) -> Result<(), ServerError> {
         self.update_order_logic(
             channel_id,
-            previous_id,
-            next_id,
+            position,
             |channel_id| self.does_channel_exist(guild_id, channel_id),
             &make_guild_chan_ordering_key(guild_id),
         )
@@ -2769,8 +2737,7 @@ impl ChatTree {
     pub fn update_order_logic(
         &self,
         id: u64,
-        previous_id: u64,
-        next_id: u64,
+        position: impl Into<Place>,
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
     ) -> Result<(), ServerError> {
@@ -2778,6 +2745,10 @@ impl ChatTree {
             let serialized_ordering = self.serialize_list_u64_logic(ordering);
             cchat_insert!(key / serialized_ordering);
         };
+
+        let place = position.into();
+        let previous_id = place.after().unwrap_or(0);
+        let next_id = place.before().unwrap_or(0);
 
         if previous_id != 0 {
             check_exists(previous_id)?;
@@ -3070,7 +3041,7 @@ impl ChatTree {
         let role_id = role.role_id;
         let ser_role = encode_protobuf_message(role);
         cchat_insert!(key / ser_role);
-        self.move_role_logic(guild_id, role_id, 0, 0)?;
+        self.move_role_logic(guild_id, role_id, Place::between(0, 0))?;
         Ok(role_id)
     }
 
@@ -3099,8 +3070,7 @@ impl ChatTree {
         channel_name: String,
         is_category: bool,
         metadata: Option<Metadata>,
-        previous_id: u64,
-        next_id: u64,
+        position: Option<ItemPosition>,
     ) -> Result<u64, ServerError> {
         let channel_id = {
             let mut rng = rand::thread_rng();
@@ -3124,7 +3094,11 @@ impl ChatTree {
         cchat_insert!(key / buf);
 
         // Add from ordering list
-        self.update_channel_order_logic(guild_id, channel_id, previous_id, next_id)?;
+        self.update_channel_order_logic(
+            guild_id,
+            channel_id,
+            position.map_or_else(|| Place::between(0, 0), Place::from),
+        )?;
 
         Ok(channel_id)
     }
