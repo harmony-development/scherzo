@@ -253,7 +253,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#f4a21acb18935af8b256999e2380eb5fb7e17d72"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#3c04f65b4e92ce69db5eafc309d39a98f861beef"
 dependencies = [
  "prost",
  "prost-types",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#f4a21acb18935af8b256999e2380eb5fb7e17d72"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#3c04f65b4e92ce69db5eafc309d39a98f861beef"
 dependencies = [
  "console-api",
  "futures",
@@ -305,9 +305,9 @@ checksum = "ea221b5284a47e40033bf9b66f35f984ec0ea2931eb03505246cd27a963f981b"
 
 [[package]]
 name = "cpufeatures"
-version = "0.1.5"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66c99696f6c9dd7f35d486b9d04d7e6e202aa3e8c40d553f2fdf5e7e0c6a71ef"
+checksum = "95059428f66df56b63431fdb4e1947ed2190586af5c5a8a8b71122bdf5a7f469"
 dependencies = [
  "libc",
 ]
@@ -759,7 +759,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#a32fecb90bdb430c70a99d9c916a0b9930ce4945"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#dfcaca4ab04992afd47d21a6610bb8600cbe48b8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#a32fecb90bdb430c70a99d9c916a0b9930ce4945"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#dfcaca4ab04992afd47d21a6610bb8600cbe48b8"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -849,9 +849,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.10.4"
+version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83a4fa1a960b7fe943a53bc77c8c04b57511273066fa414ef49a854b28a0678"
+checksum = "85ba3724d47a1b07b2a503f1faaa48c88e34a06000498a8c6e6062cf90c71940"
 dependencies = [
  "ahash",
  "async-trait",
@@ -872,9 +872,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.7.3"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4262ecc577abc1f1b05c5313c8c071b15b26bf8755054af77b8d0830608c40e"
+checksum = "4255398ef4300d5c924e7bbd80edff9420f2d5104b0fa471f1773eebf70b0065"
 dependencies = [
  "proc-macro2",
  "prost-build",
@@ -2078,9 +2078,9 @@ dependencies = [
 
 [[package]]
 name = "sha-1"
-version = "0.9.7"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a0c8611594e2ab4ebbf06ec7cbbf0a99450b8570e96cbf5188b5d5f6ef18d81"
+checksum = "99cd6713db3cf16b6c84e06321e049a9b9f699826e16096d23bbcc44d15d51a6"
 dependencies = [
  "block-buffer",
  "cfg-if",
@@ -2758,7 +2758,7 @@ dependencies = [
 [[package]]
 name = "warp"
 version = "0.3.1"
-source = "git+https://github.com/yusdacra/warp.git?branch=chore/deps#2ee2a59dfc736dfe4df1873812b72b47f8df60b9"
+source = "git+https://github.com/yusdacra/warp.git?branch=chore/deps#3ef5c1d8a267370e20e3ad05a7028e0155845aee"
 dependencies = [
  "bytes",
  "futures",
