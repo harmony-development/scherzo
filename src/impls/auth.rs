@@ -6,7 +6,10 @@ use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
     chat::GetUserResponse,
     exports::{
-        hrpc::{encode_protobuf_message, server::WriteSocket, warp::reply::Response, Request},
+        hrpc::{
+            encode_protobuf_message, server::ServerError as HrpcServerError, server::WriteSocket,
+            warp::reply::Response, Request,
+        },
         prost::Message,
     },
     harmonytypes::UserStatus,
@@ -194,7 +197,10 @@ impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 
     #[rate(20, 5)]
-    async fn check_logged_in(&self, request: Request<()>) -> Result<(), Self::Error> {
+    async fn check_logged_in(
+        &self,
+        request: Request<()>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
         Ok(())
     }
@@ -203,13 +209,13 @@ impl auth_service_server::AuthService for AuthServer {
     async fn federate(
         &self,
         request: Request<FederateRequest>,
-    ) -> Result<FederateReply, Self::Error> {
+    ) -> Result<FederateReply, HrpcServerError<Self::Error>> {
         auth!();
 
         let keys_manager = self.keys_manager()?;
 
         let profile = self.chat_tree.get_user_logic(user_id)?;
-        let target = request.into_parts().0.target;
+        let target = request.into_parts().0.into_message().await??.target;
 
         self.is_host_allowed(&target)?;
 
@@ -229,8 +235,9 @@ impl auth_service_server::AuthService for AuthServer {
     async fn login_federated(
         &self,
         request: Request<LoginFederatedRequest>,
-    ) -> Result<Session, Self::Error> {
-        let LoginFederatedRequest { auth_token, domain } = request.into_parts().0;
+    ) -> Result<Session, HrpcServerError<Self::Error>> {
+        let LoginFederatedRequest { auth_token, domain } =
+            request.into_parts().0.into_message().await??;
 
         self.is_host_allowed(&domain)?;
 
@@ -287,11 +294,11 @@ impl auth_service_server::AuthService for AuthServer {
             return Ok(session);
         }
 
-        Err(ServerError::InvalidToken)
+        Err(ServerError::InvalidToken.into())
     }
 
     #[rate(1, 5)]
-    async fn key(&self, _: Request<()>) -> Result<KeyReply, Self::Error> {
+    async fn key(&self, _: Request<()>) -> Result<KeyReply, HrpcServerError<Self::Error>> {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
 
@@ -309,14 +316,14 @@ impl auth_service_server::AuthService for AuthServer {
     async fn stream_steps_validation(
         &self,
         request: Request<Option<StreamStepsRequest>>,
-    ) -> Result<SmolStr, Self::Error> {
-        if let Some(msg) = request.into_parts().0 {
+    ) -> Result<SmolStr, HrpcServerError<Self::Error>> {
+        if let Some(msg) = request.into_parts().0.into_optional_message().await?? {
             let auth_id = msg.auth_id;
 
             if self.step_map.contains_key(auth_id.as_str()) {
                 Ok(auth_id.into())
             } else {
-                Err(ServerError::InvalidAuthId)
+                Err(ServerError::InvalidAuthId.into())
             }
         } else {
             Ok(SmolStr::new_inline(""))
@@ -340,7 +347,10 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(2, 5)]
-    async fn begin_auth(&self, _: Request<()>) -> Result<BeginAuthResponse, Self::Error> {
+    async fn begin_auth(
+        &self,
+        _: Request<()>,
+    ) -> Result<BeginAuthResponse, HrpcServerError<Self::Error>> {
         let initial_step = AuthStep {
             can_go_back: false,
             fallback_url: String::default(),
@@ -369,11 +379,14 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(10, 5)]
-    async fn next_step(&self, req: Request<NextStepRequest>) -> Result<AuthStep, Self::Error> {
+    async fn next_step(
+        &self,
+        req: Request<NextStepRequest>,
+    ) -> Result<AuthStep, HrpcServerError<Self::Error>> {
         let NextStepRequest {
             auth_id,
             step: maybe_step,
-        } = req.into_parts().0;
+        } = req.into_parts().0.into_message().await??;
 
         let next_step;
 
@@ -448,13 +461,15 @@ impl auth_service_server::AuthService for AuthServer {
                                 return Err(ServerError::NoSuchChoice {
                                     choice: choice.into(),
                                     expected_any_of: options.into_iter().map(Into::into).collect(),
-                                });
+                                }
+                                .into());
                             }
                         } else {
                             return Err(ServerError::WrongStep {
                                 expected: SmolStr::new_inline("form"),
                                 got: SmolStr::new_inline("choice"),
-                            });
+                            }
+                            .into());
                         }
                     }
                     next_step_request::Step::Form(next_step_request::Form { fields }) => {
@@ -478,7 +493,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     return Err(ServerError::WrongTypeForField {
                                                         name: afield.name.as_str().into(),
                                                         expected: SmolStr::new_inline("bytes"),
-                                                    });
+                                                    }
+                                                    .into());
                                                 }
                                             }
                                             "text" => {
@@ -488,7 +504,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     return Err(ServerError::WrongTypeForField {
                                                         name: afield.name.as_str().into(),
                                                         expected: SmolStr::new_inline("text"),
-                                                    });
+                                                    }
+                                                    .into());
                                                 }
                                             }
                                             "number" => {
@@ -498,7 +515,8 @@ impl auth_service_server::AuthService for AuthServer {
                                                     return Err(ServerError::WrongTypeForField {
                                                         name: afield.name.as_str().into(),
                                                         expected: SmolStr::new_inline("number"),
-                                                    });
+                                                    }
+                                                    .into());
                                                 }
                                             }
                                             "email" => {
@@ -509,16 +527,17 @@ impl auth_service_server::AuthService for AuthServer {
                                                     return Err(ServerError::WrongTypeForField {
                                                         name: afield.name.as_str().into(),
                                                         expected: SmolStr::new_inline("email"),
-                                                    });
+                                                    }
+                                                    .into());
                                                 }
                                             }
                                             _ => unreachable!(),
                                         }
                                     } else {
-                                        return Err(ServerError::NoFieldSpecified);
+                                        return Err(ServerError::NoFieldSpecified.into());
                                     }
                                 } else {
-                                    return Err(ServerError::NoSuchField);
+                                    return Err(ServerError::NoSuchField.into());
                                 }
                             }
 
@@ -542,7 +561,8 @@ impl auth_service_server::AuthService for AuthServer {
                                     } else {
                                         return Err(ServerError::WrongUserOrPassword {
                                             email: email.into(),
-                                        });
+                                        }
+                                        .into());
                                     };
 
                                     if self
@@ -553,7 +573,8 @@ impl auth_service_server::AuthService for AuthServer {
                                     {
                                         return Err(ServerError::WrongUserOrPassword {
                                             email: email.into(),
-                                        });
+                                        }
+                                        .into());
                                     }
 
                                     let session_token = self.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
@@ -592,7 +613,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     let username = try_get_username(&mut values)?;
 
                                     if self.auth_tree.get(email.as_bytes()).unwrap().is_some() {
-                                        return Err(ServerError::UserAlreadyExists);
+                                        return Err(ServerError::UserAlreadyExists.into());
                                     }
 
                                     let user_id = gen_rand_u64();
@@ -642,7 +663,8 @@ impl auth_service_server::AuthService for AuthServer {
                             return Err(ServerError::WrongStep {
                                 expected: SmolStr::new_inline("choice"),
                                 got: SmolStr::new_inline("form"),
-                            });
+                            }
+                            .into());
                         }
                     }
                 }
@@ -651,7 +673,7 @@ impl auth_service_server::AuthService for AuthServer {
                 next_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
             }
         } else {
-            return Err(ServerError::InvalidAuthId);
+            return Err(ServerError::InvalidAuthId.into());
         }
 
         if let Some(chan) = self.send_step.get(auth_id.as_str()) {
@@ -674,8 +696,11 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(10, 5)]
-    async fn step_back(&self, req: Request<StepBackRequest>) -> Result<AuthStep, Self::Error> {
-        let req = req.into_parts().0;
+    async fn step_back(
+        &self,
+        req: Request<StepBackRequest>,
+    ) -> Result<AuthStep, HrpcServerError<Self::Error>> {
+        let req = req.into_parts().0.into_message().await??;
         let auth_id = req.auth_id;
 
         let prev_step;
@@ -699,7 +724,7 @@ impl auth_service_server::AuthService for AuthServer {
                 }
             }
         } else {
-            return Err(ServerError::InvalidAuthId);
+            return Err(ServerError::InvalidAuthId.into());
         }
 
         Ok(prev_step)

@@ -19,9 +19,9 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             encode_protobuf_message, return_print,
-            server::{Socket, SocketError, WriteSocket},
+            server::{ServerError as HrpcServerError, Socket, SocketError, WriteSocket},
             warp::reply::Response,
-            Request,
+            BodyKind, Request,
         },
         prost::{bytes::BytesMut, Message},
     },
@@ -276,13 +276,13 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_all_channel_order(
         &self,
         request: Request<UpdateAllChannelOrderRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateAllChannelOrderRequest {
             guild_id,
             channel_ids,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -308,7 +308,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         for it in channels {
             if !channel_ids.contains(&it.channel_id) {
-                return Err(ServerError::UnderSpecifiedChannels);
+                return Err(ServerError::UnderSpecifiedChannels.into());
             }
         }
 
@@ -333,18 +333,16 @@ impl chat_service_server::ChatService for ChatServer {
     async fn create_guild(
         &self,
         request: Request<CreateGuildRequest>,
-    ) -> Result<CreateGuildResponse, Self::Error> {
+    ) -> Result<CreateGuildResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let (
-            CreateGuildRequest {
-                metadata,
-                guild_name,
-                picture_url,
-            },
-            headers,
-            addr,
-        ) = request.into_parts();
+        let (body, headers, addr) = request.into_parts();
+
+        let CreateGuildRequest {
+            metadata,
+            guild_name,
+            picture_url,
+        } = body.into_message().await??;
 
         let guild_id = {
             let mut rng = rand::thread_rng();
@@ -401,11 +399,11 @@ impl chat_service_server::ChatService for ChatServer {
             .set_permissions_logic(guild_id, 0, everyone_role_id, def_perms.clone());
         let channel_id = self
             .create_channel(Request::from_parts((
-                CreateChannelRequest {
+                BodyKind::DecodedMessage(CreateChannelRequest {
                     guild_id,
                     channel_name: "general".to_string(),
                     ..Default::default()
-                },
+                }),
                 headers,
                 addr,
             )))
@@ -444,14 +442,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn create_invite(
         &self,
         request: Request<CreateInviteRequest>,
-    ) -> Result<CreateInviteResponse, Self::Error> {
+    ) -> Result<CreateInviteResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let CreateInviteRequest {
             guild_id,
             name,
             possible_uses,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -460,11 +458,11 @@ impl chat_service_server::ChatService for ChatServer {
         let key = make_invite_key(name.as_str());
 
         if name.is_empty() {
-            return Err(ServerError::InviteNameEmpty);
+            return Err(ServerError::InviteNameEmpty.into());
         }
 
         if chat_get!(key).is_some() {
-            return Err(ServerError::InviteExists(name));
+            return Err(ServerError::InviteExists(name).into());
         }
 
         let invite = get_guild_invites_response::Invite {
@@ -483,7 +481,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn create_channel(
         &self,
         request: Request<CreateChannelRequest>,
-    ) -> Result<CreateChannelResponse, Self::Error> {
+    ) -> Result<CreateChannelResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let CreateChannelRequest {
@@ -492,7 +490,7 @@ impl chat_service_server::ChatService for ChatServer {
             is_category,
             position,
             metadata,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -527,10 +525,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn create_emote_pack(
         &self,
         request: Request<CreateEmotePackRequest>,
-    ) -> Result<CreateEmotePackResponse, Self::Error> {
+    ) -> Result<CreateEmotePackResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let CreateEmotePackRequest { pack_name } = request.into_parts().0;
+        let CreateEmotePackRequest { pack_name } = request.into_parts().0.into_message().await??;
 
         let pack_id = gen_rand_u64();
         let key = make_emote_pack_key(pack_id);
@@ -561,7 +559,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_guild_list(
         &self,
         request: Request<GetGuildListRequest>,
-    ) -> Result<GetGuildListResponse, Self::Error> {
+    ) -> Result<GetGuildListResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let prefix = make_guild_list_key_prefix(user_id);
@@ -595,24 +593,24 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_guild(
         &self,
         request: Request<GetGuildRequest>,
-    ) -> Result<GetGuildResponse, Self::Error> {
+    ) -> Result<GetGuildResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetGuildRequest { guild_id } = request.into_parts().0;
+        let GetGuildRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
-        self.chat_tree.get_guild_logic(guild_id)
+        self.chat_tree.get_guild_logic(guild_id).map_err(Into::into)
     }
 
     #[rate(15, 5)]
     async fn get_guild_invites(
         &self,
         request: Request<GetGuildInvitesRequest>,
-    ) -> Result<GetGuildInvitesResponse, Self::Error> {
+    ) -> Result<GetGuildInvitesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetGuildInvitesRequest { guild_id } = request.into_parts().0;
+        let GetGuildInvitesRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -625,10 +623,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_guild_members(
         &self,
         request: Request<GetGuildMembersRequest>,
-    ) -> Result<GetGuildMembersResponse, Self::Error> {
+    ) -> Result<GetGuildMembersResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetGuildMembersRequest { guild_id } = request.into_parts().0;
+        let GetGuildMembersRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
@@ -639,10 +637,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_guild_channels(
         &self,
         request: Request<GetGuildChannelsRequest>,
-    ) -> Result<GetGuildChannelsResponse, Self::Error> {
+    ) -> Result<GetGuildChannelsResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetGuildChannelsRequest { guild_id } = request.into_parts().0;
+        let GetGuildChannelsRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
@@ -653,7 +651,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_channel_messages(
         &self,
         request: Request<GetChannelMessagesRequest>,
-    ) -> Result<GetChannelMessagesResponse, Self::Error> {
+    ) -> Result<GetChannelMessagesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let GetChannelMessagesRequest {
@@ -662,7 +660,7 @@ impl chat_service_server::ChatService for ChatServer {
             message_id,
             direction,
             count,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -682,10 +680,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_message(
         &self,
         request: Request<GetMessageRequest>,
-    ) -> Result<GetMessageResponse, Self::Error> {
+    ) -> Result<GetMessageResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let request = request.into_parts().0;
+        let request = request.into_parts().0.into_message().await??;
 
         let GetMessageRequest {
             guild_id,
@@ -711,7 +709,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_emote_packs(
         &self,
         request: Request<GetEmotePacksRequest>,
-    ) -> Result<GetEmotePacksResponse, Self::Error> {
+    ) -> Result<GetEmotePacksResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let prefix = make_equipped_emote_prefix(user_id);
@@ -758,15 +756,15 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_emote_pack_emotes(
         &self,
         request: Request<GetEmotePackEmotesRequest>,
-    ) -> Result<GetEmotePackEmotesResponse, Self::Error> {
+    ) -> Result<GetEmotePackEmotesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0;
+        let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0.into_message().await??;
 
         let pack_key = make_emote_pack_key(pack_id);
 
         if chat_get!(pack_key).is_none() {
-            return Err(ServerError::EmotePackNotFound);
+            return Err(ServerError::EmotePackNotFound.into());
         }
 
         let emotes = self
@@ -786,7 +784,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_guild_information(
         &self,
         request: Request<UpdateGuildInformationRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateGuildInformationRequest {
@@ -794,13 +792,13 @@ impl chat_service_server::ChatService for ChatServer {
             new_guild_name,
             new_guild_picture,
             new_metadata,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         let key = guild_id.to_be_bytes();
         let mut guild_info = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
             db::deser_guild(raw)
         } else {
-            return Err(ServerError::NoSuchGuild(guild_id));
+            return Err(ServerError::NoSuchGuild(guild_id).into());
         };
 
         self.chat_tree.is_user_in_guild(guild_id, user_id)?;
@@ -845,7 +843,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_channel_information(
         &self,
         request: Request<UpdateChannelInformationRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateChannelInformationRequest {
@@ -853,7 +851,7 @@ impl chat_service_server::ChatService for ChatServer {
             channel_id,
             new_name,
             new_metadata,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.check_perms(
@@ -871,7 +869,8 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::NoSuchChannel {
                 guild_id,
                 channel_id,
-            });
+            }
+            .into());
         };
 
         if let Some(new_name) = new_name.clone() {
@@ -904,14 +903,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_channel_order(
         &self,
         request: Request<UpdateChannelOrderRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateChannelOrderRequest {
             guild_id,
             channel_id,
             new_position,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -942,10 +941,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_message_text(
         &self,
         request: Request<UpdateMessageTextRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let request = request.into_parts().0;
+        let request = request.into_parts().0.into_message().await??;
 
         let UpdateMessageTextRequest {
             guild_id,
@@ -960,7 +959,7 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
 
         if new_content.is_empty() {
-            return Err(ServerError::MessageContentCantBeEmpty);
+            return Err(ServerError::MessageContentCantBeEmpty.into());
         }
 
         let (mut message, key) = self
@@ -1003,14 +1002,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn add_emote_to_pack(
         &self,
         request: Request<AddEmoteToPackRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let AddEmoteToPackRequest {
             pack_id,
             image_id,
             name,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
 
@@ -1036,10 +1035,13 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(1, 15)]
-    async fn delete_guild(&self, request: Request<DeleteGuildRequest>) -> Result<(), Self::Error> {
+    async fn delete_guild(
+        &self,
+        request: Request<DeleteGuildRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let DeleteGuildRequest { guild_id } = request.into_parts().0;
+        let DeleteGuildRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1100,13 +1102,13 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_invite(
         &self,
         request: Request<DeleteInviteRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteInviteRequest {
             guild_id,
             invite_id,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1124,13 +1126,13 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_channel(
         &self,
         request: Request<DeleteChannelRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteChannelRequest {
             guild_id,
             channel_id,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -1182,14 +1184,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_message(
         &self,
         request: Request<DeleteMessageRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteMessageRequest {
             guild_id,
             channel_id,
             message_id,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -1232,10 +1234,11 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_emote_from_pack(
         &self,
         request: Request<DeleteEmoteFromPackRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let DeleteEmoteFromPackRequest { pack_id, image_id } = request.into_parts().0;
+        let DeleteEmoteFromPackRequest { pack_id, image_id } =
+            request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
 
@@ -1262,10 +1265,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_emote_pack(
         &self,
         request: Request<DeleteEmotePackRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let DeleteEmotePackRequest { pack_id } = request.into_parts().0;
+        let DeleteEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
 
@@ -1296,10 +1299,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn dequip_emote_pack(
         &self,
         request: Request<DequipEmotePackRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let DequipEmotePackRequest { pack_id } = request.into_parts().0;
+        let DequipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
 
@@ -1317,10 +1320,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn equip_emote_pack(
         &self,
         request: Request<EquipEmotePackRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let EquipEmotePackRequest { pack_id } = request.into_parts().0;
+        let EquipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
 
         let key = make_emote_pack_key(pack_id);
         if let Some(data) = chat_get!(key) {
@@ -1333,7 +1336,7 @@ impl chat_service_server::ChatService for ChatServer {
                 EventContext::new(vec![user_id]),
             );
         } else {
-            return Err(ServerError::EmotePackNotFound);
+            return Err(ServerError::EmotePackNotFound.into());
         }
 
         Ok(())
@@ -1343,21 +1346,21 @@ impl chat_service_server::ChatService for ChatServer {
     async fn join_guild(
         &self,
         request: Request<JoinGuildRequest>,
-    ) -> Result<JoinGuildResponse, Self::Error> {
+    ) -> Result<JoinGuildResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let JoinGuildRequest { invite_id } = request.into_parts().0;
+        let JoinGuildRequest { invite_id } = request.into_parts().0.into_message().await??;
         let key = make_invite_key(invite_id.as_str());
 
         let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap()
         {
             db::deser_invite_entry(raw)
         } else {
-            return Err(ServerError::NoSuchInvite(invite_id.into()));
+            return Err(ServerError::NoSuchInvite(invite_id.into()).into());
         };
 
         if self.chat_tree.is_user_banned_in_guild(guild_id, user_id) {
-            return Err(ServerError::UserBanned);
+            return Err(ServerError::UserBanned.into());
         }
 
         self.chat_tree
@@ -1368,7 +1371,7 @@ impl chat_service_server::ChatService for ChatServer {
         let is_infinite = invite.possible_uses == -1;
 
         if is_infinite.not() && invite.use_count >= invite.possible_uses {
-            return Err(ServerError::InviteExpired);
+            return Err(ServerError::InviteExpired.into());
         }
 
         chat_insert!(make_member_key(guild_id, user_id) / []);
@@ -1415,10 +1418,13 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
-    async fn leave_guild(&self, request: Request<LeaveGuildRequest>) -> Result<(), Self::Error> {
+    async fn leave_guild(
+        &self,
+        request: Request<LeaveGuildRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let LeaveGuildRequest { guild_id } = request.into_parts().0;
+        let LeaveGuildRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
@@ -1468,15 +1474,15 @@ impl chat_service_server::ChatService for ChatServer {
     async fn trigger_action(
         &self,
         request: Request<TriggerActionRequest>,
-    ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+    ) -> Result<(), HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 
     #[rate(50, 10)]
     async fn send_message(
         &self,
         request: Request<SendMessageRequest>,
-    ) -> Result<SendMessageResponse, Self::Error> {
+    ) -> Result<SendMessageResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let SendMessageRequest {
@@ -1487,7 +1493,7 @@ impl chat_service_server::ChatService for ChatServer {
             overrides,
             echo_id,
             metadata,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -1522,13 +1528,13 @@ impl chat_service_server::ChatService for ChatServer {
             let content = match content {
                 content::Content::TextMessage(text) => {
                     if text.content.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     content::Content::TextMessage(text)
                 }
                 content::Content::PhotosMessage(mut photos) => {
                     if photos.photos.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     for photo in photos.photos.drain(..).collect::<Vec<_>>() {
                         // TODO: return error for invalid hmc
@@ -1544,75 +1550,84 @@ impl chat_service_server::ChatService for ChatServer {
                             let minithumbnail_jpeg_path =
                                 self.media_root.join(&minithumbnail_jpeg_id);
 
-                            let ((file_size, isize), minithumbnail) =
-                                if image_jpeg_path.exists() && minithumbnail_jpeg_path.exists() {
-                                    let minifile = BufReader::new(
-                                        tokio::fs::File::open(&minithumbnail_jpeg_path)
-                                            .await?
-                                            .into_std()
-                                            .await,
-                                    );
-                                    let mut minireader = image::io::Reader::new(minifile);
-                                    minireader.set_format(FORMAT);
-                                    let minisize = minireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
-                                    let minithumbnail_jpeg =
-                                        tokio::fs::read(&minithumbnail_jpeg_path).await?;
+                            let ((file_size, isize), minithumbnail) = if image_jpeg_path.exists()
+                                && minithumbnail_jpeg_path.exists()
+                            {
+                                let minifile = BufReader::new(
+                                    tokio::fs::File::open(&minithumbnail_jpeg_path)
+                                        .await
+                                        .map_err(ServerError::from)?
+                                        .into_std()
+                                        .await,
+                                );
+                                let mut minireader = image::io::Reader::new(minifile);
+                                minireader.set_format(FORMAT);
+                                let minisize = minireader
+                                    .into_dimensions()
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let minithumbnail_jpeg = tokio::fs::read(&minithumbnail_jpeg_path)
+                                    .await
+                                    .map_err(ServerError::from)?;
 
-                                    let ifile = tokio::fs::File::open(&image_jpeg_path).await?;
-                                    let file_size = ifile.metadata().await?.len();
-                                    let ifile = BufReader::new(ifile.into_std().await);
-                                    let mut ireader = image::io::Reader::new(ifile);
-                                    ireader.set_format(FORMAT);
-                                    let isize = ireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
+                                let ifile = tokio::fs::File::open(&image_jpeg_path)
+                                    .await
+                                    .map_err(ServerError::from)?;
+                                let file_size =
+                                    ifile.metadata().await.map_err(ServerError::from)?.len();
+                                let ifile = BufReader::new(ifile.into_std().await);
+                                let mut ireader = image::io::Reader::new(ifile);
+                                ireader.set_format(FORMAT);
+                                let isize = ireader
+                                    .into_dimensions()
+                                    .map_err(|_| ServerError::InternalServerError)?;
 
-                                    (
-                                        (file_size as u32, isize),
-                                        Minithumbnail {
-                                            width: minisize.0,
-                                            height: minisize.1,
-                                            data: minithumbnail_jpeg,
-                                        },
-                                    )
-                                } else {
-                                    let (_, _, data, _) =
-                                        get_file_full(self.media_root.as_path(), id).await?;
+                                (
+                                    (file_size as u32, isize),
+                                    Minithumbnail {
+                                        width: minisize.0,
+                                        height: minisize.1,
+                                        data: minithumbnail_jpeg,
+                                    },
+                                )
+                            } else {
+                                let (_, _, data, _) =
+                                    get_file_full(self.media_root.as_path(), id).await?;
 
-                                    if image::guess_format(&data).is_err() {
-                                        return Err(ServerError::NotAnImage);
-                                    }
+                                if image::guess_format(&data).is_err() {
+                                    return Err(ServerError::NotAnImage.into());
+                                }
 
-                                    let image = image::load_from_memory(&data)
-                                        .map_err(|_| ServerError::InternalServerError)?;
-                                    let image_size = image.dimensions();
-                                    let mut image_jpeg = Vec::new();
-                                    image
-                                        .write_to(&mut image_jpeg, FORMAT)
-                                        .map_err(|_| ServerError::InternalServerError)?;
-                                    let file_size = image_jpeg.len();
-                                    tokio::fs::write(&image_jpeg_path, image_jpeg).await?;
+                                let image = image::load_from_memory(&data)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let image_size = image.dimensions();
+                                let mut image_jpeg = Vec::new();
+                                image
+                                    .write_to(&mut image_jpeg, FORMAT)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let file_size = image_jpeg.len();
+                                tokio::fs::write(&image_jpeg_path, image_jpeg)
+                                    .await
+                                    .map_err(ServerError::from)?;
 
-                                    let minithumbnail = image.thumbnail(64, 64);
-                                    let minithumb_size = minithumbnail.dimensions();
-                                    let mut minithumbnail_jpeg = Vec::new();
-                                    minithumbnail
-                                        .write_to(&mut minithumbnail_jpeg, FORMAT)
-                                        .map_err(|_| ServerError::InternalServerError)?;
-                                    tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
-                                        .await?;
+                                let minithumbnail = image.thumbnail(64, 64);
+                                let minithumb_size = minithumbnail.dimensions();
+                                let mut minithumbnail_jpeg = Vec::new();
+                                minithumbnail
+                                    .write_to(&mut minithumbnail_jpeg, FORMAT)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
+                                    .await
+                                    .map_err(ServerError::from)?;
 
-                                    (
-                                        (file_size as u32, image_size),
-                                        Minithumbnail {
-                                            width: minithumb_size.0,
-                                            height: minithumb_size.1,
-                                            data: minithumbnail_jpeg,
-                                        },
-                                    )
-                                };
+                                (
+                                    (file_size as u32, image_size),
+                                    Minithumbnail {
+                                        width: minithumb_size.0,
+                                        height: minithumb_size.1,
+                                        data: minithumbnail_jpeg,
+                                    },
+                                )
+                            };
 
                             photos.photos.push(Photo {
                                 hmc: Hmc::new(&self.host, image_jpeg_id).unwrap().into(),
@@ -1630,7 +1645,7 @@ impl chat_service_server::ChatService for ChatServer {
                 }
                 content::Content::FilesMessage(mut files) => {
                     if files.attachments.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     for attachment in files.attachments.drain(..).collect::<Vec<_>>() {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
@@ -1692,7 +1707,7 @@ impl chat_service_server::ChatService for ChatServer {
                 }
                 content::Content::EmbedMessage(embed) => {
                     if embed.embeds.is_none() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     content::Content::EmbedMessage(embed)
                 }
@@ -1701,7 +1716,7 @@ impl chat_service_server::ChatService for ChatServer {
                 content: Some(content),
             })
         } else {
-            return Err(ServerError::MessageContentCantBeEmpty);
+            return Err(ServerError::MessageContentCantBeEmpty.into());
         };
 
         let message = HarmonyMessage {
@@ -1739,21 +1754,23 @@ impl chat_service_server::ChatService for ChatServer {
     async fn query_has_permission(
         &self,
         request: Request<QueryPermissionsRequest>,
-    ) -> Result<QueryPermissionsResponse, Self::Error> {
+    ) -> Result<QueryPermissionsResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         self.chat_tree
-            .query_has_permission_request(user_id, request.into_parts().0)
+            .query_has_permission_request(user_id, request.into_parts().0.into_message().await??)
+            .map_err(Into::into)
     }
 
     #[rate(30, 5)]
     async fn batch_query_has_permission(
         &self,
         request: Request<BatchQueryPermissionsRequest>,
-    ) -> Result<BatchQueryPermissionsResponse, Self::Error> {
+    ) -> Result<BatchQueryPermissionsResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let BatchQueryPermissionsRequest { requests } = request.into_parts().0;
+        let BatchQueryPermissionsRequest { requests } =
+            request.into_parts().0.into_message().await??;
 
         Ok(BatchQueryPermissionsResponse {
             responses: requests
@@ -1776,7 +1793,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn set_permissions(
         &self,
         request: Request<SetPermissionsRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let SetPermissionsRequest {
@@ -1784,7 +1801,7 @@ impl chat_service_server::ChatService for ChatServer {
             channel_id,
             role_id,
             perms,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.check_perms(
@@ -1847,7 +1864,7 @@ impl chat_service_server::ChatService for ChatServer {
             );
             Ok(())
         } else {
-            Err(ServerError::NoPermissionsSpecified)
+            Err(ServerError::NoPermissionsSpecified.into())
         }
     }
 
@@ -1855,14 +1872,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_permissions(
         &self,
         request: Request<GetPermissionsRequest>,
-    ) -> Result<GetPermissionsResponse, Self::Error> {
+    ) -> Result<GetPermissionsResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let GetPermissionsRequest {
             guild_id,
             channel_id,
             role_id,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.check_perms(
@@ -1884,14 +1901,14 @@ impl chat_service_server::ChatService for ChatServer {
     async fn move_role(
         &self,
         request: Request<MoveRoleRequest>,
-    ) -> Result<MoveRoleResponse, Self::Error> {
+    ) -> Result<MoveRoleResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let MoveRoleRequest {
             guild_id,
             role_id,
             new_position,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1920,10 +1937,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_guild_roles(
         &self,
         request: Request<GetGuildRolesRequest>,
-    ) -> Result<GetGuildRolesResponse, Self::Error> {
+    ) -> Result<GetGuildRolesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetGuildRolesRequest { guild_id } = request.into_parts().0;
+        let GetGuildRolesRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1938,10 +1955,11 @@ impl chat_service_server::ChatService for ChatServer {
     async fn add_guild_role(
         &self,
         request: Request<AddGuildRoleRequest>,
-    ) -> Result<AddGuildRoleResponse, Self::Error> {
+    ) -> Result<AddGuildRoleResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let AddGuildRoleRequest { guild_id, role } = request.into_parts().0;
+        let AddGuildRoleRequest { guild_id, role } =
+            request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1963,7 +1981,7 @@ impl chat_service_server::ChatService for ChatServer {
             );
             Ok(AddGuildRoleResponse { role_id })
         } else {
-            Err(ServerError::NoRoleSpecified)
+            Err(ServerError::NoRoleSpecified.into())
         }
     }
 
@@ -1971,7 +1989,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn modify_guild_role(
         &self,
         request: Request<ModifyGuildRoleRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let ModifyGuildRoleRequest {
@@ -1981,7 +1999,7 @@ impl chat_service_server::ChatService for ChatServer {
             new_color,
             new_hoist,
             new_pingable,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -1991,7 +2009,7 @@ impl chat_service_server::ChatService for ChatServer {
         let mut role = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
             db::deser_role(raw)
         } else {
-            return Err(ServerError::NoSuchRole { guild_id, role_id });
+            return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
         };
 
         if let Some(new_name) = new_name {
@@ -2028,10 +2046,11 @@ impl chat_service_server::ChatService for ChatServer {
     async fn delete_guild_role(
         &self,
         request: Request<DeleteGuildRoleRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
-        let DeleteGuildRoleRequest { guild_id, role_id } = request.into_parts().0;
+        let DeleteGuildRoleRequest { guild_id, role_id } =
+            request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -2057,7 +2076,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn manage_user_roles(
         &self,
         request: Request<ManageUserRolesRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let ManageUserRolesRequest {
@@ -2065,7 +2084,7 @@ impl chat_service_server::ChatService for ChatServer {
             user_id: user_to_manage,
             give_role_ids,
             take_role_ids,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_manage)?;
@@ -2102,13 +2121,13 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_user_roles(
         &self,
         request: Request<GetUserRolesRequest>,
-    ) -> Result<GetUserRolesResponse, Self::Error> {
+    ) -> Result<GetUserRolesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let GetUserRolesRequest {
             guild_id,
             user_id: user_to_fetch,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_fetch)?;
@@ -2134,7 +2153,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn stream_events_validation(
         &self,
         request: Request<Option<StreamEventsRequest>>,
-    ) -> Result<u64, Self::Error> {
+    ) -> Result<u64, HrpcServerError<Self::Error>> {
         auth!();
         Ok(user_id)
     }
@@ -2188,22 +2207,22 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_user(
         &self,
         request: Request<GetUserRequest>,
-    ) -> Result<GetUserResponse, Self::Error> {
+    ) -> Result<GetUserResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetUserRequest { user_id } = request.into_parts().0;
+        let GetUserRequest { user_id } = request.into_parts().0.into_message().await??;
 
-        self.chat_tree.get_user_logic(user_id)
+        self.chat_tree.get_user_logic(user_id).map_err(Into::into)
     }
 
     #[rate(5, 5)]
     async fn get_user_bulk(
         &self,
         request: Request<GetUserBulkRequest>,
-    ) -> Result<GetUserBulkResponse, Self::Error> {
+    ) -> Result<GetUserBulkResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetUserBulkRequest { user_ids } = request.into_parts().0;
+        let GetUserBulkRequest { user_ids } = request.into_parts().0.into_message().await??;
 
         let mut profiles = Vec::with_capacity(user_ids.len());
 
@@ -2214,7 +2233,7 @@ impl chat_service_server::ChatService for ChatServer {
             if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
                 profiles.push(db::deser_profile(raw));
             } else {
-                return Err(ServerError::NoSuchUser(id));
+                return Err(ServerError::NoSuchUser(id).into());
             }
         }
 
@@ -2225,10 +2244,10 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_user_metadata(
         &self,
         request: Request<GetUserMetadataRequest>,
-    ) -> Result<GetUserMetadataResponse, Self::Error> {
+    ) -> Result<GetUserMetadataResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let GetUserMetadataRequest { app_id } = request.into_parts().0;
+        let GetUserMetadataRequest { app_id } = request.into_parts().0.into_message().await??;
         let metadata = self
             .chat_tree
             .chat_tree
@@ -2246,7 +2265,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn profile_update(
         &self,
         request: Request<ProfileUpdateRequest>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let ProfileUpdateRequest {
@@ -2254,7 +2273,7 @@ impl chat_service_server::ChatService for ChatServer {
             new_avatar,
             new_status,
             new_is_bot,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         let key = make_user_profile_key(user_id);
 
@@ -2298,13 +2317,16 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
-    async fn typing(&self, request: Request<TypingRequest>) -> Result<(), Self::Error> {
+    async fn typing(
+        &self,
+        request: Request<TypingRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let TypingRequest {
             guild_id,
             channel_id,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
@@ -2329,8 +2351,8 @@ impl chat_service_server::ChatService for ChatServer {
     async fn preview_guild(
         &self,
         request: Request<PreviewGuildRequest>,
-    ) -> Result<PreviewGuildResponse, Self::Error> {
-        let PreviewGuildRequest { invite_id } = request.into_parts().0;
+    ) -> Result<PreviewGuildResponse, HrpcServerError<Self::Error>> {
+        let PreviewGuildRequest { invite_id } = request.into_parts().0.into_message().await??;
 
         let key = make_invite_key(&invite_id);
         let guild_id = self
@@ -2355,13 +2377,16 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
-    async fn ban_user(&self, request: Request<BanUserRequest>) -> Result<(), Self::Error> {
+    async fn ban_user(
+        &self,
+        request: Request<BanUserRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let BanUserRequest {
             guild_id,
             user_id: user_to_ban,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
@@ -2387,13 +2412,16 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
-    async fn kick_user(&self, request: Request<KickUserRequest>) -> Result<(), Self::Error> {
+    async fn kick_user(
+        &self,
+        request: Request<KickUserRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let KickUserRequest {
             guild_id,
             user_id: user_to_kick,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
@@ -2417,13 +2445,16 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
-    async fn unban_user(&self, request: Request<UnbanUserRequest>) -> Result<(), Self::Error> {
+    async fn unban_user(
+        &self,
+        request: Request<UnbanUserRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
         auth!();
 
         let UnbanUserRequest {
             guild_id,
             user_id: user_to_unban,
-        } = request.into_parts().0;
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
@@ -2437,19 +2468,22 @@ impl chat_service_server::ChatService for ChatServer {
     async fn get_pinned_messages(
         &self,
         request: Request<GetPinnedMessagesRequest>,
-    ) -> Result<GetPinnedMessagesResponse, Self::Error> {
-        Err(ServerError::NotImplemented)
+    ) -> Result<GetPinnedMessagesResponse, HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 
-    async fn pin_message(&self, request: Request<PinMessageRequest>) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+    async fn pin_message(
+        &self,
+        request: Request<PinMessageRequest>,
+    ) -> Result<(), HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 
     async fn unpin_message(
         &self,
         request: Request<UnpinMessageRequest>,
-    ) -> Result<(), Self::Error> {
-        Err(ServerError::NotImplemented)
+    ) -> Result<(), HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 }
 

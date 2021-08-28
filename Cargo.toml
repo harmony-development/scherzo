@@ -85,3 +85,5 @@ markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 cached = { git = "https://github.com/yusdacra/cached.git", branch = "chore/deps" }
+hrpc = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "feat/body" }
+hrpc-build = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "feat/body" }

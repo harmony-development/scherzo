@@ -6,7 +6,10 @@ use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
-        hrpc::{async_trait, encode_protobuf_message, futures_util::TryFutureExt, Request},
+        hrpc::{
+            async_trait, encode_protobuf_message, futures_util::TryFutureExt,
+            server::ServerError as HrpcServerError, Request,
+        },
         prost::Message,
     },
     harmonytypes::Token,
@@ -251,19 +254,19 @@ impl SyncServer {
 impl postbox_service_server::PostboxService for SyncServer {
     type Error = ServerError;
 
-    async fn pull(&self, request: Request<()>) -> Result<EventQueue, Self::Error> {
+    async fn pull(&self, request: Request<()>) -> Result<EventQueue, HrpcServerError<Self::Error>> {
         let host = self.auth(&request).await?;
         let queue = self.get_event_queue(&host);
         Ok(queue)
     }
 
-    async fn push(&self, request: Request<Event>) -> Result<(), Self::Error> {
+    async fn push(&self, request: Request<Event>) -> Result<(), HrpcServerError<Self::Error>> {
         let host = self.auth(&request).await?;
         let key = make_host_key(&host);
         if !self.sync_tree.contains_key(&key).unwrap() {
             self.sync_tree.insert(&key, &[]).unwrap();
         }
-        self.push_logic(&host, request.into_parts().0);
+        self.push_logic(&host, request.into_parts().0.into_message().await??);
         Ok(())
     }
 }

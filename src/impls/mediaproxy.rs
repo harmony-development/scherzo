@@ -13,7 +13,7 @@ use crate::{
 };
 
 use harmony_rust_sdk::api::{
-    exports::hrpc::Request,
+    exports::hrpc::{server::ServerError as HrpcServerError, Request},
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 
@@ -141,10 +141,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     async fn fetch_link_metadata(
         &self,
         request: Request<FetchLinkMetadataRequest>,
-    ) -> Result<FetchLinkMetadataResponse, Self::Error> {
+    ) -> Result<FetchLinkMetadataResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let FetchLinkMetadataRequest { url } = request.into_parts().0;
+        let FetchLinkMetadataRequest { url } = request.into_parts().0.into_message().await??;
 
         let data = match self.fetch_metadata(url).await? {
             Metadata::Site(mut html) => Data::IsSite(SiteMetadata {
@@ -172,10 +172,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     async fn instant_view(
         &self,
         request: Request<InstantViewRequest>,
-    ) -> Result<InstantViewResponse, Self::Error> {
+    ) -> Result<InstantViewResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let InstantViewRequest { url } = request.into_parts().0;
+        let InstantViewRequest { url } = request.into_parts().0.into_message().await??;
 
         let data = self.fetch_metadata(url).await?;
 
@@ -201,10 +201,10 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     async fn can_instant_view(
         &self,
         request: Request<InstantViewRequest>,
-    ) -> Result<CanInstantViewResponse, Self::Error> {
+    ) -> Result<CanInstantViewResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let InstantViewRequest { url } = request.into_parts().0;
+        let InstantViewRequest { url } = request.into_parts().0.into_message().await??;
 
         if let Some(val) = get_from_cache(&url) {
             return Ok(CanInstantViewResponse {
@@ -213,7 +213,7 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         }
 
         let url: Url = url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = self.http.get(url).send().await?;
+        let response = self.http.get(url).send().await.map_err(ServerError::from)?;
 
         let ok = get_mimetype(&response).eq("text/html");
 
