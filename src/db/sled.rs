@@ -37,6 +37,13 @@ impl Tree for sled::Tree {
         }))
     }
 
+    fn iter(&self) -> Iter<'_> {
+        Box::new(self.iter().map(|res| {
+            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
+                .map_err(Into::into)
+        }))
+    }
+
     fn apply_batch(&self, batch: Batch) -> Result<(), DbError> {
         self.apply_batch(batch.into()).map_err(Into::into)
     }

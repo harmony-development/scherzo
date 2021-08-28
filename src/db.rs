@@ -72,6 +72,7 @@ pub trait Tree: Send + Sync {
     fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<Vec<u8>>>;
     fn remove(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
     fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a>;
+    fn iter(&self) -> Iter<'_>;
     fn apply_batch(&self, batch: Batch) -> DbResult<()>;
     fn contains_key(&self, key: &[u8]) -> DbResult<bool>;
     fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a>;

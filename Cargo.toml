@@ -42,6 +42,9 @@ ed25519-compact = "0.1"
 rustyline = "8.2"
 image = "0.23"
 
+# migration protocols
+sdk_migration_two = { package = "harmony_rust_sdk", git = "https://github.com/harmony-development/harmony_rust_sdk.git", rev = "dfcaca4ab04992afd47d21a6610bb8600cbe48b8" }
+
 [profile.dev]
 opt-level = 0
 overflow-checks = true

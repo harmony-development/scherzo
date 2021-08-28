@@ -31,6 +31,10 @@ impl Tree for NoopTree {
         Box::new(std::iter::empty())
     }
 
+    fn iter(&self) -> Iter<'_> {
+        Box::new(std::iter::empty())
+    }
+
     fn apply_batch(&self, _: Batch) -> DbResult<()> {
         Ok(())
     }
