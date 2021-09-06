@@ -382,9 +382,8 @@ pub async fn run(filter_level: Level, db_path: String) {
         profile_tree.clone(),
         valid_sessions.clone(),
         dispatch_tx,
-        chat_event_sender,
+        chat_event_sender.clone(),
     );
-    let broadcast_send = chat_server.broadcast_send.clone();
     let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
     let sync_server = SyncServer::new(
         chat_tree.clone(),
@@ -637,7 +636,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     loop {
         let prompt = format!(
             "({} streams) ({} valid sessions)> ",
-            broadcast_send.receiver_count(),
+            chat_event_sender.receiver_count(),
             valid_sessions.len()
         );
         let readline = rl.readline(&prompt);
@@ -647,9 +646,8 @@ pub async fn run(filter_level: Level, db_path: String) {
                 handle_cmd(command);
                 rl.add_history_entry(line);
             }
-            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                break;
-            }
+            // We don't want to accidentally shut down the whole server
+            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {}
             Err(err) => {
                 println!("Error: {:?}", err);
                 break;
