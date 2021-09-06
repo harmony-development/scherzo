@@ -4,7 +4,6 @@ use ahash::RandomState;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
-    chat::GetUserResponse,
     exports::{
         hrpc::{
             encode_protobuf_message, server::ServerError as HrpcServerError, server::WriteSocket,
@@ -12,9 +11,9 @@ use harmony_rust_sdk::api::{
         },
         prost::Message,
     },
-    harmonytypes::UserStatus,
+    profile::{Profile, UserStatus},
 };
-use scherzo_derive::{auth, chat_insert, rate};
+use scherzo_derive::*;
 use sha3::Digest;
 use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
@@ -22,14 +21,13 @@ use triomphe::Arc;
 
 use crate::{
     config::FederationConfig,
-    impls::chat::ChatTree,
     key::{self, Manager as KeyManager},
 };
 
 use crate::{
     db::{
         auth::*,
-        chat::{
+        profile::{
             make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
         },
         ArcTree, Batch, Tree,
@@ -39,7 +37,7 @@ use crate::{
     set_proto_name, ServerError, ServerResult,
 };
 
-use super::gen_rand_arr;
+use super::{gen_rand_arr, profile::ProfileTree};
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
@@ -78,21 +76,21 @@ pub struct AuthServer {
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     auth_tree: ArcTree,
-    chat_tree: ChatTree,
+    profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
     federation_config: Option<Arc<FederationConfig>>,
 }
 
 impl AuthServer {
     pub fn new(
-        chat_tree: ChatTree,
+        profile_tree: ProfileTree,
         auth_tree: ArcTree,
         valid_sessions: SessionMap,
         keys_manager: Option<Arc<KeyManager>>,
         federation_config: Option<Arc<FederationConfig>>,
     ) -> Self {
         let att = auth_tree.clone();
-        let ctt = chat_tree.clone();
+        let ptt = profile_tree.clone();
         let vs = valid_sessions.clone();
 
         std::thread::spawn(move || {
@@ -121,7 +119,7 @@ impl AuthServer {
 
                 let mut batch = Batch::default();
                 for (id, raw_token) in tokens {
-                    if let Ok(profile) = ctt.get_user_logic(id) {
+                    if let Ok(profile) = ptt.get_profile_logic(id) {
                         for (oid, raw_atime) in &atimes {
                             if id.eq(oid) {
                                 // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
@@ -159,7 +157,7 @@ impl AuthServer {
             step_map: DashMap::default(),
             send_step: DashMap::default(),
             auth_tree,
-            chat_tree,
+            profile_tree,
             keys_manager,
             federation_config,
         }
@@ -199,22 +197,22 @@ impl auth_service_server::AuthService for AuthServer {
     #[rate(20, 5)]
     async fn check_logged_in(
         &self,
-        request: Request<()>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+        request: Request<CheckLoggedInRequest>,
+    ) -> Result<CheckLoggedInResponse, HrpcServerError<Self::Error>> {
         auth!();
-        Ok(())
+        Ok(CheckLoggedInResponse {})
     }
 
     #[rate(3, 1)]
     async fn federate(
         &self,
         request: Request<FederateRequest>,
-    ) -> Result<FederateReply, HrpcServerError<Self::Error>> {
+    ) -> Result<FederateResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let keys_manager = self.keys_manager()?;
 
-        let profile = self.chat_tree.get_user_logic(user_id)?;
+        let profile = self.profile_tree.get_profile_logic(user_id)?;
         let target = request.into_parts().0.into_message().await??.target;
 
         self.is_host_allowed(&target)?;
@@ -228,14 +226,14 @@ impl auth_service_server::AuthService for AuthServer {
 
         let token = keys_manager.generate_token(data).await?;
 
-        Ok(FederateReply { token: Some(token) })
+        Ok(FederateResponse { token: Some(token) })
     }
 
     #[rate(1, 5)]
     async fn login_federated(
         &self,
         request: Request<LoginFederatedRequest>,
-    ) -> Result<Session, HrpcServerError<Self::Error>> {
+    ) -> Result<LoginFederatedResponse, HrpcServerError<Self::Error>> {
         let LoginFederatedRequest { auth_token, domain } =
             request.into_parts().0.into_message().await??;
 
@@ -254,7 +252,7 @@ impl auth_service_server::AuthService for AuthServer {
                 .map_err(|_| ServerError::InvalidTokenData)?;
 
             let local_user_id = self
-                .chat_tree
+                .profile_tree
                 .foreign_to_local_id(foreign_id, &target)
                 .unwrap_or_else(|| {
                     let local_id = gen_rand_u64();
@@ -271,15 +269,15 @@ impl auth_service_server::AuthService for AuthServer {
                         &local_id.to_be_bytes(),
                     );
                     // Add the profile entry
-                    let profile = GetUserResponse {
+                    let profile = Profile {
                         is_bot: false,
-                        user_status: UserStatus::Offline.into(),
+                        user_status: UserStatus::OfflineUnspecified.into(),
                         user_avatar: avatar,
                         user_name: username,
                     };
                     let buf = encode_protobuf_message(profile);
                     batch.insert(&make_user_profile_key(local_id), buf.to_vec());
-                    self.chat_tree.chat_tree.apply_batch(batch).unwrap();
+                    self.profile_tree.inner.apply_batch(batch).unwrap();
 
                     local_id
                 });
@@ -291,18 +289,23 @@ impl auth_service_server::AuthService for AuthServer {
             };
             self.valid_sessions.insert(session_token, local_user_id);
 
-            return Ok(session);
+            return Ok(LoginFederatedResponse {
+                session: Some(session),
+            });
         }
 
         Err(ServerError::InvalidToken.into())
     }
 
     #[rate(1, 5)]
-    async fn key(&self, _: Request<()>) -> Result<KeyReply, HrpcServerError<Self::Error>> {
+    async fn key(
+        &self,
+        _: Request<KeyRequest>,
+    ) -> Result<KeyResponse, HrpcServerError<Self::Error>> {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
 
-        Ok(KeyReply {
+        Ok(KeyResponse {
             key: key.pk.to_vec(),
         })
     }
@@ -331,12 +334,15 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(2, 5)]
-    async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<AuthStep>) {
+    async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<StreamStepsResponse>) {
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id.clone(), tx);
         loop {
             while let Some(step) = rx.recv().await {
-                if let Err(err) = socket.send_message(step).await {
+                if let Err(err) = socket
+                    .send_message(StreamStepsResponse { step: Some(step) })
+                    .await
+                {
                     tracing::error!("error occured: {}", err);
 
                     // Remove send step channel after we are done
@@ -349,7 +355,7 @@ impl auth_service_server::AuthService for AuthServer {
     #[rate(2, 5)]
     async fn begin_auth(
         &self,
-        _: Request<()>,
+        _: Request<BeginAuthRequest>,
     ) -> Result<BeginAuthResponse, HrpcServerError<Self::Error>> {
         let initial_step = AuthStep {
             can_go_back: false,
@@ -382,7 +388,7 @@ impl auth_service_server::AuthService for AuthServer {
     async fn next_step(
         &self,
         req: Request<NextStepRequest>,
-    ) -> Result<AuthStep, HrpcServerError<Self::Error>> {
+    ) -> Result<NextStepResponse, HrpcServerError<Self::Error>> {
         let NextStepRequest {
             auth_id,
             step: maybe_step,
@@ -634,11 +640,11 @@ impl auth_service_server::AuthService for AuthServer {
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
-                                    let buf = encode_protobuf_message(GetUserResponse {
+                                    let buf = encode_protobuf_message(Profile {
                                         user_name: username,
                                         ..Default::default()
                                     });
-                                    chat_insert!(make_user_profile_key(user_id) / buf);
+                                    profile_insert!(make_user_profile_key(user_id) / buf);
 
                                     tracing::debug!(
                                         "new user {} registered with email {}",
@@ -692,14 +698,16 @@ impl auth_service_server::AuthService for AuthServer {
             self.send_step.remove(auth_id.as_str());
         }
 
-        Ok(next_step)
+        Ok(NextStepResponse {
+            step: Some(next_step),
+        })
     }
 
     #[rate(10, 5)]
     async fn step_back(
         &self,
         req: Request<StepBackRequest>,
-    ) -> Result<AuthStep, HrpcServerError<Self::Error>> {
+    ) -> Result<StepBackResponse, HrpcServerError<Self::Error>> {
         let req = req.into_parts().0.into_message().await??;
         let auth_id = req.auth_id;
 
@@ -727,7 +735,9 @@ impl auth_service_server::AuthService for AuthServer {
             return Err(ServerError::InvalidAuthId.into());
         }
 
-        Ok(prev_step)
+        Ok(StepBackResponse {
+            step: Some(prev_step),
+        })
     }
 }
 

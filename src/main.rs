@@ -11,29 +11,31 @@ use std::{
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
-    chat::{
-        chat_service_server::ChatServiceServer, get_guild_invites_response::Invite,
-        GetGuildResponse, GetUserResponse,
-    },
+    chat::{chat_service_server::ChatServiceServer, Guild, Invite},
+    emote::emote_service_server::EmoteServiceServer,
     exports::{
         hrpc::{self, warp::Filter},
         prost::Message,
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
+    profile::{profile_service_server::ProfileServiceServer, Profile},
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
 use rustyline::{error::ReadlineError, Editor};
 use scherzo::{
     db::{
-        chat::{make_invite_key, INVITE_PREFIX, USER_PREFIX},
+        chat::{make_invite_key, INVITE_PREFIX},
         migration::{apply_migrations, get_db_version},
+        profile::USER_PREFIX,
         Db,
     },
     impls::{
         auth::AuthServer,
         chat::{ChatServer, ChatTree},
+        emote::{EmoteServer, EmoteTree},
         mediaproxy::MediaproxyServer,
+        profile::{ProfileServer, ProfileTree},
         sync::SyncServer,
     },
     key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
@@ -334,11 +336,17 @@ pub async fn run(filter_level: Level, db_path: String) {
 
     let valid_sessions = Arc::new(DashMap::default());
 
-    let auth_tree = db.open_tree("auth".as_bytes()).unwrap();
-    let chat_tree = db.open_tree("chat".as_bytes()).unwrap();
-    let sync_tree = db.open_tree("sync".as_bytes()).unwrap();
+    let auth_tree = db.open_tree(b"auth").unwrap();
+    let chat_tree = db.open_tree(b"chat").unwrap();
+    let sync_tree = db.open_tree(b"sync").unwrap();
+    let profile_tree = db.open_tree(b"profile").unwrap();
+    let emote_tree = db.open_tree(b"emote").unwrap();
 
     let chat_tree = ChatTree { chat_tree };
+    let profile_tree = ProfileTree {
+        inner: profile_tree,
+    };
+    let emote_tree = EmoteTree { inner: emote_tree };
 
     let federation_config = config.federation.map(Arc::new);
     let media_root = Arc::new(config.media.media_root);
@@ -347,8 +355,21 @@ pub async fn run(filter_level: Level, db_path: String) {
     let keys_manager = federation_config
         .as_ref()
         .map(|conf| Arc::new(key::Manager::new(conf.key.clone())));
-    let auth_server = AuthServer::new(
+    let (chat_event_sender, _) = tokio::sync::broadcast::channel(1000);
+
+    let profile_server = ProfileServer::new(
+        profile_tree.clone(),
         chat_tree.clone(),
+        valid_sessions.clone(),
+        chat_event_sender.clone(),
+    );
+    let emote_server = EmoteServer::new(
+        emote_tree,
+        valid_sessions.clone(),
+        chat_event_sender.clone(),
+    );
+    let auth_server = AuthServer::new(
+        profile_tree.clone(),
         auth_tree.clone(),
         valid_sessions.clone(),
         keys_manager.clone(),
@@ -358,8 +379,10 @@ pub async fn run(filter_level: Level, db_path: String) {
         config.host.clone(),
         media_root.clone(),
         chat_tree.clone(),
+        profile_tree.clone(),
         valid_sessions.clone(),
         dispatch_tx,
+        chat_event_sender,
     );
     let broadcast_send = chat_server.broadcast_send.clone();
     let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
@@ -372,6 +395,8 @@ pub async fn run(filter_level: Level, db_path: String) {
         config.host.clone(),
     );
 
+    let profile = ProfileServiceServer::new(profile_server).filters();
+    let emote = EmoteServiceServer::new(emote_server).filters();
     let auth = AuthServiceServer::new(auth_server).filters();
     let chat = ChatServiceServer::new(chat_server).filters();
     let rest = scherzo::impls::rest::rest(
@@ -409,6 +434,8 @@ pub async fn run(filter_level: Level, db_path: String) {
             .or(mediaproxy)
             .or(rest)
             .or(sync)
+            .or(emote)
+            .or(profile)
             .or(scherzo::impls::about(
                 config.server_description,
                 shared_config.clone(),
@@ -460,14 +487,14 @@ pub async fn run(filter_level: Level, db_path: String) {
             }
         }
         Command::GetMembers => {
-            let members = chat_tree
-                .chat_tree
+            let members = profile_tree
+                .inner
                 .scan_prefix(USER_PREFIX)
                 .flatten()
                 .map(|(k, v)| {
                     let member_id =
                         u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
-                    let member_data = GetUserResponse::decode(v.as_ref()).unwrap();
+                    let member_data = Profile::decode(v.as_ref()).unwrap();
                     (member_id, member_data)
                 });
 
@@ -483,7 +510,7 @@ pub async fn run(filter_level: Level, db_path: String) {
                 .filter_map(|(k, v)| {
                     if k.len() == 8 {
                         let guild_id = u64::from_be_bytes(k.try_into().unwrap());
-                        let guild_data = GetGuildResponse::decode(v.as_ref()).unwrap();
+                        let guild_data = Guild::decode(v.as_ref()).unwrap();
 
                         Some((guild_id, guild_data))
                     } else {
@@ -527,8 +554,8 @@ pub async fn run(filter_level: Level, db_path: String) {
                 guild_id,
                 channel_id,
                 before_message_id.unwrap_or(0),
-                Default::default(),
-                0,
+                None,
+                None,
             );
             for message in messages.messages {
                 println!("{:?}", message);
@@ -539,7 +566,7 @@ pub async fn run(filter_level: Level, db_path: String) {
             println!("{:#?}", guild);
         }
         Command::GetMember(id) => {
-            let member = chat_tree.get_user_logic(id);
+            let member = profile_tree.get_profile_logic(id);
             println!("{:#?}", member);
         }
         Command::GetGuildRoles(id) => {
@@ -590,7 +617,11 @@ pub async fn run(filter_level: Level, db_path: String) {
             channel_id,
             role_id,
         } => {
-            let perms = chat_tree.get_permissions_logic(guild_id, channel_id, role_id);
+            let perms = chat_tree.get_permissions_logic(
+                guild_id,
+                channel_id.eq(&0).then(|| None).unwrap_or(Some(channel_id)),
+                role_id,
+            );
             println!("{:#?}", perms);
         }
     };

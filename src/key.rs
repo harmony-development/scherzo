@@ -4,7 +4,7 @@ use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use ed25519_compact::{KeyPair, PublicKey, Seed};
 use harmony_rust_sdk::api::{
-    auth::auth_service_client::AuthServiceClient,
+    auth::{auth_service_client::AuthServiceClient, KeyRequest},
     exports::{hrpc::encode_protobuf_message, prost::Message},
     harmonytypes::Token,
 };
@@ -85,7 +85,7 @@ impl Manager {
             let key = self
                 .get_client(host.clone())
                 .value_mut()
-                .key(())
+                .key(KeyRequest {})
                 .await
                 .map_err(|_| ServerError::CantGetHostKey(host.clone()))?
                 .key;

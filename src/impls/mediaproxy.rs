@@ -200,11 +200,11 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     #[rate(20, 5)]
     async fn can_instant_view(
         &self,
-        request: Request<InstantViewRequest>,
+        request: Request<CanInstantViewRequest>,
     ) -> Result<CanInstantViewResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let InstantViewRequest { url } = request.into_parts().0.into_message().await??;
+        let CanInstantViewRequest { url } = request.into_parts().0.into_message().await??;
 
         if let Some(val) = get_from_cache(&url) {
             return Ok(CanInstantViewResponse {

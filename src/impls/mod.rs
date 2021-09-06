@@ -1,6 +1,8 @@
 pub mod auth;
 pub mod chat;
+pub mod emote;
 pub mod mediaproxy;
+pub mod profile;
 pub mod rest;
 pub mod sync;
 

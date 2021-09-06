@@ -3,19 +3,8 @@ use std::{
     str::FromStr,
 };
 
-use event::MessageUpdated;
-use get_guild_channels_response::Channel;
 use harmony_rust_sdk::api::{
-    chat::{
-        event::{
-            ChannelUpdated, ChannelsReordered, EmotePackAdded, EmotePackDeleted,
-            EmotePackEmotesUpdated, GuildUpdated, LeaveReason, PermissionUpdated, RoleCreated,
-            RoleDeleted, RoleMoved, RolePermissionsUpdated, RoleUpdated, UserRolesUpdated,
-        },
-        get_channel_messages_request::Direction,
-        permission::Mode,
-        *,
-    },
+    chat::{get_channel_messages_request::Direction, stream_event, Message as HarmonyMessage, *},
     exports::{
         hrpc::{
             encode_protobuf_message, return_print,
@@ -25,10 +14,7 @@ use harmony_rust_sdk::api::{
         },
         prost::{bytes::BytesMut, Message},
     },
-    harmonytypes::{
-        content, Attachment, Content, ContentText, ItemPosition, Message as HarmonyMessage,
-        Metadata, Minithumbnail, Photo,
-    },
+    harmonytypes::{ItemPosition, Metadata},
     rest::FileId,
     sync::{
         event::{
@@ -45,7 +31,7 @@ use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
     sync::{
-        broadcast::{self, Sender as BroadcastSend},
+        broadcast::Sender as BroadcastSend,
         mpsc::{self, Receiver, UnboundedSender},
     },
     task::JoinHandle,
@@ -56,32 +42,34 @@ use crate::{
     append_list::AppendList,
     db::{self, chat::*, Batch},
     impls::{
-        auth, gen_rand_u64, get_time_secs,
+        auth, get_time_secs,
         rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
     set_proto_name, ServerError,
 };
 
+use super::profile::ProfileTree;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum EventSub {
+pub enum EventSub {
     Guild(u64),
     Homeserver,
     Actions,
 }
 
 #[derive(Clone, Copy)]
-struct PermCheck<'a> {
+pub struct PermCheck<'a> {
     guild_id: u64,
-    channel_id: u64,
+    channel_id: Option<u64>,
     check_for: &'a str,
     must_be_guild_owner: bool,
 }
 
 impl<'a> PermCheck<'a> {
-    const fn new(
+    pub const fn new(
         guild_id: u64,
-        channel_id: u64,
+        channel_id: Option<u64>,
         check_for: &'a str,
         must_be_guild_owner: bool,
     ) -> Self {
@@ -94,33 +82,52 @@ impl<'a> PermCheck<'a> {
     }
 }
 
-struct EventContext {
+pub struct EventContext {
     user_ids: Vec<u64>,
 }
 
 impl EventContext {
-    const fn new(user_ids: Vec<u64>) -> Self {
+    pub const fn new(user_ids: Vec<u64>) -> Self {
         Self { user_ids }
     }
 
-    fn empty() -> Self {
+    pub fn empty() -> Self {
         Self::new(Vec::new())
     }
 }
 
 pub struct EventBroadcast {
     sub: EventSub,
-    event: event::Event,
+    event: Event,
     perm_check: Option<PermCheck<'static>>,
     context: EventContext,
 }
+
+impl EventBroadcast {
+    pub fn new(
+        sub: EventSub,
+        event: Event,
+        perm_check: Option<PermCheck<'static>>,
+        context: EventContext,
+    ) -> Self {
+        Self {
+            sub,
+            event,
+            perm_check,
+            context,
+        }
+    }
+}
+
+pub type EventSender = BroadcastSend<Arc<EventBroadcast>>;
 
 pub struct ChatServer {
     host: String,
     media_root: Arc<PathBuf>,
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
-    pub broadcast_send: BroadcastSend<Arc<EventBroadcast>>,
+    profile_tree: ProfileTree,
+    pub broadcast_send: EventSender,
     dispatch_tx: UnboundedSender<EventDispatch>,
 }
 
@@ -129,17 +136,18 @@ impl ChatServer {
         host: String,
         media_root: Arc<PathBuf>,
         chat_tree: ChatTree,
+        profile_tree: ProfileTree,
         valid_sessions: auth::SessionMap,
         dispatch_tx: UnboundedSender<EventDispatch>,
+        broadcast_send: EventSender,
     ) -> Self {
-        // TODO: is 1000 a fine upper limit? maybe we should make this limit configurable?
-        let (tx, _) = broadcast::channel(1000);
         Self {
             host,
             media_root,
             valid_sessions,
             chat_tree,
-            broadcast_send: tx,
+            profile_tree,
+            broadcast_send,
             dispatch_tx,
         }
     }
@@ -148,15 +156,15 @@ impl ChatServer {
         &self,
         user_id: u64,
         mut sub_rx: Receiver<EventSub>,
-        mut ws: WriteSocket<Event>,
+        mut ws: WriteSocket<StreamEventsResponse>,
     ) -> JoinHandle<()> {
         async fn send_event(
-            ws: &mut WriteSocket<Event>,
+            ws: &mut WriteSocket<StreamEventsResponse>,
             broadcast: &EventBroadcast,
             user_id: u64,
         ) -> bool {
-            ws.send_message(Event {
-                event: Some(broadcast.event.clone()),
+            ws.send_message(StreamEventsResponse {
+                event: Some(broadcast.event.clone().into()),
             })
             .await
             .map_or_else(
@@ -244,13 +252,13 @@ impl ChatServer {
     fn send_event_through_chan(
         &self,
         sub: EventSub,
-        event: event::Event,
+        event: stream_event::Event,
         perm_check: Option<PermCheck<'static>>,
         context: EventContext,
     ) {
         let broadcast = EventBroadcast {
             sub,
-            event,
+            event: Event::Chat(event),
             perm_check,
             context,
         };
@@ -276,7 +284,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn update_all_channel_order(
         &self,
         request: Request<UpdateAllChannelOrderRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UpdateAllChannelOrderResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateAllChannelOrderRequest {
@@ -286,7 +294,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "channels.manage.move", false)?;
+            .check_perms(guild_id, None, user_id, "channels.manage.move", false)?;
 
         for channel_id in &channel_ids {
             self.chat_tree.does_channel_exist(guild_id, *channel_id)?;
@@ -298,16 +306,14 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .scan_prefix(&prefix)
             .flat_map(|res| {
-                let (key, value) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>()).then(|| {
-                    // Safety: this unwrap is safe since we only store valid Channel message
-                    unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() }
-                })
+                let (key, _) = res.unwrap();
+                (key.len() == prefix.len() + size_of::<u64>())
+                    .then(|| unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) })
             })
             .collect::<Vec<_>>();
 
-        for it in channels {
-            if !channel_ids.contains(&it.channel_id) {
+        for channel_id in channels {
+            if !channel_ids.contains(&channel_id) {
                 return Err(ServerError::UnderSpecifiedChannels.into());
             }
         }
@@ -318,7 +324,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::ChannelsReordered(ChannelsReordered {
+            stream_event::Event::ChannelsReordered(stream_event::ChannelsReordered {
                 guild_id,
                 channel_ids,
             }),
@@ -326,7 +332,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(UpdateAllChannelOrderResponse {})
     }
 
     #[rate(1, 5)]
@@ -340,8 +346,8 @@ impl chat_service_server::ChatService for ChatServer {
 
         let CreateGuildRequest {
             metadata,
-            guild_name,
-            picture_url,
+            name,
+            picture,
         } = body.into_message().await??;
 
         let guild_id = {
@@ -358,10 +364,10 @@ impl chat_service_server::ChatService for ChatServer {
             guild_id
         };
 
-        let guild = GetGuildResponse {
-            guild_name,
-            guild_picture: picture_url,
-            guild_owner: user_id,
+        let guild = Guild {
+            name,
+            picture,
+            owner_id: user_id,
             metadata,
         };
         let buf = encode_protobuf_message(guild);
@@ -381,22 +387,20 @@ impl chat_service_server::ChatService for ChatServer {
         // [tag:default_role_store]
         chat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
         self.chat_tree.add_default_role_to(guild_id, user_id)?;
-        let def_perms = PermissionList {
-            permissions: [
-                "messages.send",
-                "messages.view",
-                "roles.get",
-                "roles.user.get",
-            ]
-            .iter()
-            .map(|m| Permission {
-                matches: m.to_string(),
-                mode: permission::Mode::Allow.into(),
-            })
-            .collect(),
-        };
+        let def_perms = [
+            "messages.send",
+            "messages.view",
+            "roles.get",
+            "roles.user.get",
+        ]
+        .iter()
+        .map(|m| Permission {
+            matches: m.to_string(),
+            ok: true,
+        })
+        .collect::<Vec<_>>();
         self.chat_tree
-            .set_permissions_logic(guild_id, 0, everyone_role_id, def_perms.clone());
+            .set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone());
         let channel_id = self
             .create_channel(Request::from_parts((
                 BodyKind::DecodedMessage(CreateChannelRequest {
@@ -409,10 +413,14 @@ impl chat_service_server::ChatService for ChatServer {
             )))
             .await?
             .channel_id;
-        self.chat_tree
-            .set_permissions_logic(guild_id, channel_id, everyone_role_id, def_perms);
+        self.chat_tree.set_permissions_logic(
+            guild_id,
+            Some(channel_id),
+            everyone_role_id,
+            def_perms,
+        );
 
-        match self.chat_tree.local_to_foreign_id(user_id) {
+        match self.profile_tree.local_to_foreign_id(user_id) {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
@@ -425,7 +433,7 @@ impl chat_service_server::ChatService for ChatServer {
                     .add_guild_to_guild_list(user_id, guild_id, "");
                 self.send_event_through_chan(
                     EventSub::Homeserver,
-                    event::Event::GuildAddedToList(event::GuildAddedToList {
+                    stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
                         guild_id,
                         homeserver: String::new(),
                     }),
@@ -453,7 +461,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "invites.manage.create", false)?;
+            .check_perms(guild_id, None, user_id, "invites.manage.create", false)?;
 
         let key = make_invite_key(name.as_str());
 
@@ -465,16 +473,15 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::InviteExists(name).into());
         }
 
-        let invite = get_guild_invites_response::Invite {
+        let invite = Invite {
             possible_uses,
             use_count: 0,
-            invite_id: name.clone(),
         };
         let buf = encode_protobuf_message(invite);
 
         chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
 
-        Ok(CreateInviteResponse { name })
+        Ok(CreateInviteResponse { invite_id: name })
     }
 
     #[rate(5, 5)]
@@ -494,7 +501,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "channels.manage.create", false)?;
+            .check_perms(guild_id, None, user_id, "channels.manage.create", false)?;
 
         let channel_id = self.chat_tree.create_channel_logic(
             guild_id,
@@ -506,7 +513,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::CreatedChannel(event::ChannelCreated {
+            stream_event::Event::CreatedChannel(stream_event::ChannelCreated {
                 guild_id,
                 channel_id,
                 name: channel_name,
@@ -514,45 +521,16 @@ impl chat_service_server::ChatService for ChatServer {
                 is_category,
                 metadata,
             }),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
         Ok(CreateChannelResponse { channel_id })
-    }
-
-    #[rate(5, 5)]
-    async fn create_emote_pack(
-        &self,
-        request: Request<CreateEmotePackRequest>,
-    ) -> Result<CreateEmotePackResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let CreateEmotePackRequest { pack_name } = request.into_parts().0.into_message().await??;
-
-        let pack_id = gen_rand_u64();
-        let key = make_emote_pack_key(pack_id);
-
-        let emote_pack = EmotePack {
-            pack_id,
-            pack_name,
-            pack_owner: user_id,
-        };
-        let data = encode_protobuf_message(emote_pack.clone());
-
-        chat_insert!(key / data);
-
-        self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::EmotePackAdded(EmotePackAdded {
-                pack: Some(emote_pack),
-            }),
-            None,
-            EventContext::new(vec![user_id]),
-        );
-
-        Ok(CreateEmotePackResponse { pack_id })
     }
 
     #[rate(15, 5)]
@@ -579,7 +557,7 @@ impl chat_service_server::ChatService for ChatServer {
                 // Safety: we never store non UTF-8 hosts, so this can't cause UB
                 let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
 
-                get_guild_list_response::GuildListEntry {
+                GuildListEntry {
                     guild_id,
                     host: host.to_string(),
                 }
@@ -600,7 +578,10 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
-        self.chat_tree.get_guild_logic(guild_id).map_err(Into::into)
+        self.chat_tree
+            .get_guild_logic(guild_id)
+            .map(|g| GetGuildResponse { guild: Some(g) })
+            .map_err(Into::into)
     }
 
     #[rate(15, 5)]
@@ -614,7 +595,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "invites.view", false)?;
+            .check_perms(guild_id, None, user_id, "invites.view", false)?;
 
         Ok(self.chat_tree.get_guild_invites_logic(guild_id))
     }
@@ -665,13 +646,13 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "messages.view", false)?;
+            .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
 
         Ok(self.chat_tree.get_channel_messages_logic(
             guild_id,
             channel_id,
             message_id,
-            Direction::from_i32(direction).unwrap_or_default(),
+            direction.map(|val| Direction::from_i32(val).unwrap_or_default()),
             count,
         ))
     }
@@ -694,7 +675,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "messages.view", false)?;
+            .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
 
         let message = Some(
             self.chat_tree
@@ -705,86 +686,11 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(GetMessageResponse { message })
     }
 
-    #[rate(10, 5)]
-    async fn get_emote_packs(
-        &self,
-        request: Request<GetEmotePacksRequest>,
-    ) -> Result<GetEmotePacksResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let prefix = make_equipped_emote_prefix(user_id);
-        let equipped_packs = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .filter_map(|res| {
-                let (key, _) = res.unwrap();
-                (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let packs = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(EMOTEPACK_PREFIX)
-            .filter_map(|res| {
-                let (key, val) = res.unwrap();
-                let pack_id = (key.len() == make_emote_pack_key(0).len()).then(|| {
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(EMOTEPACK_PREFIX.len())
-                            .1
-                            .try_into()
-                            .unwrap_unchecked()
-                    })
-                })?;
-                equipped_packs
-                    .contains(&pack_id)
-                    .then(|| EmotePack::decode(val.as_ref()).unwrap())
-            })
-            .collect();
-
-        Ok(GetEmotePacksResponse { packs })
-    }
-
-    #[rate(20, 5)]
-    async fn get_emote_pack_emotes(
-        &self,
-        request: Request<GetEmotePackEmotesRequest>,
-    ) -> Result<GetEmotePackEmotesResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0.into_message().await??;
-
-        let pack_key = make_emote_pack_key(pack_id);
-
-        if chat_get!(pack_key).is_none() {
-            return Err(ServerError::EmotePackNotFound.into());
-        }
-
-        let emotes = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&pack_key)
-            .flat_map(|res| {
-                let (key, value) = res.unwrap();
-                (key.len() > pack_key.len()).then(|| Emote::decode(value.as_ref()).unwrap())
-            })
-            .collect();
-
-        Ok(GetEmotePackEmotesResponse { emotes })
-    }
-
     #[rate(2, 5)]
     async fn update_guild_information(
         &self,
         request: Request<UpdateGuildInformationRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UpdateGuildInformationResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateGuildInformationRequest {
@@ -805,17 +711,17 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_perms(
             guild_id,
-            0,
+            None,
             user_id,
             "guild.manage.change-information",
             false,
         )?;
 
         if let Some(new_guild_name) = new_guild_name.clone() {
-            guild_info.guild_name = new_guild_name;
+            guild_info.name = new_guild_name;
         }
         if let Some(new_guild_picture) = new_guild_picture.clone() {
-            guild_info.guild_picture = new_guild_picture;
+            guild_info.picture = new_guild_picture;
         }
         if let Some(new_metadata) = new_metadata.clone() {
             guild_info.metadata = Some(new_metadata);
@@ -826,7 +732,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::EditedGuild(GuildUpdated {
+            stream_event::Event::EditedGuild(stream_event::GuildUpdated {
                 guild_id,
                 new_name: new_guild_name,
                 new_picture: new_guild_picture,
@@ -836,14 +742,14 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(UpdateGuildInformationResponse {})
     }
 
     #[rate(2, 5)]
     async fn update_channel_information(
         &self,
         request: Request<UpdateChannelInformationRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UpdateChannelInformationResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateChannelInformationRequest {
@@ -856,7 +762,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.check_perms(
             guild_id,
-            channel_id,
+            Some(channel_id),
             user_id,
             "channels.manage.change-information",
             false,
@@ -885,25 +791,29 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::EditedChannel(ChannelUpdated {
+            stream_event::Event::EditedChannel(stream_event::ChannelUpdated {
                 guild_id,
                 channel_id,
                 new_name,
                 new_metadata,
-                ..Default::default()
             }),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(UpdateChannelInformationResponse {})
     }
 
     #[rate(10, 5)]
     async fn update_channel_order(
         &self,
         request: Request<UpdateChannelOrderRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UpdateChannelOrderResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let UpdateChannelOrderRequest {
@@ -914,8 +824,13 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
-        self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "channels.manage.move", false)?;
+        self.chat_tree.check_perms(
+            guild_id,
+            Some(channel_id),
+            user_id,
+            "channels.manage.move",
+            false,
+        )?;
 
         if let Some(position) = new_position.clone() {
             self.chat_tree
@@ -924,24 +839,28 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::EditedChannel(ChannelUpdated {
+            stream_event::Event::EditedChannelPosition(stream_event::ChannelPositionUpdated {
                 guild_id,
                 channel_id,
                 new_position,
-                ..Default::default()
             }),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(UpdateChannelOrderResponse {})
     }
 
     #[rate(2, 5)]
     async fn update_message_text(
         &self,
         request: Request<UpdateMessageTextRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UpdateMessageTextResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let request = request.into_parts().0.into_message().await??;
@@ -956,9 +875,9 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
+            .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
 
-        if new_content.is_empty() {
+        if new_content.as_ref().map_or(true, |f| f.text.is_empty()) {
             return Err(ServerError::MessageContentCantBeEmpty.into());
         }
 
@@ -972,7 +891,7 @@ impl chat_service_server::ChatService for ChatServer {
             message.content = Some(Content::default());
             message.content.as_mut().unwrap()
         };
-        msg_content.content = Some(content::Content::TextMessage(ContentText {
+        msg_content.content = Some(content::Content::TextMessage(content::TextContent {
             content: new_content.clone(),
         }));
 
@@ -984,68 +903,37 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::EditedMessage(Box::new(MessageUpdated {
+            stream_event::Event::EditedMessage(Box::new(stream_event::MessageUpdated {
                 guild_id,
                 channel_id,
                 message_id,
                 edited_at,
                 new_content,
             })),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
-        Ok(())
-    }
-
-    #[rate(20, 5)]
-    async fn add_emote_to_pack(
-        &self,
-        request: Request<AddEmoteToPackRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let AddEmoteToPackRequest {
-            pack_id,
-            image_id,
-            name,
-        } = request.into_parts().0.into_message().await??;
-
-        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
-
-        let emote_key = make_emote_pack_emote_key(pack_id, &image_id);
-        let emote = Emote { image_id, name };
-        let data = encode_protobuf_message(emote.clone());
-
-        chat_insert!(emote_key / data);
-
-        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
-                pack_id,
-                added_emotes: vec![emote],
-                deleted_emotes: Vec::new(),
-            }),
-            None,
-            EventContext::new(equipped_users),
-        );
-
-        Ok(())
+        Ok(UpdateMessageTextResponse {})
     }
 
     #[rate(1, 15)]
     async fn delete_guild(
         &self,
         request: Request<DeleteGuildRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<DeleteGuildResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteGuildRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "guild.manage.delete", false)?;
+            .check_perms(guild_id, None, user_id, "guild.manage.delete", false)?;
 
         let guild_members = self.chat_tree.get_guild_members_logic(guild_id).members;
 
@@ -1063,14 +951,14 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::DeletedGuild(event::GuildDeleted { guild_id }),
+            stream_event::Event::DeletedGuild(stream_event::GuildDeleted { guild_id }),
             None,
             EventContext::empty(),
         );
 
         let mut local_ids = Vec::new();
         for member_id in guild_members {
-            match self.chat_tree.local_to_foreign_id(member_id) {
+            match self.profile_tree.local_to_foreign_id(member_id) {
                 Some((foreign_id, target)) => self.dispatch_event(
                     target,
                     DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -1087,7 +975,7 @@ impl chat_service_server::ChatService for ChatServer {
         }
         self.send_event_through_chan(
             EventSub::Homeserver,
-            event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
+            stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
                 guild_id,
                 homeserver: String::new(),
             }),
@@ -1095,14 +983,14 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::new(local_ids),
         );
 
-        Ok(())
+        Ok(DeleteGuildResponse {})
     }
 
     #[rate(5, 5)]
     async fn delete_invite(
         &self,
         request: Request<DeleteInviteRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<DeleteInviteResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteInviteRequest {
@@ -1112,21 +1000,21 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "invites.manage.delete", false)?;
+            .check_perms(guild_id, None, user_id, "invites.manage.delete", false)?;
 
         self.chat_tree
             .chat_tree
             .remove(&make_invite_key(invite_id.as_str()))
             .unwrap();
 
-        Ok(())
+        Ok(DeleteInviteResponse {})
     }
 
     #[rate(5, 5)]
     async fn delete_channel(
         &self,
         request: Request<DeleteChannelRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<DeleteChannelResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteChannelRequest {
@@ -1138,7 +1026,7 @@ impl chat_service_server::ChatService for ChatServer {
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree.check_perms(
             guild_id,
-            channel_id,
+            Some(channel_id),
             user_id,
             "channels.manage.delete",
             false,
@@ -1169,7 +1057,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::DeletedChannel(event::ChannelDeleted {
+            stream_event::Event::DeletedChannel(stream_event::ChannelDeleted {
                 guild_id,
                 channel_id,
             }),
@@ -1177,14 +1065,14 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(DeleteChannelResponse {})
     }
 
     #[rate(5, 5)]
     async fn delete_message(
         &self,
         request: Request<DeleteMessageRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<DeleteMessageResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteMessageRequest {
@@ -1204,7 +1092,7 @@ impl chat_service_server::ChatService for ChatServer {
         {
             self.chat_tree.check_perms(
                 guild_id,
-                channel_id,
+                Some(channel_id),
                 user_id,
                 "messages.manage.delete",
                 false,
@@ -1218,128 +1106,21 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::DeletedMessage(event::MessageDeleted {
+            stream_event::Event::DeletedMessage(stream_event::MessageDeleted {
                 guild_id,
                 channel_id,
                 message_id,
             }),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
-        Ok(())
-    }
-
-    #[rate(20, 5)]
-    async fn delete_emote_from_pack(
-        &self,
-        request: Request<DeleteEmoteFromPackRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let DeleteEmoteFromPackRequest { pack_id, image_id } =
-            request.into_parts().0.into_message().await??;
-
-        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
-
-        let key = make_emote_pack_emote_key(pack_id, &image_id);
-
-        chat_remove!(key);
-
-        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
-                pack_id,
-                added_emotes: Vec::new(),
-                deleted_emotes: vec![image_id],
-            }),
-            None,
-            EventContext::new(equipped_users),
-        );
-
-        Ok(())
-    }
-
-    #[rate(5, 5)]
-    async fn delete_emote_pack(
-        &self,
-        request: Request<DeleteEmotePackRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let DeleteEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
-
-        self.chat_tree.check_if_emote_pack_owner(pack_id, user_id)?;
-
-        let key = make_emote_pack_key(pack_id);
-
-        let mut batch = db::Batch::default();
-        batch.remove(key);
-        for res in self.chat_tree.chat_tree.scan_prefix(&key) {
-            let (key, _) = res.unwrap();
-            batch.remove(key);
-        }
-        self.chat_tree.chat_tree.apply_batch(batch).unwrap();
-
-        self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
-
-        let equipped_users = self.chat_tree.calculate_users_pack_equipped(pack_id);
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),
-            None,
-            EventContext::new(equipped_users),
-        );
-
-        Ok(())
-    }
-
-    #[rate(10, 5)]
-    async fn dequip_emote_pack(
-        &self,
-        request: Request<DequipEmotePackRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let DequipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
-
-        self.chat_tree.dequip_emote_pack_logic(user_id, pack_id);
-
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),
-            None,
-            EventContext::new(vec![user_id]),
-        );
-
-        Ok(())
-    }
-
-    #[rate(10, 5)]
-    async fn equip_emote_pack(
-        &self,
-        request: Request<EquipEmotePackRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let EquipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
-
-        let key = make_emote_pack_key(pack_id);
-        if let Some(data) = chat_get!(key) {
-            let pack = EmotePack::decode(data.as_ref()).unwrap();
-            self.chat_tree.equip_emote_pack_logic(user_id, pack_id);
-            self.send_event_through_chan(
-                EventSub::Homeserver,
-                event::Event::EmotePackAdded(EmotePackAdded { pack: Some(pack) }),
-                None,
-                EventContext::new(vec![user_id]),
-            );
-        } else {
-            return Err(ServerError::EmotePackNotFound.into());
-        }
-
-        Ok(())
+        Ok(DeleteMessageResponse {})
     }
 
     #[rate(5, 5)]
@@ -1368,7 +1149,7 @@ impl chat_service_server::ChatService for ChatServer {
             .ok()
             .map_or(Ok(()), |_| Err(ServerError::UserAlreadyInGuild))?;
 
-        let is_infinite = invite.possible_uses == -1;
+        let is_infinite = invite.possible_uses == 0;
 
         if is_infinite.not() && invite.use_count >= invite.possible_uses {
             return Err(ServerError::InviteExpired.into());
@@ -1380,7 +1161,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::JoinedMember(event::MemberJoined {
+            stream_event::Event::JoinedMember(stream_event::MemberJoined {
                 guild_id,
                 member_id: user_id,
             }),
@@ -1388,7 +1169,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.chat_tree.local_to_foreign_id(user_id) {
+        match self.profile_tree.local_to_foreign_id(user_id) {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
@@ -1401,7 +1182,7 @@ impl chat_service_server::ChatService for ChatServer {
                     .add_guild_to_guild_list(user_id, guild_id, "");
                 self.send_event_through_chan(
                     EventSub::Homeserver,
-                    event::Event::GuildAddedToList(event::GuildAddedToList {
+                    stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
                         guild_id,
                         homeserver: String::new(),
                     }),
@@ -1421,7 +1202,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn leave_guild(
         &self,
         request: Request<LeaveGuildRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<LeaveGuildResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let LeaveGuildRequest { guild_id } = request.into_parts().0.into_message().await??;
@@ -1435,16 +1216,16 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::LeftMember(event::MemberLeft {
+            stream_event::Event::LeftMember(stream_event::MemberLeft {
                 guild_id,
                 member_id: user_id,
-                leave_reason: LeaveReason::Willingly.into(),
+                leave_reason: LeaveReason::WillinglyUnspecified.into(),
             }),
             None,
             EventContext::empty(),
         );
 
-        match self.chat_tree.local_to_foreign_id(user_id) {
+        match self.profile_tree.local_to_foreign_id(user_id) {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -1457,7 +1238,7 @@ impl chat_service_server::ChatService for ChatServer {
                     .remove_guild_from_guild_list(user_id, guild_id, "");
                 self.send_event_through_chan(
                     EventSub::Homeserver,
-                    event::Event::GuildRemovedFromList(event::GuildRemovedFromList {
+                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
                         guild_id,
                         homeserver: String::new(),
                     }),
@@ -1467,14 +1248,14 @@ impl chat_service_server::ChatService for ChatServer {
             }
         }
 
-        Ok(())
+        Ok(LeaveGuildResponse {})
     }
 
     #[rate(20, 5)]
     async fn trigger_action(
         &self,
-        request: Request<TriggerActionRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+        _request: Request<TriggerActionRequest>,
+    ) -> Result<TriggerActionResponse, HrpcServerError<Self::Error>> {
         Err(ServerError::NotImplemented.into())
     }
 
@@ -1498,7 +1279,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
+            .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
 
         let msg_prefix = make_msg_prefix(guild_id, channel_id);
         let message_id = self
@@ -1527,12 +1308,12 @@ impl chat_service_server::ChatService for ChatServer {
         let content = if let Some(content) = inner_content {
             let content = match content {
                 content::Content::TextMessage(text) => {
-                    if text.content.is_empty() {
+                    if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
                         return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     content::Content::TextMessage(text)
                 }
-                content::Content::PhotosMessage(mut photos) => {
+                content::Content::PhotoMessage(mut photos) => {
                     if photos.photos.is_empty() {
                         return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
@@ -1641,13 +1422,13 @@ impl chat_service_server::ChatService for ChatServer {
                             photos.photos.push(photo);
                         }
                     }
-                    content::Content::PhotosMessage(photos)
+                    content::Content::PhotoMessage(photos)
                 }
-                content::Content::FilesMessage(mut files) => {
-                    if files.attachments.is_empty() {
+                content::Content::AttachmentMessage(mut files) => {
+                    if files.files.is_empty() {
                         return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
-                    for attachment in files.attachments.drain(..).collect::<Vec<_>>() {
+                    for attachment in files.files.drain(..).collect::<Vec<_>>() {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
                             let media_root = self.media_root.as_path();
                             let fill_file_local = move |attachment: Attachment, id: String| async move {
@@ -1674,15 +1455,15 @@ impl chat_service_server::ChatService for ChatServer {
                                     size: attachment
                                         .size
                                         .eq(&0)
-                                        .then(|| size as i32)
+                                        .then(|| size as u32)
                                         .unwrap_or(attachment.size),
-                                    r#type: attachment
-                                        .r#type
+                                    mimetype: attachment
+                                        .mimetype
                                         .is_empty()
                                         .then(|| unsafe {
                                             String::from_utf8_unchecked(mimetype_raw)
                                         })
-                                        .unwrap_or(attachment.r#type),
+                                        .unwrap_or(attachment.mimetype),
                                     ..attachment
                                 })
                             };
@@ -1691,22 +1472,22 @@ impl chat_service_server::ChatService for ChatServer {
                                     // TODO: fetch file from remote host if its not local
                                     let id = hmc.id();
                                     files
-                                        .attachments
+                                        .files
                                         .push(fill_file_local(attachment, id.to_string()).await?);
                                 }
-                                FileId::Id(id) => files
-                                    .attachments
-                                    .push(fill_file_local(attachment, id).await?),
-                                _ => files.attachments.push(attachment),
+                                FileId::Id(id) => {
+                                    files.files.push(fill_file_local(attachment, id).await?)
+                                }
+                                _ => files.files.push(attachment),
                             }
                         } else {
-                            files.attachments.push(attachment);
+                            files.files.push(attachment);
                         }
                     }
-                    content::Content::FilesMessage(files)
+                    content::Content::AttachmentMessage(files)
                 }
                 content::Content::EmbedMessage(embed) => {
-                    if embed.embeds.is_none() {
+                    if embed.embed.is_none() {
                         return Err(ServerError::MessageContentCantBeEmpty.into());
                     }
                     content::Content::EmbedMessage(embed)
@@ -1721,9 +1502,6 @@ impl chat_service_server::ChatService for ChatServer {
 
         let message = HarmonyMessage {
             metadata,
-            guild_id,
-            channel_id,
-            message_id,
             author_id: user_id,
             created_at,
             edited_at,
@@ -1739,11 +1517,19 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::SentMessage(Box::new(event::MessageSent {
+            stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
                 echo_id,
+                guild_id,
+                channel_id,
+                message_id,
                 message: Some(message),
             })),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
@@ -1753,8 +1539,8 @@ impl chat_service_server::ChatService for ChatServer {
     #[rate(30, 5)]
     async fn query_has_permission(
         &self,
-        request: Request<QueryPermissionsRequest>,
-    ) -> Result<QueryPermissionsResponse, HrpcServerError<Self::Error>> {
+        request: Request<QueryHasPermissionRequest>,
+    ) -> Result<QueryHasPermissionResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         self.chat_tree
@@ -1762,45 +1548,18 @@ impl chat_service_server::ChatService for ChatServer {
             .map_err(Into::into)
     }
 
-    #[rate(30, 5)]
-    async fn batch_query_has_permission(
-        &self,
-        request: Request<BatchQueryPermissionsRequest>,
-    ) -> Result<BatchQueryPermissionsResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let BatchQueryPermissionsRequest { requests } =
-            request.into_parts().0.into_message().await??;
-
-        Ok(BatchQueryPermissionsResponse {
-            responses: requests
-                .into_iter()
-                .map(|request| {
-                    self.chat_tree
-                        .query_has_permission_request(user_id, request)
-                })
-                .try_fold::<_, _, Result<Vec<QueryPermissionsResponse>, ServerError>>(
-                    Vec::new(),
-                    |mut total, item| {
-                        total.push(item?);
-                        Ok(total)
-                    },
-                )?,
-        })
-    }
-
     #[rate(10, 5)]
     async fn set_permissions(
         &self,
         request: Request<SetPermissionsRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<SetPermissionsResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let SetPermissionsRequest {
             guild_id,
             channel_id,
             role_id,
-            perms,
+            perms_to_give,
         } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
@@ -1812,9 +1571,14 @@ impl chat_service_server::ChatService for ChatServer {
             false,
         )?;
 
-        if let Some(perms) = perms {
-            self.chat_tree
-                .set_permissions_logic(guild_id, channel_id, role_id, perms.clone());
+        // TODO: fix
+        if !perms_to_give.is_empty() {
+            self.chat_tree.set_permissions_logic(
+                guild_id,
+                channel_id,
+                role_id,
+                perms_to_give.clone(),
+            );
             let members = self.chat_tree.get_guild_members_logic(guild_id).members;
             let guild_owner = self.chat_tree.get_guild_owner(guild_id)?;
             let for_users = members
@@ -1831,38 +1595,36 @@ impl chat_service_server::ChatService for ChatServer {
                         .flatten()
                 })
                 .collect::<Vec<_>>();
-            for perm in &perms.permissions {
-                if let Some(perm_mode) = permission::Mode::from_i32(perm.mode) {
-                    self.send_event_through_chan(
-                        EventSub::Guild(guild_id),
-                        event::Event::PermissionUpdated(PermissionUpdated {
-                            guild_id,
-                            channel_id,
-                            query: perm.matches.clone(),
-                            ok: permission::Mode::Allow == perm_mode,
-                        }),
-                        None,
-                        EventContext::new(for_users.clone()),
-                    );
-                }
+            for perm in &perms_to_give {
+                self.send_event_through_chan(
+                    EventSub::Guild(guild_id),
+                    stream_event::Event::PermissionUpdated(stream_event::PermissionUpdated {
+                        guild_id,
+                        channel_id,
+                        query: perm.matches.clone(),
+                        ok: perm.ok,
+                    }),
+                    None,
+                    EventContext::new(for_users.clone()),
+                );
             }
             self.send_event_through_chan(
                 EventSub::Guild(guild_id),
-                event::Event::RolePermsUpdated(RolePermissionsUpdated {
+                stream_event::Event::RolePermsUpdated(stream_event::RolePermissionsUpdated {
                     guild_id,
                     channel_id,
                     role_id,
-                    new_perms: Some(perms),
+                    new_perms: perms_to_give,
                 }),
                 Some(PermCheck {
                     guild_id,
-                    channel_id: 0,
+                    channel_id: None,
                     check_for: "guild.manage",
                     must_be_guild_owner: false,
                 }),
                 EventContext::empty(),
             );
-            Ok(())
+            Ok(SetPermissionsResponse {})
         } else {
             Err(ServerError::NoPermissionsSpecified.into())
         }
@@ -1912,7 +1674,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
+            .check_perms(guild_id, None, user_id, "roles.manage", false)?;
         self.chat_tree.does_role_exist(guild_id, role_id)?;
 
         if let Some(pos) = new_position.clone() {
@@ -1921,7 +1683,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::RoleMoved(RoleMoved {
+            stream_event::Event::RoleMoved(stream_event::RoleMoved {
                 guild_id,
                 role_id,
                 new_position,
@@ -1944,7 +1706,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.get", false)?;
+            .check_perms(guild_id, None, user_id, "roles.get", false)?;
 
         let roles = self.chat_tree.get_guild_roles_logic(guild_id);
 
@@ -1958,38 +1720,47 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<AddGuildRoleResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let AddGuildRoleRequest { guild_id, role } =
-            request.into_parts().0.into_message().await??;
+        let AddGuildRoleRequest {
+            guild_id,
+            name,
+            color,
+            hoist,
+            pingable,
+        } = request.into_parts().0.into_message().await??;
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
+            .check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
-        if let Some(role) = role {
-            let role_id = self
-                .chat_tree
-                .add_guild_role_logic(guild_id, role.clone())?;
-            self.send_event_through_chan(
-                EventSub::Guild(guild_id),
-                event::Event::RoleCreated(RoleCreated {
-                    guild_id,
-                    role_id,
-                    role: Some(role),
-                }),
-                None,
-                EventContext::empty(),
-            );
-            Ok(AddGuildRoleResponse { role_id })
-        } else {
-            Err(ServerError::NoRoleSpecified.into())
-        }
+        let role = Role {
+            name: name.clone(),
+            color,
+            hoist,
+            pingable,
+        };
+        let role_id = self.chat_tree.add_guild_role_logic(guild_id, role)?;
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            stream_event::Event::RoleCreated(stream_event::RoleCreated {
+                guild_id,
+                role_id,
+                name,
+                color,
+                hoist,
+                pingable,
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(AddGuildRoleResponse { role_id })
     }
 
     #[rate(10, 5)]
     async fn modify_guild_role(
         &self,
         request: Request<ModifyGuildRoleRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<ModifyGuildRoleResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let ModifyGuildRoleRequest {
@@ -2003,7 +1774,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
+            .check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
         let key = make_guild_role_key(guild_id, role_id);
         let mut role = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
@@ -2012,7 +1783,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
         };
 
-        if let Some(new_name) = new_name {
+        if let Some(new_name) = new_name.clone() {
             role.name = new_name;
         }
         if let Some(new_color) = new_color {
@@ -2025,28 +1796,31 @@ impl chat_service_server::ChatService for ChatServer {
             role.pingable = new_pingable;
         }
 
-        let ser_role = encode_protobuf_message(role.clone());
+        let ser_role = encode_protobuf_message(role);
         chat_insert!(key / ser_role);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::RoleUpdated(RoleUpdated {
+            stream_event::Event::RoleUpdated(stream_event::RoleUpdated {
                 guild_id,
                 role_id,
-                new_role: Some(role),
+                new_name,
+                new_color,
+                new_hoist,
+                new_pingable,
             }),
             None,
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(ModifyGuildRoleResponse {})
     }
 
     #[rate(10, 5)]
     async fn delete_guild_role(
         &self,
         request: Request<DeleteGuildRoleRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<DeleteGuildRoleResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let DeleteGuildRoleRequest { guild_id, role_id } =
@@ -2054,7 +1828,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.manage", false)?;
+            .check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
         self.chat_tree
             .chat_tree
@@ -2064,19 +1838,19 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::RoleDeleted(RoleDeleted { guild_id, role_id }),
+            stream_event::Event::RoleDeleted(stream_event::RoleDeleted { guild_id, role_id }),
             None,
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(DeleteGuildRoleResponse {})
     }
 
     #[rate(10, 5)]
     async fn manage_user_roles(
         &self,
         request: Request<ManageUserRolesRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<ManageUserRolesResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let ManageUserRolesRequest {
@@ -2089,7 +1863,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_manage)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "roles.user.manage", false)?;
+            .check_perms(guild_id, None, user_id, "roles.user.manage", false)?;
         let user_to_manage = if user_to_manage != 0 {
             user_to_manage
         } else {
@@ -2105,7 +1879,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::UserRolesUpdated(UserRolesUpdated {
+            stream_event::Event::UserRolesUpdated(stream_event::UserRolesUpdated {
                 guild_id,
                 user_id: user_to_manage,
                 new_role_ids,
@@ -2114,7 +1888,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(ManageUserRolesResponse {})
     }
 
     #[rate(10, 5)]
@@ -2136,7 +1910,7 @@ impl chat_service_server::ChatService for ChatServer {
             .unwrap_or(user_to_fetch);
         if fetch_user != user_id {
             self.chat_tree
-                .check_perms(guild_id, 0, user_id, "roles.user.get", false)?;
+                .check_perms(guild_id, None, user_id, "roles.user.get", false)?;
         }
 
         let roles = self.chat_tree.get_user_roles_logic(guild_id, fetch_user);
@@ -2159,7 +1933,11 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(1, 5)]
-    async fn stream_events(&self, user_id: u64, socket: Socket<StreamEventsRequest, Event>) {
+    async fn stream_events(
+        &self,
+        user_id: u64,
+        socket: Socket<StreamEventsRequest, StreamEventsResponse>,
+    ) {
         let (mut rs, ws) = socket.split();
         let (sub_tx, sub_rx) = mpsc::channel(64);
         let chat_tree = self.chat_tree.clone();
@@ -2203,124 +1981,11 @@ impl chat_service_server::ChatService for ChatServer {
         );
     }
 
-    #[rate(32, 10)]
-    async fn get_user(
-        &self,
-        request: Request<GetUserRequest>,
-    ) -> Result<GetUserResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let GetUserRequest { user_id } = request.into_parts().0.into_message().await??;
-
-        self.chat_tree.get_user_logic(user_id).map_err(Into::into)
-    }
-
-    #[rate(5, 5)]
-    async fn get_user_bulk(
-        &self,
-        request: Request<GetUserBulkRequest>,
-    ) -> Result<GetUserBulkResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let GetUserBulkRequest { user_ids } = request.into_parts().0.into_message().await??;
-
-        let mut profiles = Vec::with_capacity(user_ids.len());
-
-        for (id, key) in user_ids
-            .into_iter()
-            .map(|id| (id, make_user_profile_key(id)))
-        {
-            if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
-                profiles.push(db::deser_profile(raw));
-            } else {
-                return Err(ServerError::NoSuchUser(id).into());
-            }
-        }
-
-        Ok(GetUserBulkResponse { users: profiles })
-    }
-
-    #[rate(4, 1)]
-    async fn get_user_metadata(
-        &self,
-        request: Request<GetUserMetadataRequest>,
-    ) -> Result<GetUserMetadataResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let GetUserMetadataRequest { app_id } = request.into_parts().0.into_message().await??;
-        let metadata = self
-            .chat_tree
-            .chat_tree
-            .get(&make_user_metadata_key(user_id, &app_id))
-            .unwrap()
-            .map_or_else(String::default, |raw| unsafe {
-                // Safety: this can never cause UB since we don't store non UTF-8 user metadata
-                String::from_utf8_unchecked(raw.to_vec())
-            });
-
-        Ok(GetUserMetadataResponse { metadata })
-    }
-
-    #[rate(4, 5)]
-    async fn profile_update(
-        &self,
-        request: Request<ProfileUpdateRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
-        auth!();
-
-        let ProfileUpdateRequest {
-            new_username,
-            new_avatar,
-            new_status,
-            new_is_bot,
-        } = request.into_parts().0.into_message().await??;
-
-        let key = make_user_profile_key(user_id);
-
-        let mut profile = self
-            .chat_tree
-            .chat_tree
-            .get(&key)
-            .unwrap()
-            .map_or_else(GetUserResponse::default, db::deser_profile);
-
-        if let Some(new_username) = new_username.clone() {
-            profile.user_name = new_username;
-        }
-        if let Some(new_avatar) = new_avatar.clone() {
-            profile.user_avatar = new_avatar;
-        }
-        if let Some(new_status) = new_status {
-            profile.user_status = new_status;
-        }
-        if let Some(new_is_bot) = new_is_bot {
-            profile.is_bot = new_is_bot;
-        }
-
-        let buf = encode_protobuf_message(profile);
-        chat_insert!(key / buf);
-
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            event::Event::ProfileUpdated(event::ProfileUpdated {
-                user_id,
-                new_username,
-                new_avatar,
-                new_status,
-                new_is_bot,
-            }),
-            None,
-            EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)),
-        );
-
-        Ok(())
-    }
-
     #[rate(4, 5)]
     async fn typing(
         &self,
         request: Request<TypingRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<TypingResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let TypingRequest {
@@ -2331,20 +1996,25 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
-            .check_perms(guild_id, channel_id, user_id, "messages.send", false)?;
+            .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::Typing(event::Typing {
+            stream_event::Event::Typing(stream_event::Typing {
                 user_id,
                 guild_id,
                 channel_id,
             }),
-            Some(PermCheck::new(guild_id, channel_id, "messages.view", false)),
+            Some(PermCheck::new(
+                guild_id,
+                Some(channel_id),
+                "messages.view",
+                false,
+            )),
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(TypingResponse {})
     }
 
     #[rate(2, 5)]
@@ -2370,8 +2040,8 @@ impl chat_service_server::ChatService for ChatServer {
             .count();
 
         Ok(PreviewGuildResponse {
-            name: guild.guild_name,
-            avatar: guild.guild_picture,
+            name: guild.name,
+            picture: guild.picture,
             member_count: member_count as u64,
         })
     }
@@ -2380,7 +2050,7 @@ impl chat_service_server::ChatService for ChatServer {
     async fn ban_user(
         &self,
         request: Request<BanUserRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<BanUserResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let BanUserRequest {
@@ -2391,7 +2061,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "user.manage.ban", false)?;
+            .check_perms(guild_id, None, user_id, "user.manage.ban", false)?;
 
         self.chat_tree.kick_user_logic(guild_id, user_to_ban);
 
@@ -2399,7 +2069,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::LeftMember(event::MemberLeft {
+            stream_event::Event::LeftMember(stream_event::MemberLeft {
                 guild_id,
                 member_id: user_to_ban,
                 leave_reason: LeaveReason::Banned.into(),
@@ -2408,14 +2078,14 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(BanUserResponse {})
     }
 
     #[rate(4, 5)]
     async fn kick_user(
         &self,
         request: Request<KickUserRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<KickUserResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let KickUserRequest {
@@ -2426,13 +2096,13 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "user.manage.kick", false)?;
+            .check_perms(guild_id, None, user_id, "user.manage.kick", false)?;
 
         self.chat_tree.kick_user_logic(guild_id, user_to_kick);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            event::Event::LeftMember(event::MemberLeft {
+            stream_event::Event::LeftMember(stream_event::MemberLeft {
                 guild_id,
                 member_id: user_to_kick,
                 leave_reason: LeaveReason::Kicked.into(),
@@ -2441,14 +2111,14 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        Ok(())
+        Ok(KickUserResponse {})
     }
 
     #[rate(4, 5)]
     async fn unban_user(
         &self,
         request: Request<UnbanUserRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+    ) -> Result<UnbanUserResponse, HrpcServerError<Self::Error>> {
         auth!();
 
         let UnbanUserRequest {
@@ -2458,31 +2128,31 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree
-            .check_perms(guild_id, 0, user_id, "user.manage.unban", false)?;
+            .check_perms(guild_id, None, user_id, "user.manage.unban", false)?;
 
         chat_remove!(make_banned_member_key(guild_id, user_to_unban));
 
-        Ok(())
+        Ok(UnbanUserResponse {})
     }
 
     async fn get_pinned_messages(
         &self,
-        request: Request<GetPinnedMessagesRequest>,
+        _request: Request<GetPinnedMessagesRequest>,
     ) -> Result<GetPinnedMessagesResponse, HrpcServerError<Self::Error>> {
         Err(ServerError::NotImplemented.into())
     }
 
     async fn pin_message(
         &self,
-        request: Request<PinMessageRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+        _request: Request<PinMessageRequest>,
+    ) -> Result<PinMessageResponse, HrpcServerError<Self::Error>> {
         Err(ServerError::NotImplemented.into())
     }
 
     async fn unpin_message(
         &self,
-        request: Request<UnpinMessageRequest>,
-    ) -> Result<(), HrpcServerError<Self::Error>> {
+        _request: Request<UnpinMessageRequest>,
+    ) -> Result<UnpinMessageResponse, HrpcServerError<Self::Error>> {
         Err(ServerError::NotImplemented.into())
     }
 }
@@ -2499,14 +2169,6 @@ impl ChatTree {
             .unwrap()
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::UserNotInGuild { guild_id, user_id }))
-    }
-
-    pub fn does_user_exist(&self, user_id: u64) -> Result<(), ServerError> {
-        self.chat_tree
-            .contains_key(&make_user_profile_key(user_id))
-            .unwrap()
-            .then(|| Ok(()))
-            .unwrap_or(Err(ServerError::NoSuchUser(user_id)))
     }
 
     pub fn does_guild_exist(&self, guild_id: u64) -> Result<(), ServerError> {
@@ -2548,7 +2210,7 @@ impl ChatTree {
             .unwrap()
             .map_or_else(
                 || Err(ServerError::NoSuchGuild(guild_id)),
-                |raw| Ok(db::deser_guild(raw).guild_owner),
+                |raw| Ok(db::deser_guild(raw).owner_id),
             )
     }
 
@@ -2576,11 +2238,6 @@ impl ChatTree {
         self.does_guild_exist(guild_id)
     }
 
-    #[inline(always)]
-    pub fn check_user(&self, user_id: u64) -> Result<(), ServerError> {
-        self.does_user_exist(user_id)
-    }
-
     pub fn get_message_logic(
         &self,
         guild_id: u64,
@@ -2602,19 +2259,7 @@ impl ChatTree {
         Ok((message, key))
     }
 
-    pub fn get_user_logic(&self, user_id: u64) -> Result<GetUserResponse, ServerError> {
-        let key = make_user_profile_key(user_id);
-
-        let profile = if let Some(profile_raw) = self.chat_tree.get(&key).unwrap() {
-            db::deser_profile(profile_raw)
-        } else {
-            return Err(ServerError::NoSuchUser(user_id));
-        };
-
-        Ok(profile)
-    }
-
-    pub fn get_guild_logic(&self, guild_id: u64) -> Result<GetGuildResponse, ServerError> {
+    pub fn get_guild_logic(&self, guild_id: u64) -> Result<Guild, ServerError> {
         let guild =
             if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
                 db::deser_guild(guild_raw)
@@ -2630,14 +2275,26 @@ impl ChatTree {
             .chat_tree
             .scan_prefix(INVITE_PREFIX)
             .map(|res| {
-                let (_, value) = res.unwrap();
-                let (id_raw, invite_raw) = value.split_at(size_of::<u64>());
+                let (key, value) = res.unwrap();
+                let (inv_guild_id_raw, invite_raw) = value.split_at(size_of::<u64>());
                 // Safety: this unwrap cannot fail since we split at u64 boundary
-                let id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+                let inv_guild_id =
+                    u64::from_be_bytes(unsafe { inv_guild_id_raw.try_into().unwrap_unchecked() });
+                let invite_id =
+                    unsafe { std::str::from_utf8_unchecked(key.split_at(INVITE_PREFIX.len()).1) };
                 let invite = db::deser_invite(invite_raw.into());
-                (id, invite)
+                (inv_guild_id, invite_id.to_string(), invite)
             })
-            .filter_map(|(id, invite)| if guild_id == id { Some(invite) } else { None })
+            .filter_map(|(inv_guild_id, invite_id, invite)| {
+                if guild_id == inv_guild_id {
+                    Some(InviteWithId {
+                        invite_id,
+                        invite: Some(invite),
+                    })
+                } else {
+                    None
+                }
+            })
             .collect();
 
         GetGuildInvitesResponse { invites }
@@ -2673,26 +2330,27 @@ impl ChatTree {
                 let (key, value) = res.unwrap();
                 (key.len() == prefix.len() + size_of::<u64>())
                     .then(|| {
-                        (user_id == 0
-                            || self
-                                .check_perms(
-                                    guild_id,
-                                    u64::from_be_bytes(
-                                        // Safety: this unwrap is safe since we check if it's a valid u64 beforehand
-                                        unsafe {
-                                            key.split_at(prefix.len())
-                                                .1
-                                                .try_into()
-                                                .unwrap_unchecked()
-                                        },
-                                    ),
-                                    user_id,
-                                    "messages.view",
-                                    false,
-                                )
-                                .is_ok())
+                        let channel_id = u64::from_be_bytes(
+                            // Safety: this unwrap is safe since we check if it's a valid u64 beforehand
+                            unsafe { key.split_at(prefix.len()).1.try_into().unwrap_unchecked() },
+                        );
+                        self.check_perms(
+                            guild_id,
+                            Some(channel_id),
+                            user_id,
+                            "messages.view",
+                            false,
+                        )
+                        .is_ok()
                         // Safety: this unwrap is safe since we only store valid Channel message
-                        .then(|| unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() })
+                        .then(|| {
+                            let channel =
+                                unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() };
+                            ChannelWithId {
+                                channel_id,
+                                channel: Some(channel),
+                            }
+                        })
                     })
                     .flatten()
             })
@@ -2827,9 +2485,11 @@ impl ChatTree {
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-        direction: Direction,
-        count: u32,
+        direction: Option<Direction>,
+        count: Option<u32>,
     ) -> GetChannelMessagesResponse {
+        let direction = direction.unwrap_or_default();
+
         let prefix = make_msg_prefix(guild_id, channel_id);
         let get_last_message_id = || {
             self.chat_tree.scan_prefix(&prefix).last().map(|last| {
@@ -2848,19 +2508,21 @@ impl ChatTree {
         };
 
         let get_messages = |to: u64| {
-            let count = count
-                .eq(&0)
-                .then(|| {
+            let count = count.map_or_else(
+                || {
                     matches!(direction, Direction::Around)
                         .then(|| 12)
                         .unwrap_or(25)
-                })
-                .unwrap_or(count as u64);
+                },
+                |c| c as u64,
+            );
+            let last_message_id = get_last_message_id().unwrap_or(1);
+
             let to = (to > 1).then(|| to - 1).unwrap_or(1);
             let to_before = || (to > count).then(|| to - count).unwrap_or(1);
-            let to_after = || (to + count).min(get_last_message_id().unwrap_or(1));
+            let to_after = || (to + count).min(last_message_id);
             let (from, to) = match direction {
-                Direction::Before => (to_before(), to),
+                Direction::BeforeUnspecified => (to_before(), to),
                 Direction::After => (to, to_after()),
                 Direction::Around => (to_before(), to_after()),
             };
@@ -2873,13 +2535,25 @@ impl ChatTree {
                 .range((&from_key)..=(&to_key))
                 .rev()
                 .map(|res| {
-                    let (_, value) = res.unwrap();
-                    db::deser_message(value)
+                    let (key, value) = res.unwrap();
+                    // Safety: this is safe since the only keys we get are message keys, which after stripping prefix are message IDs
+                    let message_id = u64::from_be_bytes(unsafe {
+                        key.split_at(make_msg_prefix(guild_id, channel_id).len())
+                            .1
+                            .try_into()
+                            .unwrap_unchecked()
+                    });
+                    let message = db::deser_message(value);
+                    MessageWithId {
+                        message_id,
+                        message: Some(message),
+                    }
                 })
                 .collect();
 
             GetChannelMessagesResponse {
                 reached_top: from == 1,
+                reached_bottom: to == last_message_id,
                 messages,
             }
         };
@@ -2889,6 +2563,7 @@ impl ChatTree {
                 get_last_message_id().map_or_else(
                     || GetChannelMessagesResponse {
                         reached_top: true,
+                        reached_bottom: true,
                         messages: Vec::new(),
                     },
                     |last| get_messages(last + 1),
@@ -2910,9 +2585,8 @@ impl ChatTree {
             })
     }
 
-    pub fn compare_perms(perms: PermissionList, check_for: &str) -> Option<bool> {
+    pub fn compare_perms(perms: Vec<Permission>, check_for: &str) -> Option<bool> {
         let mut matching_perms = perms
-            .permissions
             .into_iter()
             .filter(|perm| {
                 perm.matches
@@ -2944,32 +2618,24 @@ impl ChatTree {
             }
         });
 
-        matching_perms
-            .pop()
-            .map(|p| matches!(p.mode(), Mode::Allow))
+        matching_perms.pop().map(|p| p.ok)
     }
 
     pub fn query_has_permission_logic(
         &self,
         guild_id: u64,
-        channel_id: u64,
+        channel_id: Option<u64>,
         user_id: u64,
         check_for: &str,
     ) -> bool {
         let key = make_guild_user_roles_key(guild_id, user_id);
         let user_roles = self.get_list_u64_logic(&key);
 
-        let is_allowed = |key: &[u8]| {
-            self.chat_tree.get(key).unwrap().and_then(|raw_perms| {
-                let perms = db::deser_perm_list(raw_perms);
-                Self::compare_perms(perms, check_for)
-            })
-        };
-
-        if channel_id != 0 {
+        if let Some(channel_id) = channel_id {
             for role_id in &user_roles {
-                let key = &make_guild_channel_roles_key(guild_id, channel_id, *role_id);
-                if let Some(allow) = is_allowed(key) {
+                let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id);
+                let is_allowed = Self::compare_perms(perms, check_for);
+                if let Some(allow) = is_allowed {
                     if allow {
                         return true;
                     }
@@ -2978,8 +2644,9 @@ impl ChatTree {
         }
 
         for role_id in user_roles {
-            let key = &make_guild_role_perms_key(guild_id, role_id);
-            if let Some(allow) = is_allowed(key) {
+            let perms = self.get_permissions_logic(guild_id, None, role_id);
+            let is_allowed = Self::compare_perms(perms, check_for);
+            if let Some(allow) = is_allowed {
                 if allow {
                     return true;
                 }
@@ -2992,7 +2659,7 @@ impl ChatTree {
     pub fn check_perms(
         &self,
         guild_id: u64,
-        channel_id: u64,
+        channel_id: Option<u64>,
         user_id: u64,
         check_for: &str,
         must_be_guild_owner: bool,
@@ -3061,18 +2728,17 @@ impl ChatTree {
         Ok(())
     }
 
-    pub fn add_guild_role_logic(&self, guild_id: u64, mut role: Role) -> Result<u64, ServerError> {
-        let key = {
+    pub fn add_guild_role_logic(&self, guild_id: u64, role: Role) -> Result<u64, ServerError> {
+        let (role_id, key) = {
             let mut rng = rand::thread_rng();
-            role.role_id = rng.gen_range(1..u64::MAX);
-            let mut key = make_guild_role_key(guild_id, role.role_id);
+            let mut role_id = rng.gen_range(1..u64::MAX);
+            let mut key = make_guild_role_key(guild_id, role_id);
             while self.chat_tree.contains_key(&key).unwrap() {
-                role.role_id = rng.gen_range(1..u64::MAX);
-                key = make_guild_role_key(guild_id, role.role_id);
+                role_id = rng.gen_range(1..u64::MAX);
+                key = make_guild_role_key(guild_id, role_id);
             }
-            key
+            (role_id, key)
         };
-        let role_id = role.role_id;
         let ser_role = encode_protobuf_message(role);
         cchat_insert!(key / ser_role);
         self.move_role_logic(guild_id, role_id, Place::between(0, 0))?;
@@ -3082,19 +2748,18 @@ impl ChatTree {
     pub fn set_permissions_logic(
         &self,
         guild_id: u64,
-        channel_id: u64,
+        channel_id: Option<u64>,
         role_id: u64,
-        perms: PermissionList,
+        perms_to_give: Vec<Permission>,
     ) {
-        let put_perms = |key: &[u8]| {
-            let buf = encode_protobuf_message(perms);
-            cchat_insert!(key / buf);
-        };
-        // TODO: categories?
-        if channel_id != 0 {
-            put_perms(make_guild_channel_roles_key(guild_id, channel_id, role_id).as_ref())
-        } else {
-            put_perms(make_guild_role_perms_key(guild_id, role_id).as_ref())
+        let mut batch = Batch::default();
+        for perm in perms_to_give {
+            let value = perm.ok.then(|| [1]).unwrap_or([0]);
+            let key = channel_id.map_or_else(
+                || make_guild_perm_key(guild_id, role_id, &perm.matches),
+                |channel_id| make_channel_perm_key(guild_id, channel_id, role_id, &perm.matches),
+            );
+            batch.insert(key, value);
         }
     }
 
@@ -3120,7 +2785,6 @@ impl ChatTree {
 
         let channel = Channel {
             metadata,
-            channel_id,
             channel_name,
             is_category,
         };
@@ -3174,70 +2838,22 @@ impl ChatTree {
             .unwrap();
     }
 
-    /// Converts a local user ID to the corresponding foreign user ID and the host
-    pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, SmolStr)> {
-        let key = make_local_to_foreign_user_key(local_id);
-
-        self.chat_tree.get(&key).unwrap().map(|raw| {
-            let (raw_id, raw_host) = raw.split_at(size_of::<u64>());
-            // Safety: safe since we split at u64 boundary.
-            let foreign_id = u64::from_be_bytes(unsafe { raw_id.try_into().unwrap_unchecked() });
-            // Safety: all stored hosts are valid UTF-8
-            let host = (unsafe { std::str::from_utf8_unchecked(raw_host) }).into();
-            (foreign_id, host)
-        })
-    }
-
-    /// Convert a foreign user ID to a local user ID
-    pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> Option<u64> {
-        let key = make_foreign_to_local_user_key(foreign_id, host);
-
-        self.chat_tree
-            .get(&key)
-            .unwrap()
-            // Safety: we store u64's only for these keys
-            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
-    }
-
-    pub fn check_if_emote_pack_owner(
-        &self,
-        pack_id: u64,
-        user_id: u64,
-    ) -> Result<EmotePack, ServerError> {
-        let key = make_emote_pack_key(pack_id);
-
-        let pack = if let Some(data) = cchat_get!(key) {
-            let pack = EmotePack::decode(data.as_ref()).unwrap();
-
-            if pack.pack_owner != user_id {
-                return Err(ServerError::NotEmotePackOwner);
-            }
-
-            pack
-        } else {
-            return Err(ServerError::EmotePackNotFound);
-        };
-
-        Ok(pack)
-    }
-
-    pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
-        let key = make_equipped_emote_key(user_id, pack_id);
-        cchat_remove!(key);
-    }
-
-    pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
-        let key = make_equipped_emote_key(user_id, pack_id);
-        cchat_insert!(key / &[]);
-    }
-
-    pub fn get_guild_roles_logic(&self, guild_id: u64) -> Vec<Role> {
+    pub fn get_guild_roles_logic(&self, guild_id: u64) -> Vec<RoleWithId> {
         let prefix = make_guild_role_prefix(guild_id);
         self.chat_tree
             .scan_prefix(&prefix)
             .flat_map(|res| {
                 let (key, val) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>()).then(|| db::deser_role(val))
+                (key.len() == make_guild_role_key(guild_id, 0).len()).then(|| {
+                    let role = db::deser_role(val);
+                    let role_id = u64::from_be_bytes(unsafe {
+                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                    });
+                    RoleWithId {
+                        role_id,
+                        role: Some(role),
+                    }
+                })
             })
             .collect()
     }
@@ -3245,24 +2861,40 @@ impl ChatTree {
     pub fn get_permissions_logic(
         &self,
         guild_id: u64,
-        channel_id: u64,
+        channel_id: Option<u64>,
         role_id: u64,
-    ) -> Option<PermissionList> {
-        let gkey = make_guild_role_perms_key(guild_id, role_id);
-        let ckey = make_guild_channel_roles_key(guild_id, channel_id, role_id);
-        let key = channel_id
-            .eq(&0)
-            .then(|| gkey.as_ref())
-            .unwrap_or_else(|| ckey.as_ref());
-        cchat_get!(key).map(db::deser_perm_list)
+    ) -> Vec<Permission> {
+        let get = |prefix: &[u8]| {
+            self.chat_tree
+                .scan_prefix(prefix)
+                .map(|res| {
+                    let (key, value) = res.unwrap();
+                    let matches_raw = key.split_at(prefix.len()).1;
+                    let matches = unsafe { std::str::from_utf8_unchecked(matches_raw) };
+                    let ok = value[0] != 0;
+                    Permission {
+                        matches: matches.to_string(),
+                        ok,
+                    }
+                })
+                .collect()
+        };
+
+        if let Some(channel_id) = channel_id {
+            let prefix = make_role_channel_perms_prefix(guild_id, channel_id, role_id);
+            get(&prefix)
+        } else {
+            let prefix = make_role_guild_perms_prefix(guild_id, role_id);
+            get(&prefix)
+        }
     }
 
     pub fn query_has_permission_request(
         &self,
         user_id: u64,
-        request: QueryPermissionsRequest,
-    ) -> Result<QueryPermissionsResponse, ServerError> {
-        let QueryPermissionsRequest {
+        request: QueryHasPermissionRequest,
+    ) -> Result<QueryHasPermissionResponse, ServerError> {
+        let QueryHasPermissionRequest {
             guild_id,
             channel_id,
             check_for,
@@ -3271,10 +2903,9 @@ impl ChatTree {
 
         self.check_guild_user(guild_id, user_id)?;
 
-        let as_other = r#as != 0;
-        let check_as = if as_other { r#as } else { user_id };
+        let check_as = r#as.unwrap_or(user_id);
 
-        if as_other {
+        if r#as.is_some() {
             self.check_perms(guild_id, channel_id, user_id, "permissions.query", false)?;
         }
 
@@ -3282,94 +2913,56 @@ impl ChatTree {
             return Err(ServerError::EmptyPermissionQuery);
         }
 
-        Ok(QueryPermissionsResponse {
+        Ok(QueryHasPermissionResponse {
             ok: self
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .is_ok(),
         })
     }
-
-    pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> Vec<u64> {
-        let mut result = Vec::new();
-        for user_id in self.chat_tree.scan_prefix(USER_PREFIX).filter_map(|res| {
-            let (key, _) = res.unwrap();
-            (key.len() == make_user_profile_key(0).len()).then(|| {
-                u64::from_be_bytes(unsafe {
-                    key.split_at(USER_PREFIX.len())
-                        .1
-                        .try_into()
-                        .unwrap_unchecked()
-                })
-            })
-        }) {
-            let prefix = make_equipped_emote_prefix(user_id);
-            if self
-                .chat_tree
-                .scan_prefix(&prefix)
-                .filter_map(|res| {
-                    let (key, _) = res.unwrap();
-                    (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
-                        u64::from_be_bytes(unsafe {
-                            key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                        })
-                    })
-                })
-                .any(|id| id == pack_id)
-            {
-                result.push(user_id);
-            }
-        }
-        result
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use harmony_rust_sdk::api::chat::{permission::Mode, Permission, PermissionList};
+    use harmony_rust_sdk::api::chat::Permission;
 
     use crate::impls::chat::ChatTree;
 
-    fn mk_perms<const LEN: usize>(arr: [(&'static str, Mode); LEN]) -> PermissionList {
-        let permissions = std::array::IntoIter::new(arr)
-            .map(|(matches, mode)| Permission {
+    fn mk_perms<const LEN: usize>(arr: [(&'static str, bool); LEN]) -> Vec<Permission> {
+        std::array::IntoIter::new(arr)
+            .map(|(matches, ok)| Permission {
                 matches: matches.to_string(),
-                mode: mode.into(),
+                ok,
             })
-            .collect();
-        PermissionList { permissions }
+            .collect()
     }
 
     #[test]
     fn test_perm_compare_equal_allow() {
-        let ok =
-            ChatTree::compare_perms(mk_perms([("messages.send", Mode::Allow)]), "messages.send");
+        let ok = ChatTree::compare_perms(mk_perms([("messages.send", true)]), "messages.send");
         assert_eq!(ok, Some(true));
     }
 
     #[test]
     fn test_perm_compare_equal_deny() {
-        let ok =
-            ChatTree::compare_perms(mk_perms([("messages.send", Mode::Deny)]), "messages.send");
+        let ok = ChatTree::compare_perms(mk_perms([("messages.send", false)]), "messages.send");
         assert_eq!(ok, Some(false));
     }
 
     #[test]
     fn test_perm_compare_nonequal_allow() {
-        let ok =
-            ChatTree::compare_perms(mk_perms([("messages.sendd", Mode::Allow)]), "messages.send");
+        let ok = ChatTree::compare_perms(mk_perms([("messages.sendd", true)]), "messages.send");
         assert_eq!(ok, None);
     }
 
     #[test]
     fn test_perm_compare_nonequal_deny() {
-        let ok =
-            ChatTree::compare_perms(mk_perms([("messages.sendd", Mode::Deny)]), "messages.send");
+        let ok = ChatTree::compare_perms(mk_perms([("messages.sendd", false)]), "messages.send");
         assert_eq!(ok, None);
     }
 
     #[test]
     fn test_perm_compare_glob_allow() {
-        let perms = mk_perms([("messages.*", Mode::Allow)]);
+        let perms = mk_perms([("messages.*", true)]);
         let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
         assert_eq!(ok, Some(true));
         let ok = ChatTree::compare_perms(perms, "messages.view");
@@ -3378,7 +2971,7 @@ mod tests {
 
     #[test]
     fn test_perm_compare_glob_deny() {
-        let perms = mk_perms([("messages.*", Mode::Deny)]);
+        let perms = mk_perms([("messages.*", false)]);
         let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
         assert_eq!(ok, Some(false));
         let ok = ChatTree::compare_perms(perms, "messages.view");
@@ -3387,14 +2980,14 @@ mod tests {
 
     #[test]
     fn test_perm_compare_specific_deny() {
-        let perms = mk_perms([("messages.*", Mode::Allow), ("messages.send", Mode::Deny)]);
+        let perms = mk_perms([("messages.*", true), ("messages.send", false)]);
         let ok = ChatTree::compare_perms(perms, "messages.send");
         assert_eq!(ok, Some(false));
     }
 
     #[test]
     fn test_perm_compare_specific_allow() {
-        let perms = mk_perms([("messages.*", Mode::Deny), ("messages.send", Mode::Allow)]);
+        let perms = mk_perms([("messages.*", false), ("messages.send", true)]);
         let ok = ChatTree::compare_perms(perms, "messages.send");
         assert_eq!(ok, Some(true));
     }
@@ -3402,9 +2995,9 @@ mod tests {
     #[test]
     fn test_perm_compare_depth_allow() {
         let perms = mk_perms([
-            ("messages.*", Mode::Deny),
-            ("messages.send", Mode::Deny),
-            ("messages.send.send", Mode::Allow),
+            ("messages.*", false),
+            ("messages.send", false),
+            ("messages.send.send", true),
         ]);
         let ok = ChatTree::compare_perms(perms, "messages.send.send");
         assert_eq!(ok, Some(true));
@@ -3413,9 +3006,9 @@ mod tests {
     #[test]
     fn test_perm_compare_depth_deny() {
         let perms = mk_perms([
-            ("messages.*", Mode::Allow),
-            ("messages.send", Mode::Allow),
-            ("messages.send.send", Mode::Deny),
+            ("messages.*", true),
+            ("messages.send", true),
+            ("messages.send.send", false),
         ]);
         let ok = ChatTree::compare_perms(perms, "messages.send.send");
         assert_eq!(ok, Some(false));

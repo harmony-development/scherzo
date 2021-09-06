@@ -39,6 +39,66 @@ fn tree_get(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
 }
 
 #[proc_macro]
+pub fn emote_insert(input: TokenStream) -> TokenStream {
+    tree_insert(input, quote! { emote_tree.inner })
+}
+
+#[proc_macro]
+pub fn emote_remove(input: TokenStream) -> TokenStream {
+    tree_remove(input, quote! { emote_tree.inner })
+}
+
+#[proc_macro]
+pub fn emote_get(input: TokenStream) -> TokenStream {
+    tree_get(input, quote! { emote_tree.inner })
+}
+
+#[proc_macro]
+pub fn eemote_insert(input: TokenStream) -> TokenStream {
+    tree_insert(input, quote! { inner })
+}
+
+#[proc_macro]
+pub fn eemote_remove(input: TokenStream) -> TokenStream {
+    tree_remove(input, quote! { inner })
+}
+
+#[proc_macro]
+pub fn eemote_get(input: TokenStream) -> TokenStream {
+    tree_get(input, quote! { inner })
+}
+
+#[proc_macro]
+pub fn profile_insert(input: TokenStream) -> TokenStream {
+    tree_insert(input, quote! { profile_tree.inner })
+}
+
+#[proc_macro]
+pub fn profile_remove(input: TokenStream) -> TokenStream {
+    tree_remove(input, quote! { profile_tree.inner })
+}
+
+#[proc_macro]
+pub fn profile_get(input: TokenStream) -> TokenStream {
+    tree_get(input, quote! { profile_tree.inner })
+}
+
+#[proc_macro]
+pub fn pprofile_insert(input: TokenStream) -> TokenStream {
+    tree_insert(input, quote! { inner })
+}
+
+#[proc_macro]
+pub fn pprofile_remove(input: TokenStream) -> TokenStream {
+    tree_remove(input, quote! { inner })
+}
+
+#[proc_macro]
+pub fn pprofile_get(input: TokenStream) -> TokenStream {
+    tree_get(input, quote! { inner })
+}
+
+#[proc_macro]
 pub fn chat_insert(input: TokenStream) -> TokenStream {
     tree_insert(input, quote! { chat_tree.chat_tree })
 }

@@ -10,12 +10,9 @@ use std::{
 use crate::travel_error;
 use cached::proc_macro::cached;
 use harmony_rust_sdk::api::{
-    chat::{
-        get_guild_channels_response::Channel, get_guild_invites_response::Invite, GetGuildResponse,
-        GetUserResponse, PermissionList, Role,
-    },
+    chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
     exports::prost::Message,
-    harmonytypes::Message as HarmonyMessage,
+    profile::Profile,
 };
 
 pub mod migration;
@@ -84,13 +81,127 @@ pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
         .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
 }
 
-pub mod chat {
+pub mod profile {
     use super::concat_static;
 
     pub const USER_PREFIX: &[u8] = b"user_";
     pub const FOREIGN_PREFIX: &[u8] = b"fuser_";
-    pub const INVITE_PREFIX: &[u8] = b"invite_";
+
+    pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 15] {
+        concat_static(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
+    }
+
+    pub fn make_foreign_to_local_user_key(foreign_id: u64, host: &str) -> Vec<u8> {
+        [
+            FOREIGN_PREFIX,
+            &[2],
+            &foreign_id.to_be_bytes(),
+            host.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub const fn make_user_profile_key(user_id: u64) -> [u8; 13] {
+        concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
+    }
+
+    pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
+        [
+            make_user_profile_key(user_id).as_ref(),
+            &[1],
+            app_id.as_bytes(),
+        ]
+        .concat()
+    }
+}
+
+pub mod emote {
+    use super::{concat_static, profile::USER_PREFIX};
+
     pub const EMOTEPACK_PREFIX: &[u8] = b"emotep_";
+
+    pub const fn make_emote_pack_key(pack_id: u64) -> [u8; 15] {
+        concat_static(&[EMOTEPACK_PREFIX, &pack_id.to_be_bytes()])
+    }
+
+    pub fn make_emote_pack_emote_key(pack_id: u64, image_id: &str) -> Vec<u8> {
+        [
+            EMOTEPACK_PREFIX,
+            &pack_id.to_be_bytes(),
+            image_id.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub const fn make_equipped_emote_prefix(user_id: u64) -> [u8; 14] {
+        concat_static(&[USER_PREFIX, &user_id.to_be_bytes(), &[9]])
+    }
+
+    pub const fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
+        concat_static(&[&make_equipped_emote_prefix(user_id), &pack_id.to_be_bytes()])
+    }
+}
+
+pub mod chat {
+    use super::concat_static;
+
+    pub const INVITE_PREFIX: &[u8] = b"invite_";
+
+    // perms
+
+    pub fn make_guild_perm_key(guild_id: u64, role_id: u64, matches: &str) -> Vec<u8> {
+        [
+            &make_role_guild_perms_prefix(guild_id, role_id),
+            matches.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub fn make_channel_perm_key(
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+        matches: &str,
+    ) -> Vec<u8> {
+        [
+            &make_role_channel_perms_prefix(guild_id, channel_id, role_id),
+            matches.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub const fn make_role_guild_perms_prefix(guild_id: u64, role_id: u64) -> [u8; 18] {
+        concat_static(&[
+            &make_guild_role_prefix(guild_id),
+            &role_id.to_be_bytes(),
+            &[9],
+        ])
+    }
+
+    pub const fn make_role_channel_perms_prefix(
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+    ) -> [u8; 26] {
+        concat_static(&[
+            &make_chan_key(guild_id, channel_id),
+            &[8],
+            &role_id.to_be_bytes(),
+        ])
+    }
+
+    pub const fn make_guild_role_key(guild_id: u64, role_id: u64) -> [u8; 17] {
+        concat_static(&[&make_guild_role_prefix(guild_id), &role_id.to_be_bytes()])
+    }
+
+    pub const fn make_guild_user_roles_key(guild_id: u64, user_id: u64) -> [u8; 17] {
+        concat_static(&[
+            &make_guild_user_roles_prefix(guild_id),
+            &user_id.to_be_bytes(),
+        ])
+    }
+
+    // perms
 
     // message
 
@@ -118,33 +229,6 @@ pub mod chat {
             &make_guild_banned_mem_prefix(guild_id),
             &user_id.to_be_bytes(),
         ])
-    }
-
-    pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 15] {
-        concat_static(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
-    }
-
-    pub fn make_foreign_to_local_user_key(foreign_id: u64, host: &str) -> Vec<u8> {
-        [
-            FOREIGN_PREFIX,
-            &[2],
-            &foreign_id.to_be_bytes(),
-            host.as_bytes(),
-        ]
-        .concat()
-    }
-
-    pub const fn make_user_profile_key(user_id: u64) -> [u8; 13] {
-        concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
-    }
-
-    pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
-        [
-            make_user_profile_key(user_id).as_ref(),
-            &[1],
-            app_id.as_bytes(),
-        ]
-        .concat()
     }
 
     // member
@@ -196,37 +280,6 @@ pub mod chat {
         .concat()
     }
 
-    pub const fn make_guild_role_key(guild_id: u64, role_id: u64) -> [u8; 17] {
-        concat_static(&[&make_guild_role_prefix(guild_id), &role_id.to_be_bytes()])
-    }
-
-    pub const fn make_guild_role_perms_key(guild_id: u64, role_id: u64) -> [u8; 18] {
-        concat_static(&[
-            &make_guild_role_prefix(guild_id),
-            &role_id.to_be_bytes(),
-            &[9],
-        ])
-    }
-
-    pub const fn make_guild_user_roles_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-        concat_static(&[
-            &make_guild_user_roles_prefix(guild_id),
-            &user_id.to_be_bytes(),
-        ])
-    }
-
-    pub const fn make_guild_channel_roles_key(
-        guild_id: u64,
-        channel_id: u64,
-        role_id: u64,
-    ) -> [u8; 26] {
-        concat_static(&[
-            &make_chan_key(guild_id, channel_id),
-            &[8],
-            &role_id.to_be_bytes(),
-        ])
-    }
-
     // guild
 
     pub const fn make_chan_key(guild_id: u64, channel_id: u64) -> [u8; 17] {
@@ -236,31 +289,6 @@ pub mod chat {
     pub fn make_invite_key(name: &str) -> Vec<u8> {
         [INVITE_PREFIX, name.as_bytes()].concat()
     }
-
-    // emote
-
-    pub const fn make_emote_pack_key(pack_id: u64) -> [u8; 15] {
-        concat_static(&[EMOTEPACK_PREFIX, &pack_id.to_be_bytes()])
-    }
-
-    pub fn make_emote_pack_emote_key(pack_id: u64, image_id: &str) -> Vec<u8> {
-        [
-            EMOTEPACK_PREFIX,
-            &pack_id.to_be_bytes(),
-            image_id.as_bytes(),
-        ]
-        .concat()
-    }
-
-    pub const fn make_equipped_emote_prefix(user_id: u64) -> [u8; 14] {
-        concat_static(&[USER_PREFIX, &user_id.to_be_bytes(), &[9]])
-    }
-
-    pub const fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
-        concat_static(&[&make_equipped_emote_prefix(user_id), &pack_id.to_be_bytes()])
-    }
-
-    // emote
 }
 
 pub mod auth {
@@ -287,13 +315,12 @@ pub mod sync {
 }
 
 crate::impl_deser! {
-    profile, GetUserResponse, 5096;
+    profile, Profile, 5096;
     invite, Invite, 1024;
     message, HarmonyMessage, 10192;
-    guild, GetGuildResponse, 1024;
+    guild, Guild, 1024;
     chan, Channel, 1024;
     role, Role, 1024;
-    perm_list, PermissionList, 1024;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
