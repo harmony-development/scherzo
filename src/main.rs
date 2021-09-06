@@ -294,10 +294,6 @@ pub async fn run(filter_level: Level, db_path: String) {
             .expect("failed to write default config file");
         def
     };
-    // Write config file back, since it might have filled in with default values
-    tokio::fs::write(config_path, toml::to_vec(&config).unwrap())
-        .await
-        .expect("failed to write to config file");
     debug!("running with {:?}", config);
     tokio::fs::create_dir_all(&config.media.media_root)
         .await
