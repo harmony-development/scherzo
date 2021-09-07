@@ -255,7 +255,7 @@ pub fn upload(
 }
 
 #[inline(always)]
-fn reject(err: impl Into<ServerError>) -> warp::Rejection {
+pub fn reject(err: impl Into<ServerError>) -> warp::Rejection {
     warp::reject::custom(HrpcError::Custom(err.into()))
 }
 

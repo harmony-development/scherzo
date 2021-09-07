@@ -6,7 +6,10 @@ pub mod profile;
 pub mod rest;
 pub mod sync;
 
-use std::time::{Duration, UNIX_EPOCH};
+use std::{
+    str::FromStr,
+    time::{Duration, UNIX_EPOCH},
+};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::exports::{
@@ -19,7 +22,7 @@ use harmony_rust_sdk::api::exports::{
 };
 use parking_lot::Mutex;
 use rand::Rng;
-use reqwest::Response;
+use reqwest::{Response, Url};
 use smol_str::SmolStr;
 use tokio::sync::{broadcast, mpsc};
 use triomphe::Arc;
@@ -27,6 +30,7 @@ use triomphe::Arc;
 use crate::{
     config::Config,
     db::{ArcTree, Db, DbResult},
+    impls::rest::reject,
     key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
 };
 
@@ -165,4 +169,89 @@ pub fn about(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
             })
         })
         .boxed()
+}
+
+pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
+    let http = reqwest::Client::new();
+
+    // TODO: return a proper server error instead of just using header
+    // which discards the FromStr error
+    warp::header::<HomeserverIdentifier>("Against")
+        .and(warp::path::full())
+        .and(warp::body::body())
+        .and(warp::header::headers_cloned())
+        .and_then(
+            move |host_id: HomeserverIdentifier, path: warp::path::FullPath, body, headers| {
+                let http = http.clone();
+                async move {
+                    use reqwest::{Method, Request};
+
+                    // TODO: don't use unwrap, handle error
+                    let url = host_id.to_url().unwrap().join(path.as_str()).unwrap();
+                    let mut request = Request::new(Method::POST, url);
+                    *request.body_mut() = Some(reqwest::Body::wrap_stream(body));
+                    // TODO: only pass harmony headers
+                    *request.headers_mut() = headers;
+
+                    let response = http.execute(request).await.map_err(reject)?;
+                    let stream = response.bytes_stream();
+
+                    let mut response =
+                        warp::reply::Response::new(warp::hyper::Body::wrap_stream(stream));
+                    *response.headers_mut() = response.headers().clone();
+                    *response.status_mut() = response.status();
+
+                    Result::<_, warp::Rejection>::Ok(response)
+                }
+            },
+        )
+        .boxed()
+}
+
+use harmony_rust_sdk::api::exports::hrpc::url::ParseError;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct HomeserverIdentifier {
+    domain: SmolStr,
+    port: u16,
+}
+
+impl HomeserverIdentifier {
+    pub fn to_url(&self) -> Result<Url, ParseError> {
+        let mut url = Url::parse("https://example.net").unwrap();
+        url.set_host(Some(self.domain.as_str()))?;
+        url.set_port(Some(self.port))
+            .map_err(|_| ParseError::InvalidPort)?;
+        Ok(url)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HomeserverIdParseError {
+    /// Port wasn't a `u16`.
+    InvalidPort,
+    /// Port was missing.
+    MissingPort,
+    /// Domain was missing.
+    MissingDomain,
+}
+
+impl FromStr for HomeserverIdentifier {
+    type Err = HomeserverIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut split = s.split(':');
+
+        let domain = split.next().ok_or(HomeserverIdParseError::MissingDomain)?;
+        let port_raw = split.next().ok_or(HomeserverIdParseError::MissingPort)?;
+
+        let port: u16 = port_raw
+            .parse()
+            .map_err(|_| HomeserverIdParseError::InvalidPort)?;
+
+        Ok(Self {
+            domain: SmolStr::new(domain),
+            port,
+        })
+    }
 }

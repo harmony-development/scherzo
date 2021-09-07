@@ -30,8 +30,8 @@ use scherzo::{
         Db,
     },
     impls::{
-        auth::AuthServer, chat::ChatServer, emote::EmoteServer, mediaproxy::MediaproxyServer,
-        profile::ProfileServer, sync::SyncServer, Dependencies,
+        against_proxy, auth::AuthServer, chat::ChatServer, emote::EmoteServer,
+        mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer, Dependencies,
     },
     ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
 };
@@ -365,7 +365,9 @@ pub async fn run(filter_level: Level, db_path: String) {
 
     let shared_config = SharedConfig::new(SharedConfigData::default().into());
     let serve = hrpc::warp::serve(
-        auth.or(chat)
+        against_proxy()
+            .or(auth)
+            .or(chat)
             .or(mediaproxy)
             .or(rest)
             .or(sync)
