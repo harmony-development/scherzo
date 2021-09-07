@@ -40,7 +40,7 @@ use triomphe::Arc;
 
 use crate::{
     append_list::AppendList,
-    db::{self, chat::*, Batch},
+    db::{self, chat::*, Batch, Db, DbResult},
     impls::{
         auth, get_time_secs,
         rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
@@ -49,7 +49,7 @@ use crate::{
     set_proto_name, ServerError,
 };
 
-use super::profile::ProfileTree;
+use super::{profile::ProfileTree, Dependencies};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EventSub {
@@ -120,35 +120,28 @@ impl EventBroadcast {
 }
 
 pub type EventSender = BroadcastSend<Arc<EventBroadcast>>;
+pub type EventDispatcher = UnboundedSender<EventDispatch>;
 
 pub struct ChatServer {
     host: String,
-    media_root: Arc<PathBuf>,
+    media_root: PathBuf,
     valid_sessions: auth::SessionMap,
     chat_tree: ChatTree,
     profile_tree: ProfileTree,
     pub broadcast_send: EventSender,
-    dispatch_tx: UnboundedSender<EventDispatch>,
+    dispatch_tx: EventDispatcher,
 }
 
 impl ChatServer {
-    pub fn new(
-        host: String,
-        media_root: Arc<PathBuf>,
-        chat_tree: ChatTree,
-        profile_tree: ProfileTree,
-        valid_sessions: auth::SessionMap,
-        dispatch_tx: UnboundedSender<EventDispatch>,
-        broadcast_send: EventSender,
-    ) -> Self {
+    pub fn new(deps: &Dependencies) -> Self {
         Self {
-            host,
-            media_root,
-            valid_sessions,
-            chat_tree,
-            profile_tree,
-            broadcast_send,
-            dispatch_tx,
+            host: deps.config.host.clone(),
+            media_root: deps.config.media.media_root.clone(),
+            valid_sessions: deps.valid_sessions.clone(),
+            chat_tree: deps.chat_tree.clone(),
+            profile_tree: deps.profile_tree.clone(),
+            broadcast_send: deps.chat_event_sender.clone(),
+            dispatch_tx: deps.fed_event_dispatcher.clone(),
         }
     }
 
@@ -2163,6 +2156,11 @@ pub struct ChatTree {
 }
 
 impl ChatTree {
+    pub fn new(db: &dyn Db) -> DbResult<Self> {
+        let chat_tree = db.open_tree(b"chat")?;
+        Ok(Self { chat_tree })
+    }
+
     pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
         self.chat_tree
             .contains_key(&make_member_key(guild_id, user_id))

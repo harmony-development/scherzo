@@ -8,7 +8,6 @@ use std::{
     time::Duration,
 };
 
-use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     chat::{chat_service_server::ChatServiceServer, Guild, Invite},
@@ -31,14 +30,10 @@ use scherzo::{
         Db,
     },
     impls::{
-        auth::AuthServer,
-        chat::{ChatServer, ChatTree},
-        emote::{EmoteServer, EmoteTree},
-        mediaproxy::MediaproxyServer,
-        profile::{ProfileServer, ProfileTree},
-        sync::SyncServer,
+        auth::AuthServer, chat::ChatServer, emote::EmoteServer, mediaproxy::MediaproxyServer,
+        profile::ProfileServer, sync::SyncServer, Dependencies,
     },
-    key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
+    ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{
@@ -48,7 +43,6 @@ use tracing_subscriber::{
     },
     prelude::*,
 };
-use triomphe::Arc;
 
 #[derive(Debug)]
 pub enum Command {
@@ -313,7 +307,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     if needs_migration {
         // Backup db before attempting to apply migrations
         let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
-        let db_backup_path = config.db_backup_path.map_or_else(
+        let db_backup_path = config.db_backup_path.as_ref().map_or_else(
             || Path::new(&db_backup_name).to_path_buf(),
             |path| path.join(&db_backup_name),
         );
@@ -330,80 +324,26 @@ pub async fn run(filter_level: Level, db_path: String) {
             .expect("something went wrong while applying the migrations!!!");
     }
 
-    let valid_sessions = Arc::new(DashMap::default());
+    let (deps, fed_event_receiver) = Dependencies::new(db.as_ref(), config).unwrap();
 
-    let auth_tree = db.open_tree(b"auth").unwrap();
-    let chat_tree = db.open_tree(b"chat").unwrap();
-    let sync_tree = db.open_tree(b"sync").unwrap();
-    let profile_tree = db.open_tree(b"profile").unwrap();
-    let emote_tree = db.open_tree(b"emote").unwrap();
-
-    let chat_tree = ChatTree { chat_tree };
-    let profile_tree = ProfileTree {
-        inner: profile_tree,
-    };
-    let emote_tree = EmoteTree { inner: emote_tree };
-
-    let federation_config = config.federation.map(Arc::new);
-    let media_root = Arc::new(config.media.media_root);
-
-    let (dispatch_tx, dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
-    let keys_manager = federation_config
-        .as_ref()
-        .map(|conf| Arc::new(key::Manager::new(conf.key.clone())));
-    let (chat_event_sender, _) = tokio::sync::broadcast::channel(1000);
-
-    let profile_server = ProfileServer::new(
-        profile_tree.clone(),
-        chat_tree.clone(),
-        valid_sessions.clone(),
-        chat_event_sender.clone(),
-    );
-    let emote_server = EmoteServer::new(
-        emote_tree,
-        valid_sessions.clone(),
-        chat_event_sender.clone(),
-    );
-    let auth_server = AuthServer::new(
-        profile_tree.clone(),
-        auth_tree.clone(),
-        valid_sessions.clone(),
-        keys_manager.clone(),
-        federation_config.clone(),
-    );
-    let chat_server = ChatServer::new(
-        config.host.clone(),
-        media_root.clone(),
-        chat_tree.clone(),
-        profile_tree.clone(),
-        valid_sessions.clone(),
-        dispatch_tx,
-        chat_event_sender.clone(),
-    );
-    let mediaproxy_server = MediaproxyServer::new(valid_sessions.clone());
-    let sync_server = SyncServer::new(
-        chat_tree.clone(),
-        sync_tree,
-        keys_manager,
-        dispatch_rx,
-        federation_config,
-        config.host.clone(),
-    );
+    let profile_server = ProfileServer::new(&deps);
+    let emote_server = EmoteServer::new(&deps);
+    let auth_server = AuthServer::new(&deps);
+    let chat_server = ChatServer::new(&deps);
+    let mediaproxy_server = MediaproxyServer::new(&deps);
+    let sync_server = SyncServer::new(&deps, fed_event_receiver);
 
     let profile = ProfileServiceServer::new(profile_server).filters();
     let emote = EmoteServiceServer::new(emote_server).filters();
     let auth = AuthServiceServer::new(auth_server).filters();
     let chat = ChatServiceServer::new(chat_server).filters();
-    let rest = scherzo::impls::rest::rest(
-        media_root,
-        valid_sessions.clone(),
-        config.media.max_upload_length,
-        config.host,
-    );
+    let rest = scherzo::impls::rest::rest(&deps);
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
+    let about = scherzo::impls::about(&deps);
 
-    let ctt = chat_tree.clone();
+    let ctt = deps.chat_tree.clone();
+    let att = deps.auth_tree.clone();
     std::thread::spawn(move || {
         let span = info_span!("db_validate");
         let _guard = span.enter();
@@ -413,7 +353,7 @@ pub async fn run(filter_level: Level, db_path: String) {
             if let Err(err) = ctt
                 .chat_tree
                 .verify_integrity()
-                .and_then(|_| auth_tree.verify_integrity())
+                .and_then(|_| att.verify_integrity())
             {
                 error!("database integrity check failed: {}", err);
                 break;
@@ -431,27 +371,24 @@ pub async fn run(filter_level: Level, db_path: String) {
             .or(sync)
             .or(emote)
             .or(profile)
-            .or(scherzo::impls::about(
-                config.server_description,
-                shared_config.clone(),
-            ))
+            .or(about)
             .with(warp::trace::request())
             .recover(hrpc::server::handle_rejection::<ServerError>)
             .boxed(),
     );
 
-    let addr = if config.listen_on_localhost {
-        ([127, 0, 0, 1], config.port)
+    let addr = if deps.config.listen_on_localhost {
+        ([127, 0, 0, 1], deps.config.port)
     } else {
-        ([0, 0, 0, 0], config.port)
+        ([0, 0, 0, 0], deps.config.port)
     };
 
-    if let Some(tls_config) = config.tls {
+    if let Some(tls_config) = deps.config.tls.as_ref() {
         tokio::spawn(
             serve
                 .tls()
-                .cert_path(tls_config.cert_file)
-                .key_path(tls_config.key_file)
+                .cert_path(tls_config.cert_file.clone())
+                .key_path(tls_config.key_file.clone())
                 .run(addr),
         );
     } else {
@@ -468,21 +405,26 @@ pub async fn run(filter_level: Level, db_path: String) {
         }
         Command::Help => println!("{}", HELP_TEXT),
         Command::GetInvites => {
-            let invites = chat_tree.chat_tree.scan_prefix(INVITE_PREFIX).map(|res| {
-                let (_, value) = res.unwrap();
-                let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
-                // Safety: this unwrap cannot fail since we split at u64 boundary
-                let id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                let invite = scherzo::db::deser_invite(invite_raw.into());
-                (id, invite)
-            });
+            let invites = deps
+                .chat_tree
+                .chat_tree
+                .scan_prefix(INVITE_PREFIX)
+                .map(|res| {
+                    let (_, value) = res.unwrap();
+                    let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                    // Safety: this unwrap cannot fail since we split at u64 boundary
+                    let id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                    let invite = scherzo::db::deser_invite(invite_raw.into());
+                    (id, invite)
+                });
 
             for (id, data) in invites {
                 println!("{}: {:?}", id, data);
             }
         }
         Command::GetMembers => {
-            let members = profile_tree
+            let members = deps
+                .profile_tree
                 .inner
                 .scan_prefix(USER_PREFIX)
                 .flatten()
@@ -498,7 +440,8 @@ pub async fn run(filter_level: Level, db_path: String) {
             }
         }
         Command::GetGuilds => {
-            let guilds = chat_tree
+            let guilds = deps
+                .chat_tree
                 .chat_tree
                 .scan_prefix(&[])
                 .flatten()
@@ -518,15 +461,16 @@ pub async fn run(filter_level: Level, db_path: String) {
             }
         }
         Command::GetGuildInvites(id) => {
-            let invites = chat_tree.get_guild_invites_logic(id);
+            let invites = deps.chat_tree.get_guild_invites_logic(id);
             println!("{:#?}", invites.invites)
         }
         Command::GetGuildChannels(id) => {
-            let channels = chat_tree.get_guild_channels_logic(id, 0);
+            let channels = deps.chat_tree.get_guild_channels_logic(id, 0);
             println!("{:#?}", channels.channels)
         }
         Command::GetInvite(id) => {
-            let invite = chat_tree
+            let invite = deps
+                .chat_tree
                 .chat_tree
                 .get(&make_invite_key(id.as_str()))
                 .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
@@ -537,7 +481,9 @@ pub async fn run(filter_level: Level, db_path: String) {
             channel_id,
             message_id,
         } => {
-            let message = chat_tree.get_message_logic(guild_id, channel_id, message_id);
+            let message = deps
+                .chat_tree
+                .get_message_logic(guild_id, channel_id, message_id);
             println!("{:#?}", message);
         }
         Command::GetChannelMessages {
@@ -545,7 +491,7 @@ pub async fn run(filter_level: Level, db_path: String) {
             channel_id,
             before_message_id,
         } => {
-            let messages = chat_tree.get_channel_messages_logic(
+            let messages = deps.chat_tree.get_channel_messages_logic(
                 guild_id,
                 channel_id,
                 before_message_id.unwrap_or(0),
@@ -557,19 +503,19 @@ pub async fn run(filter_level: Level, db_path: String) {
             }
         }
         Command::GetGuild(id) => {
-            let guild = chat_tree.get_guild_logic(id);
+            let guild = deps.chat_tree.get_guild_logic(id);
             println!("{:#?}", guild);
         }
         Command::GetMember(id) => {
-            let member = profile_tree.get_profile_logic(id);
+            let member = deps.profile_tree.get_profile_logic(id);
             println!("{:#?}", member);
         }
         Command::GetGuildRoles(id) => {
-            let roles = chat_tree.get_guild_roles_logic(id);
+            let roles = deps.chat_tree.get_guild_roles_logic(id);
             println!("{:#?}", roles)
         }
         Command::GetGuildMembers(id) => {
-            let members = chat_tree.get_guild_members_logic(id);
+            let members = deps.chat_tree.get_guild_members_logic(id);
             println!("{:?}", members.members);
         }
         Command::ChangeMotd(string) => {
@@ -605,14 +551,14 @@ pub async fn run(filter_level: Level, db_path: String) {
                 }
             }
         }
-        Command::ClearValidSessions => valid_sessions.clear(),
+        Command::ClearValidSessions => deps.valid_sessions.clear(),
         Command::Invalid(x) => println!("invalid cmd: {}", x),
         Command::GetRolePerms {
             guild_id,
             channel_id,
             role_id,
         } => {
-            let perms = chat_tree.get_permissions_logic(
+            let perms = deps.chat_tree.get_permissions_logic(
                 guild_id,
                 channel_id.eq(&0).then(|| None).unwrap_or(Some(channel_id)),
                 role_id,
@@ -632,8 +578,8 @@ pub async fn run(filter_level: Level, db_path: String) {
     loop {
         let prompt = format!(
             "({} streams) ({} valid sessions)> ",
-            chat_event_sender.receiver_count(),
-            valid_sessions.len()
+            deps.chat_event_sender.receiver_count(),
+            deps.valid_sessions.len()
         );
         let readline = rl.readline(&prompt);
         match readline {

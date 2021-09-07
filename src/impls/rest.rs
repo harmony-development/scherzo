@@ -43,17 +43,22 @@ use tracing::info;
 use triomphe::Arc;
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
 
+use super::Dependencies;
+
 const SEPERATOR: u8 = b'\n';
 
-pub fn rest(
-    media_root: Arc<PathBuf>,
-    sessions: SessionMap,
-    max_length: u64,
-    host: String,
-) -> BoxedFilter<(impl Reply,)> {
-    download(media_root.clone(), host)
-        .or(upload(sessions, media_root, max_length))
-        .boxed()
+pub fn rest(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
+    let media_conf = &deps.config.media;
+    download(
+        Arc::new(media_conf.media_root.clone()),
+        deps.config.host.clone(),
+    )
+    .or(upload(
+        deps.valid_sessions.clone(),
+        Arc::new(media_conf.media_root.clone()),
+        media_conf.max_upload_length,
+    ))
+    .boxed()
 }
 
 pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Reply,)> {

@@ -28,6 +28,8 @@ use crate::{
     ServerError,
 };
 
+use super::Dependencies;
+
 pub struct EventDispatch {
     pub host: SmolStr,
     pub event: Event,
@@ -52,25 +54,18 @@ pub struct SyncServer {
     chat_tree: ChatTree,
     sync_tree: ArcTree,
     keys_manager: Option<Arc<KeyManager>>,
-    federation_config: Option<Arc<FederationConfig>>,
+    federation_config: Option<FederationConfig>,
     host: String,
 }
 
 impl SyncServer {
-    pub fn new(
-        chat_tree: ChatTree,
-        sync_tree: ArcTree,
-        keys_manager: Option<Arc<KeyManager>>,
-        mut dispatch_rx: UnboundedReceiver<EventDispatch>,
-        federation_config: Option<Arc<FederationConfig>>,
-        host: String,
-    ) -> Self {
+    pub fn new(deps: &Dependencies, mut dispatch_rx: UnboundedReceiver<EventDispatch>) -> Self {
         let sync = Self {
-            chat_tree,
-            sync_tree,
-            keys_manager,
-            federation_config,
-            host,
+            chat_tree: deps.chat_tree.clone(),
+            sync_tree: deps.sync_tree.clone(),
+            keys_manager: deps.key_manager.clone(),
+            federation_config: deps.config.federation.clone(),
+            host: deps.config.host.clone(),
         };
         let sync2 = sync.clone();
         let clients = Clients(DashMap::default());

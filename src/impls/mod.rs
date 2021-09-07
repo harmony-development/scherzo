@@ -8,6 +8,7 @@ pub mod sync;
 
 use std::time::{Duration, UNIX_EPOCH};
 
+use dashmap::DashMap;
 use harmony_rust_sdk::api::exports::{
     hrpc::{
         http,
@@ -16,11 +17,68 @@ use harmony_rust_sdk::api::exports::{
     },
     prost::bytes::Bytes,
 };
+use parking_lot::Mutex;
 use rand::Rng;
 use reqwest::Response;
 use smol_str::SmolStr;
+use tokio::sync::{broadcast, mpsc};
+use triomphe::Arc;
 
-use crate::{ServerError, SharedConfig, SCHERZO_VERSION};
+use crate::{
+    config::Config,
+    db::{ArcTree, Db, DbResult},
+    key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
+};
+
+use self::{
+    auth::SessionMap, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
+};
+
+pub type FedEventReceiver = mpsc::UnboundedReceiver<EventDispatch>;
+pub type FedEventDispatcher = mpsc::UnboundedSender<EventDispatch>;
+
+pub struct Dependencies {
+    pub auth_tree: ArcTree,
+    pub chat_tree: ChatTree,
+    pub profile_tree: ProfileTree,
+    pub emote_tree: EmoteTree,
+    pub sync_tree: ArcTree,
+
+    pub valid_sessions: SessionMap,
+    pub chat_event_sender: chat::EventSender,
+    pub fed_event_dispatcher: FedEventDispatcher,
+    pub key_manager: Option<Arc<key::Manager>>,
+
+    pub config: Config,
+    pub runtime_config: SharedConfig,
+}
+
+impl Dependencies {
+    pub fn new(db: &dyn Db, config: Config) -> DbResult<(Self, FedEventReceiver)> {
+        let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
+
+        let this = Self {
+            auth_tree: db.open_tree(b"auth")?,
+            chat_tree: ChatTree::new(db)?,
+            profile_tree: ProfileTree::new(db)?,
+            emote_tree: EmoteTree::new(db)?,
+            sync_tree: db.open_tree(b"sync")?,
+
+            valid_sessions: Arc::new(DashMap::default()),
+            chat_event_sender: broadcast::channel(1000).0,
+            fed_event_dispatcher,
+            key_manager: config
+                .federation
+                .as_ref()
+                .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
+
+            config,
+            runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
+        };
+
+        Ok((this, fed_event_receiver))
+    }
+}
 
 fn get_time_secs() -> u64 {
     UNIX_EPOCH
@@ -90,8 +148,11 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         })
 }
 
-pub fn about(about_server: String, shared_config: SharedConfig) -> BoxedFilter<(impl Reply,)> {
+pub fn about(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
     use harmony_rust_sdk::api::rest::About;
+
+    let about_server = deps.config.server_description.clone();
+    let shared_config = deps.runtime_config.clone();
 
     warp::get()
         .and(warp::path!("_harmony" / "about"))

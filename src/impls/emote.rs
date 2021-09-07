@@ -4,7 +4,7 @@ use crate::{
     db::{
         emote::*,
         profile::{make_user_profile_key, USER_PREFIX},
-        ArcTree, Batch,
+        ArcTree, Batch, Db, DbResult,
     },
     impls::{
         chat::{EventContext, EventSub},
@@ -26,6 +26,7 @@ use triomphe::Arc;
 use super::{
     auth::SessionMap,
     chat::{EventBroadcast, EventSender, PermCheck},
+    Dependencies,
 };
 
 pub struct EmoteServer {
@@ -35,15 +36,11 @@ pub struct EmoteServer {
 }
 
 impl EmoteServer {
-    pub fn new(
-        emote_tree: EmoteTree,
-        valid_sessions: SessionMap,
-        broadcast_send: EventSender,
-    ) -> Self {
+    pub fn new(deps: &Dependencies) -> Self {
         Self {
-            emote_tree,
-            valid_sessions,
-            broadcast_send,
+            emote_tree: deps.emote_tree.clone(),
+            valid_sessions: deps.valid_sessions.clone(),
+            broadcast_send: deps.chat_event_sender.clone(),
         }
     }
 
@@ -330,6 +327,11 @@ pub struct EmoteTree {
 }
 
 impl EmoteTree {
+    pub fn new(db: &dyn Db) -> DbResult<Self> {
+        let inner = db.open_tree(b"emote")?;
+        Ok(Self { inner })
+    }
+
     pub fn check_if_emote_pack_owner(
         &self,
         pack_id: u64,

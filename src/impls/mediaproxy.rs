@@ -17,6 +17,8 @@ use harmony_rust_sdk::api::{
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 
+use super::Dependencies;
+
 #[derive(Clone)]
 enum Metadata {
     Site(HTML),
@@ -60,10 +62,10 @@ pub struct MediaproxyServer {
 }
 
 impl MediaproxyServer {
-    pub fn new(valid_sessions: SessionMap) -> Self {
+    pub fn new(deps: &Dependencies) -> Self {
         Self {
             http: Client::new(),
-            valid_sessions,
+            valid_sessions: deps.valid_sessions.clone(),
         }
     }
 

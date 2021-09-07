@@ -1,7 +1,7 @@
 use std::{convert::TryInto, mem::size_of};
 
 use crate::{
-    db::{self, profile::*, ArcTree},
+    db::{self, profile::*, ArcTree, Db, DbResult},
     impls::chat::{EventContext, EventSub},
     ServerError,
 };
@@ -17,6 +17,7 @@ use triomphe::Arc;
 use super::{
     auth::SessionMap,
     chat::{ChatTree, EventBroadcast, EventSender, PermCheck},
+    Dependencies,
 };
 
 pub struct ProfileServer {
@@ -27,17 +28,12 @@ pub struct ProfileServer {
 }
 
 impl ProfileServer {
-    pub fn new(
-        profile_tree: ProfileTree,
-        chat_tree: ChatTree,
-        valid_sessions: SessionMap,
-        broadcast_send: EventSender,
-    ) -> Self {
+    pub fn new(deps: &Dependencies) -> Self {
         Self {
-            profile_tree,
-            chat_tree,
-            valid_sessions,
-            broadcast_send,
+            profile_tree: deps.profile_tree.clone(),
+            chat_tree: deps.chat_tree.clone(),
+            valid_sessions: deps.valid_sessions.clone(),
+            broadcast_send: deps.chat_event_sender.clone(),
         }
     }
 
@@ -158,6 +154,11 @@ pub struct ProfileTree {
 }
 
 impl ProfileTree {
+    pub fn new(db: &dyn Db) -> DbResult<Self> {
+        let inner = db.open_tree(b"profile")?;
+        Ok(Self { inner })
+    }
+
     pub fn get_profile_logic(&self, user_id: u64) -> Result<Profile, ServerError> {
         let key = make_user_profile_key(user_id);
 

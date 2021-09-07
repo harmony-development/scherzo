@@ -37,7 +37,7 @@ use crate::{
     set_proto_name, ServerError, ServerResult,
 };
 
-use super::{gen_rand_arr, profile::ProfileTree};
+use super::{gen_rand_arr, profile::ProfileTree, Dependencies};
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
@@ -78,20 +78,14 @@ pub struct AuthServer {
     auth_tree: ArcTree,
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
-    federation_config: Option<Arc<FederationConfig>>,
+    federation_config: Option<FederationConfig>,
 }
 
 impl AuthServer {
-    pub fn new(
-        profile_tree: ProfileTree,
-        auth_tree: ArcTree,
-        valid_sessions: SessionMap,
-        keys_manager: Option<Arc<KeyManager>>,
-        federation_config: Option<Arc<FederationConfig>>,
-    ) -> Self {
-        let att = auth_tree.clone();
-        let ptt = profile_tree.clone();
-        let vs = valid_sessions.clone();
+    pub fn new(deps: &Dependencies) -> Self {
+        let att = deps.auth_tree.clone();
+        let ptt = deps.profile_tree.clone();
+        let vs = deps.valid_sessions.clone();
 
         std::thread::spawn(move || {
             let _guard = tracing::info_span!("auth_session_check").entered();
@@ -153,13 +147,13 @@ impl AuthServer {
         });
 
         Self {
-            valid_sessions,
+            valid_sessions: deps.valid_sessions.clone(),
             step_map: DashMap::default(),
             send_step: DashMap::default(),
-            auth_tree,
-            profile_tree,
-            keys_manager,
-            federation_config,
+            auth_tree: deps.auth_tree.clone(),
+            profile_tree: deps.profile_tree.clone(),
+            keys_manager: deps.key_manager.clone(),
+            federation_config: deps.config.federation.clone(),
         }
     }
 
