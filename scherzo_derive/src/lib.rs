@@ -153,10 +153,10 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
     let dur = args.pop().unwrap();
     let num = args.pop().unwrap();
 
-    let func_name = quote::format_ident!("{}_pre", func.sig.ident);
+    let func_name = quote::format_ident!("{}_middleware", func.sig.ident);
 
     (quote! {
-        fn #func_name (&self) -> harmony_rust_sdk::api::exports::hrpc::warp::filters::BoxedFilter<()> {
+        fn #func_name (&self, _: &'static str) -> harmony_rust_sdk::api::exports::hrpc::warp::filters::BoxedFilter<()> {
             use harmony_rust_sdk::api::exports::hrpc::warp::Filter;
 
             crate::DISABLE_RATELIMITS.load(std::sync::atomic::Ordering::Relaxed)

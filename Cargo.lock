@@ -253,7 +253,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#598b4989661b86a5c817f6dabf51effe7442542e"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#05b9f5bf2accba58da97a4b08d4ab500892465b7"
 dependencies = [
  "prost",
  "prost-types",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#598b4989661b86a5c817f6dabf51effe7442542e"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#05b9f5bf2accba58da97a4b08d4ab500892465b7"
 dependencies = [
  "console-api",
  "futures",
@@ -759,7 +759,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#d47ecf1d3bca9c0879f11d1a8466519d71a8c086"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#05cc6bc47edf799a318c53038090d9bbe56b0c67"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#d47ecf1d3bca9c0879f11d1a8466519d71a8c086"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#05cc6bc47edf799a318c53038090d9bbe56b0c67"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -849,8 +849,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.10.6"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#618522e905037778affac3ceb09ac47ca29dd9de"
+version = "0.10.7"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#e2cd5122b545aec46897e0d9b7e86bced0a7fc84"
 dependencies = [
  "ahash",
  "async-trait",
@@ -858,6 +858,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "http",
+ "parking_lot",
  "prost",
  "reqwest",
  "rustls-native-certs",
@@ -871,8 +872,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.7.4"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#618522e905037778affac3ceb09ac47ca29dd9de"
+version = "0.7.5"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#e2cd5122b545aec46897e0d9b7e86bced0a7fc84"
 dependencies = [
  "proc-macro2",
  "prost-build",
