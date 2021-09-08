@@ -294,7 +294,6 @@ pub async fn run(filter_level: Level, db_path: String) {
         .expect("could not create media root dir");
     if config.disable_ratelimits {
         warn!("rate limits are disabled, please take care!");
-        scherzo::DISABLE_RATELIMITS.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     let db = open_db(

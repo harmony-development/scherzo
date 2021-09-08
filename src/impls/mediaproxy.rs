@@ -59,6 +59,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
 pub struct MediaproxyServer {
     http: Client,
     valid_sessions: SessionMap,
+    disable_ratelimits: bool,
 }
 
 impl MediaproxyServer {
@@ -66,6 +67,7 @@ impl MediaproxyServer {
         Self {
             http: Client::new(),
             valid_sessions: deps.valid_sessions.clone(),
+            disable_ratelimits: deps.config.disable_ratelimits,
         }
     }
 

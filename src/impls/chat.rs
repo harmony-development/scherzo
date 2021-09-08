@@ -130,6 +130,7 @@ pub struct ChatServer {
     profile_tree: ProfileTree,
     pub broadcast_send: EventSender,
     dispatch_tx: EventDispatcher,
+    disable_ratelimits: bool,
 }
 
 impl ChatServer {
@@ -142,6 +143,7 @@ impl ChatServer {
             profile_tree: deps.profile_tree.clone(),
             broadcast_send: deps.chat_event_sender.clone(),
             dispatch_tx: deps.fed_event_dispatcher.clone(),
+            disable_ratelimits: deps.config.disable_ratelimits,
         }
     }
 

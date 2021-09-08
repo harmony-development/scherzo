@@ -5,7 +5,6 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display, Formatter, Write},
     io::Error as IoError,
-    sync::atomic::AtomicBool,
     time::Duration,
 };
 
@@ -27,7 +26,6 @@ pub mod db;
 pub mod impls;
 pub mod key;
 
-pub static DISABLE_RATELIMITS: AtomicBool = AtomicBool::new(false);
 pub const HARMONY_PROTO_NAME: &str = "harmony";
 pub const SCHERZO_VERSION: &str = git_version::git_version!(
     prefix = "git:",

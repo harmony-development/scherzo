@@ -52,16 +52,22 @@ pub fn rest(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
     download(
         Arc::new(media_conf.media_root.clone()),
         deps.config.host.clone(),
+        deps.config.disable_ratelimits,
     )
     .or(upload(
         deps.valid_sessions.clone(),
         Arc::new(media_conf.media_root.clone()),
         media_conf.max_upload_length,
+        deps.config.disable_ratelimits,
     ))
     .boxed()
 }
 
-pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Reply,)> {
+pub fn download(
+    media_root: Arc<PathBuf>,
+    host: String,
+    disable_ratelimits: bool,
+) -> BoxedFilter<(impl Reply,)> {
     let http_client = reqwest::Client::new();
     let host: SmolStr = host.into();
     warp::get()
@@ -69,7 +75,11 @@ pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Rep
         .and(warp::path("media"))
         .and(warp::path("download"))
         .and(warp::path::param::<String>())
-        .and(rate(20, 5))
+        .and(
+            disable_ratelimits
+                .then(|| warp::any().boxed())
+                .unwrap_or_else(|| rate(20, 5)),
+        )
         .and_then(move |id: String| {
             async fn make_request(
                 http_client: &reqwest::Client,
@@ -202,10 +212,15 @@ pub fn upload(
     sessions: SessionMap,
     media_root: Arc<PathBuf>,
     max_length: u64,
+    disable_ratelimits: bool,
 ) -> BoxedFilter<(impl Reply,)> {
     warp::post()
         .and(warp::path!("_harmony" / "media" / "upload"))
-        .and(rate(5, 5))
+        .and(
+            disable_ratelimits
+                .then(|| warp::any().boxed())
+                .unwrap_or_else(|| rate(5, 5)),
+        )
         .and(warp::filters::header::value("authorization").and_then(
             move |maybe_token: HeaderValue| {
                 let res = maybe_token

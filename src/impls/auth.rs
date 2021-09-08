@@ -79,6 +79,7 @@ pub struct AuthServer {
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
     federation_config: Option<FederationConfig>,
+    disable_ratelimits: bool,
 }
 
 impl AuthServer {
@@ -154,6 +155,7 @@ impl AuthServer {
             profile_tree: deps.profile_tree.clone(),
             keys_manager: deps.key_manager.clone(),
             federation_config: deps.config.federation.clone(),
+            disable_ratelimits: deps.config.disable_ratelimits,
         }
     }
 

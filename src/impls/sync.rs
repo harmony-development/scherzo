@@ -56,6 +56,7 @@ pub struct SyncServer {
     keys_manager: Option<Arc<KeyManager>>,
     federation_config: Option<FederationConfig>,
     host: String,
+    disable_ratelimits: bool,
 }
 
 impl SyncServer {
@@ -66,6 +67,7 @@ impl SyncServer {
             keys_manager: deps.key_manager.clone(),
             federation_config: deps.config.federation.clone(),
             host: deps.config.host.clone(),
+            disable_ratelimits: deps.config.disable_ratelimits,
         };
         let sync2 = sync.clone();
         let clients = Clients(DashMap::default());

@@ -25,6 +25,7 @@ pub struct ProfileServer {
     chat_tree: ChatTree,
     valid_sessions: SessionMap,
     pub broadcast_send: EventSender,
+    disable_ratelimits: bool,
 }
 
 impl ProfileServer {
@@ -34,6 +35,7 @@ impl ProfileServer {
             chat_tree: deps.chat_tree.clone(),
             valid_sessions: deps.valid_sessions.clone(),
             broadcast_send: deps.chat_event_sender.clone(),
+            disable_ratelimits: deps.config.disable_ratelimits,
         }
     }
 
