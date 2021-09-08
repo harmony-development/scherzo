@@ -128,3 +128,35 @@ impl Default for FederationConfig {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
+mod test {
+    use super::FederationConfig;
+
+    #[test]
+    fn host_allowed() {
+        let mut fed_conf = FederationConfig::default();
+        fed_conf.host_allow_list = vec!["test".to_string()];
+        assert!(fed_conf.is_host_allowed("test").is_ok());
+        assert!(fed_conf.is_host_allowed("not_test").is_err());
+    }
+
+    #[test]
+    fn host_blocked() {
+        let mut fed_conf = FederationConfig::default();
+        fed_conf.host_block_list = vec!["test".to_string()];
+        assert!(fed_conf.is_host_allowed("test").is_err());
+        assert!(fed_conf.is_host_allowed("not_test").is_ok());
+    }
+
+    #[test]
+    fn host_mixed() {
+        let mut fed_conf = FederationConfig::default();
+        fed_conf.host_block_list = vec!["test".to_string()];
+        fed_conf.host_allow_list = vec!["hello".to_string()];
+        assert!(fed_conf.is_host_allowed("test").is_err());
+        assert!(fed_conf.is_host_allowed("not_test").is_err());
+        assert!(fed_conf.is_host_allowed("hello").is_ok());
+    }
+}
