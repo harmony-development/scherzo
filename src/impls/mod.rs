@@ -7,6 +7,9 @@ pub mod rest;
 pub mod sync;
 
 use std::{
+    error::Error as StdError,
+    fmt::{self, Display, Formatter},
+    future,
     str::FromStr,
     time::{Duration, UNIX_EPOCH},
 };
@@ -16,6 +19,7 @@ use harmony_rust_sdk::api::exports::{
     hrpc::{
         http,
         server::filters::{rate::Rate, rate_limit},
+        url::Host,
         warp::{self, filters::BoxedFilter, Filter, Reply},
     },
     prost::bytes::Bytes,
@@ -174,32 +178,43 @@ pub fn about(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
 pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
     let http = reqwest::Client::new();
 
-    // TODO: return a proper server error instead of just using header
-    // which discards the FromStr error
-    warp::header::<HomeserverIdentifier>("Against")
+    let reject_header = |err| reject(ServerError::InvalidAgainst(err));
+
+    warp::header::<String>("Against")
+        .and_then(move |host_id_raw: String| {
+            future::ready(HomeserverIdentifier::from_str(&host_id_raw).map_err(reject_header))
+        })
         .and(warp::path::full())
         .and(warp::body::body())
         .and(warp::header::headers_cloned())
+        .and(warp::method())
         .and_then(
-            move |host_id: HomeserverIdentifier, path: warp::path::FullPath, body, headers| {
+            move |host_id: HomeserverIdentifier,
+                  path: warp::path::FullPath,
+                  body,
+                  headers,
+                  method| {
                 let http = http.clone();
                 async move {
-                    use reqwest::{Method, Request};
+                    use reqwest::Request;
 
-                    // TODO: don't use unwrap, handle error
-                    let url = host_id.to_url().unwrap().join(path.as_str()).unwrap();
-                    let mut request = Request::new(Method::POST, url);
+                    let url = host_id
+                        .to_url()
+                        .map_err(reject_header)?
+                        .join(path.as_str())
+                        .map_err(|_| reject_header(HomeserverIdParseError::Malformed))?;
+                    let mut request = Request::new(method, url);
                     *request.body_mut() = Some(reqwest::Body::wrap_stream(body));
-                    // TODO: only pass harmony headers
                     *request.headers_mut() = headers;
 
-                    let response = http.execute(request).await.map_err(reject)?;
-                    let stream = response.bytes_stream();
+                    let host_response = http.execute(request).await.map_err(reject)?;
 
-                    let mut response =
-                        warp::reply::Response::new(warp::hyper::Body::wrap_stream(stream));
-                    *response.headers_mut() = response.headers().clone();
-                    *response.status_mut() = response.status();
+                    let mut response = warp::reply::Response::default();
+                    *response.headers_mut() = host_response.headers().clone();
+                    *response.status_mut() = host_response.status();
+                    *response.version_mut() = host_response.version();
+                    *response.body_mut() =
+                        warp::hyper::Body::wrap_stream(host_response.bytes_stream());
 
                     Result::<_, warp::Rejection>::Ok(response)
                 }
@@ -208,8 +223,6 @@ pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
         .boxed()
 }
 
-use harmony_rust_sdk::api::exports::hrpc::url::ParseError;
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HomeserverIdentifier {
     domain: SmolStr,
@@ -217,16 +230,18 @@ pub struct HomeserverIdentifier {
 }
 
 impl HomeserverIdentifier {
-    pub fn to_url(&self) -> Result<Url, ParseError> {
-        let mut url = Url::parse("https://example.net").unwrap();
-        url.set_host(Some(self.domain.as_str()))?;
+    pub fn to_url(&self) -> Result<Url, HomeserverIdParseError> {
+        // Safety: can never fail
+        let mut url = unsafe { Url::parse("https://example.net").unwrap_unchecked() };
+        url.set_host(Some(self.domain.as_str()))
+            .map_err(|_| HomeserverIdParseError::Malformed)?;
         url.set_port(Some(self.port))
-            .map_err(|_| ParseError::InvalidPort)?;
+            .map_err(|_| HomeserverIdParseError::Malformed)?;
         Ok(url)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum HomeserverIdParseError {
     /// Port wasn't a `u16`.
     InvalidPort,
@@ -234,7 +249,23 @@ pub enum HomeserverIdParseError {
     MissingPort,
     /// Domain was missing.
     MissingDomain,
+    /// Homeserver ID was malformed.
+    Malformed,
 }
+
+impl Display for HomeserverIdParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let msg = match self {
+            Self::InvalidPort => "port is invalid (not an u16)",
+            Self::MissingPort => "port is missing",
+            Self::MissingDomain => "domain is missing",
+            Self::Malformed => "id is malformed",
+        };
+        f.write_str(msg)
+    }
+}
+
+impl StdError for HomeserverIdParseError {}
 
 impl FromStr for HomeserverIdentifier {
     type Err = HomeserverIdParseError;
@@ -243,6 +274,9 @@ impl FromStr for HomeserverIdentifier {
         let mut split = s.split(':');
 
         let domain = split.next().ok_or(HomeserverIdParseError::MissingDomain)?;
+        if Host::parse(domain).is_err() {
+            return Err(HomeserverIdParseError::Malformed);
+        }
         let port_raw = split.next().ok_or(HomeserverIdParseError::MissingPort)?;
 
         let port: u16 = port_raw

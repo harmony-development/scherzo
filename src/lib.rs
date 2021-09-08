@@ -14,6 +14,7 @@ use harmony_rust_sdk::api::exports::hrpc::{
     url::ParseError as UrlParseError,
     warp::{self, reply::Response},
 };
+use impls::HomeserverIdParseError;
 use parking_lot::Mutex;
 use reqwest::Url;
 use smol_str::SmolStr;
@@ -139,6 +140,7 @@ pub enum ServerError {
     InviteExists(String),
     InviteNameEmpty,
     NotMedia,
+    InvalidAgainst(HomeserverIdParseError),
 }
 
 impl Display for ServerError {
@@ -263,6 +265,7 @@ impl Display for ServerError {
             ServerError::InvalidTokenSignature => write!(f, "token signature is invalid"),
             ServerError::InvalidTime => write!(f, "invalid time"),
             ServerError::InvalidToken => write!(f, "token is invalid"),
+            ServerError::InvalidAgainst(err) => write!(f, "malformed Against header: {}", err),
             ServerError::CouldntVerifyTokenData => write!(
                 f,
                 "token data could not be verified with the given signature"
@@ -328,7 +331,8 @@ impl CustomError for ServerError {
             | ServerError::InviteExists(_)
             | ServerError::InviteNameEmpty
             | ServerError::UnderSpecifiedChannels
-            | ServerError::NotMedia => StatusCode::BAD_REQUEST,
+            | ServerError::NotMedia
+            | ServerError::InvalidAgainst(_) => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -411,6 +415,7 @@ impl CustomError for ServerError {
             ServerError::EmotePackNotFound => "h.emote-pack-not-found",
             ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
             ServerError::InviteExists(_) => "h.invite-exists",
+            ServerError::InvalidAgainst(_) => "h.invalid-against",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),
