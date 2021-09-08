@@ -2,6 +2,7 @@
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::{
+    error::Error as StdError,
     fmt::{self, Display, Formatter, Write},
     io::Error as IoError,
     sync::atomic::AtomicBool,
@@ -141,6 +142,19 @@ pub enum ServerError {
     InviteNameEmpty,
     NotMedia,
     InvalidAgainst(HomeserverIdParseError),
+}
+
+impl StdError for ServerError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            ServerError::InvalidAgainst(err) => Some(err),
+            ServerError::InvalidUrl(err) => Some(err),
+            ServerError::IoError(err) => Some(err),
+            ServerError::ReqwestError(err) => Some(err),
+            ServerError::WarpError(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 impl Display for ServerError {
