@@ -7,26 +7,26 @@ pub mod rest;
 pub mod sync;
 
 use std::{
-    error::Error as StdError,
-    fmt::{self, Display, Formatter},
     future,
     str::FromStr,
     time::{Duration, UNIX_EPOCH},
 };
 
 use dashmap::DashMap;
-use harmony_rust_sdk::api::exports::{
-    hrpc::{
-        http,
-        server::filters::{rate::Rate, rate_limit},
-        url::Host,
-        warp::{self, filters::BoxedFilter, Filter, Reply},
+use harmony_rust_sdk::api::{
+    exports::{
+        hrpc::{
+            http,
+            server::filters::{rate::Rate, rate_limit},
+            warp::{self, filters::BoxedFilter, Filter, Reply},
+        },
+        prost::bytes::Bytes,
     },
-    prost::bytes::Bytes,
+    HomeserverIdParseError, HomeserverIdentifier,
 };
 use parking_lot::Mutex;
 use rand::Rng;
-use reqwest::{Response, Url};
+use reqwest::Response;
 use smol_str::SmolStr;
 use tokio::sync::{broadcast, mpsc};
 use triomphe::Arc;
@@ -221,71 +221,4 @@ pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
             },
         )
         .boxed()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HomeserverIdentifier {
-    domain: SmolStr,
-    port: u16,
-}
-
-impl HomeserverIdentifier {
-    pub fn to_url(&self) -> Result<Url, HomeserverIdParseError> {
-        // Safety: can never fail
-        let mut url = unsafe { Url::parse("https://example.net").unwrap_unchecked() };
-        url.set_host(Some(self.domain.as_str()))
-            .map_err(|_| HomeserverIdParseError::Malformed)?;
-        url.set_port(Some(self.port))
-            .map_err(|_| HomeserverIdParseError::Malformed)?;
-        Ok(url)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum HomeserverIdParseError {
-    /// Port wasn't a `u16`.
-    InvalidPort,
-    /// Port was missing.
-    MissingPort,
-    /// Domain was missing.
-    MissingDomain,
-    /// Homeserver ID was malformed.
-    Malformed,
-}
-
-impl Display for HomeserverIdParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let msg = match self {
-            Self::InvalidPort => "port is invalid (not an u16)",
-            Self::MissingPort => "port is missing",
-            Self::MissingDomain => "domain is missing",
-            Self::Malformed => "id is malformed",
-        };
-        f.write_str(msg)
-    }
-}
-
-impl StdError for HomeserverIdParseError {}
-
-impl FromStr for HomeserverIdentifier {
-    type Err = HomeserverIdParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut split = s.split(':');
-
-        let domain = split.next().ok_or(HomeserverIdParseError::MissingDomain)?;
-        if Host::parse(domain).is_err() {
-            return Err(HomeserverIdParseError::Malformed);
-        }
-        let port_raw = split.next().ok_or(HomeserverIdParseError::MissingPort)?;
-
-        let port: u16 = port_raw
-            .parse()
-            .map_err(|_| HomeserverIdParseError::InvalidPort)?;
-
-        Ok(Self {
-            domain: SmolStr::new(domain),
-            port,
-        })
-    }
 }

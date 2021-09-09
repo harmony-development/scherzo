@@ -276,61 +276,6 @@ impl chat_service_server::ChatService for ChatServer {
     type Error = ServerError;
 
     #[rate(1, 5)]
-    async fn update_all_channel_order(
-        &self,
-        request: Request<UpdateAllChannelOrderRequest>,
-    ) -> Result<UpdateAllChannelOrderResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let UpdateAllChannelOrderRequest {
-            guild_id,
-            channel_ids,
-        } = request.into_parts().0.into_message().await??;
-
-        self.chat_tree.check_guild_user(guild_id, user_id)?;
-        self.chat_tree
-            .check_perms(guild_id, None, user_id, "channels.manage.move", false)?;
-
-        for channel_id in &channel_ids {
-            self.chat_tree.does_channel_exist(guild_id, *channel_id)?;
-        }
-
-        let prefix = make_guild_chan_prefix(guild_id);
-        let channels = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, _) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>())
-                    .then(|| unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) })
-            })
-            .collect::<Vec<_>>();
-
-        for channel_id in channels {
-            if !channel_ids.contains(&channel_id) {
-                return Err(ServerError::UnderSpecifiedChannels.into());
-            }
-        }
-
-        let key = make_guild_chan_ordering_key(guild_id);
-        let serialized_ordering = self.chat_tree.serialize_list_u64_logic(channel_ids.clone());
-        chat_insert!(key / serialized_ordering);
-
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            stream_event::Event::ChannelsReordered(stream_event::ChannelsReordered {
-                guild_id,
-                channel_ids,
-            }),
-            None,
-            EventContext::empty(),
-        );
-
-        Ok(UpdateAllChannelOrderResponse {})
-    }
-
-    #[rate(1, 5)]
     async fn create_guild(
         &self,
         request: Request<CreateGuildRequest>,
@@ -849,6 +794,61 @@ impl chat_service_server::ChatService for ChatServer {
         );
 
         Ok(UpdateChannelOrderResponse {})
+    }
+
+    #[rate(1, 5)]
+    async fn update_all_channel_order(
+        &self,
+        request: Request<UpdateAllChannelOrderRequest>,
+    ) -> Result<UpdateAllChannelOrderResponse, HrpcServerError<Self::Error>> {
+        auth!();
+
+        let UpdateAllChannelOrderRequest {
+            guild_id,
+            channel_ids,
+        } = request.into_parts().0.into_message().await??;
+
+        self.chat_tree.check_guild_user(guild_id, user_id)?;
+        self.chat_tree
+            .check_perms(guild_id, None, user_id, "channels.manage.move", false)?;
+
+        for channel_id in &channel_ids {
+            self.chat_tree.does_channel_exist(guild_id, *channel_id)?;
+        }
+
+        let prefix = make_guild_chan_prefix(guild_id);
+        let channels = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(&prefix)
+            .flat_map(|res| {
+                let (key, _) = res.unwrap();
+                (key.len() == prefix.len() + size_of::<u64>())
+                    .then(|| unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) })
+            })
+            .collect::<Vec<_>>();
+
+        for channel_id in channels {
+            if !channel_ids.contains(&channel_id) {
+                return Err(ServerError::UnderSpecifiedChannels.into());
+            }
+        }
+
+        let key = make_guild_chan_ordering_key(guild_id);
+        let serialized_ordering = self.chat_tree.serialize_list_u64_logic(channel_ids.clone());
+        chat_insert!(key / serialized_ordering);
+
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            stream_event::Event::ChannelsReordered(stream_event::ChannelsReordered {
+                guild_id,
+                channel_ids,
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        Ok(UpdateAllChannelOrderResponse {})
     }
 
     #[rate(2, 5)]
@@ -1503,6 +1503,7 @@ impl chat_service_server::ChatService for ChatServer {
             content,
             in_reply_to,
             overrides,
+            reactions: Vec::new(),
         };
 
         let mut buf = BytesMut::with_capacity(message.encoded_len());
@@ -1915,67 +1916,6 @@ impl chat_service_server::ChatService for ChatServer {
 
     type StreamEventsValidationType = u64;
 
-    fn stream_events_on_upgrade(&self, response: Response) -> Response {
-        set_proto_name(response)
-    }
-
-    async fn stream_events_validation(
-        &self,
-        request: Request<Option<StreamEventsRequest>>,
-    ) -> Result<u64, HrpcServerError<Self::Error>> {
-        auth!();
-        Ok(user_id)
-    }
-
-    #[rate(1, 5)]
-    async fn stream_events(
-        &self,
-        user_id: u64,
-        socket: Socket<StreamEventsRequest, StreamEventsResponse>,
-    ) {
-        let (mut rs, ws) = socket.split();
-        let (sub_tx, sub_rx) = mpsc::channel(64);
-        let chat_tree = self.chat_tree.clone();
-
-        let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, ws);
-        let recv_loop = async move {
-            loop {
-                return_print!(rs.receive_message().await, |maybe_req| {
-                    if let Some(req) = maybe_req.and_then(|r| r.request) {
-                        use stream_events_request::*;
-
-                        let sub = match req {
-                            Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
-                                match chat_tree.check_guild_user(guild_id, user_id) {
-                                    Ok(_) => EventSub::Guild(guild_id),
-                                    Err(err) => {
-                                        tracing::error!("{}", err);
-                                        continue;
-                                    }
-                                }
-                            }
-                            Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
-                            Request::SubscribeToHomeserverEvents(
-                                SubscribeToHomeserverEvents {},
-                            ) => EventSub::Homeserver,
-                        };
-
-                        drop(sub_tx.send(sub).await);
-                    }
-                });
-            }
-        };
-
-        tokio::select!(
-            res = send_loop => {
-                res.unwrap();
-            }
-            res = tokio::spawn(recv_loop) => {
-                res.unwrap();
-            }
-        );
-    }
-
     #[rate(4, 5)]
     async fn typing(
         &self,
@@ -2039,6 +1979,13 @@ impl chat_service_server::ChatService for ChatServer {
             picture: guild.picture,
             member_count: member_count as u64,
         })
+    }
+
+    async fn get_banned_users(
+        &self,
+        _request: Request<GetBannedUsersRequest>,
+    ) -> Result<GetBannedUsersResponse, HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 
     #[rate(4, 5)]
@@ -2148,6 +2095,81 @@ impl chat_service_server::ChatService for ChatServer {
         &self,
         _request: Request<UnpinMessageRequest>,
     ) -> Result<UnpinMessageResponse, HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    fn stream_events_on_upgrade(&self, response: Response) -> Response {
+        set_proto_name(response)
+    }
+
+    async fn stream_events_validation(
+        &self,
+        request: Request<Option<StreamEventsRequest>>,
+    ) -> Result<u64, HrpcServerError<Self::Error>> {
+        auth!();
+        Ok(user_id)
+    }
+
+    #[rate(1, 5)]
+    async fn stream_events(
+        &self,
+        user_id: u64,
+        socket: Socket<StreamEventsRequest, StreamEventsResponse>,
+    ) {
+        let (mut rs, ws) = socket.split();
+        let (sub_tx, sub_rx) = mpsc::channel(64);
+        let chat_tree = self.chat_tree.clone();
+
+        let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, ws);
+        let recv_loop = async move {
+            loop {
+                return_print!(rs.receive_message().await, |maybe_req| {
+                    if let Some(req) = maybe_req.and_then(|r| r.request) {
+                        use stream_events_request::*;
+
+                        let sub = match req {
+                            Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
+                                match chat_tree.check_guild_user(guild_id, user_id) {
+                                    Ok(_) => EventSub::Guild(guild_id),
+                                    Err(err) => {
+                                        tracing::error!("{}", err);
+                                        continue;
+                                    }
+                                }
+                            }
+                            Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
+                            Request::SubscribeToHomeserverEvents(
+                                SubscribeToHomeserverEvents {},
+                            ) => EventSub::Homeserver,
+                        };
+
+                        drop(sub_tx.send(sub).await);
+                    }
+                });
+            }
+        };
+
+        tokio::select!(
+            res = send_loop => {
+                res.unwrap();
+            }
+            res = tokio::spawn(recv_loop) => {
+                res.unwrap();
+            }
+        );
+    }
+
+    async fn add_reaction(
+        &self,
+        _request: Request<AddReactionRequest>,
+    ) -> Result<AddReactionResponse, HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn remove_reaction(
+        &self,
+        _request: Request<RemoveReactionRequest>,
+    ) -> Result<RemoveReactionResponse, HrpcServerError<Self::Error>> {
         Err(ServerError::NotImplemented.into())
     }
 }

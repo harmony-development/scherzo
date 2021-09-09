@@ -8,13 +8,15 @@ use std::{
     time::Duration,
 };
 
-use harmony_rust_sdk::api::exports::hrpc::{
-    encode_protobuf_message, http,
-    server::{CustomError, StatusCode},
-    url::ParseError as UrlParseError,
-    warp::{self, reply::Response},
+use harmony_rust_sdk::api::{
+    exports::hrpc::{
+        encode_protobuf_message, http,
+        server::{CustomError, StatusCode},
+        url::ParseError as UrlParseError,
+        warp::{self, reply::Response},
+    },
+    HomeserverIdParseError,
 };
-use impls::HomeserverIdParseError;
 use parking_lot::Mutex;
 use reqwest::Url;
 use smol_str::SmolStr;
