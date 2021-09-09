@@ -253,7 +253,7 @@ checksum = "3d7b894f5411737b7867f4827955924d7c254fc9f4d91a6aad6b097804b1018b"
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#05b9f5bf2accba58da97a4b08d4ab500892465b7"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#926de99ce4cbfd02c87190f9ec5f1c60b5c305d5"
 dependencies = [
  "prost",
  "prost-types",
@@ -265,7 +265,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#05b9f5bf2accba58da97a4b08d4ab500892465b7"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#926de99ce4cbfd02c87190f9ec5f1c60b5c305d5"
 dependencies = [
  "console-api",
  "futures",
