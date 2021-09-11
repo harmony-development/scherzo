@@ -1,10 +1,10 @@
-use std::{
-    cmp::Ordering, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf,
-    str::FromStr,
-};
+use std::{convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf, str::FromStr};
 
 use harmony_rust_sdk::api::{
-    chat::{get_channel_messages_request::Direction, stream_event, Message as HarmonyMessage, *},
+    chat::{
+        get_channel_messages_request::Direction, permission::has_permission, stream_event,
+        Message as HarmonyMessage, *,
+    },
     exports::{
         hrpc::{
             encode_protobuf_message, return_print,
@@ -2607,42 +2607,6 @@ impl ChatTree {
             })
     }
 
-    pub fn compare_perms(perms: Vec<Permission>, check_for: &str) -> Option<bool> {
-        let mut matching_perms = perms
-            .into_iter()
-            .filter(|perm| {
-                perm.matches
-                    .split('.')
-                    .zip(check_for.split('.'))
-                    .all(|(m, c)| m == "*" || c == m)
-            })
-            .collect::<Vec<_>>();
-
-        matching_perms.sort_unstable_by(|p, op| {
-            let get_depth = |perm: &Permission| perm.matches.chars().filter(|c| '.'.eq(c)).count();
-            let ord = get_depth(p).cmp(&get_depth(op));
-
-            if let Ordering::Equal = ord {
-                let p_split = p.matches.split('.');
-                let op_split = op.matches.split('.');
-                match (p_split.last(), op_split.last()) {
-                    (Some(p_last), Some(op_last)) => match (p_last, op_last) {
-                        ("*", _) => Ordering::Less,
-                        (_, "*") => Ordering::Greater,
-                        _ => Ordering::Equal,
-                    },
-                    (None, Some(_)) => Ordering::Less,
-                    (Some(_), None) => Ordering::Greater,
-                    (None, None) => Ordering::Equal,
-                }
-            } else {
-                ord
-            }
-        });
-
-        matching_perms.pop().map(|p| p.ok)
-    }
-
     pub fn query_has_permission_logic(
         &self,
         guild_id: u64,
@@ -2656,7 +2620,7 @@ impl ChatTree {
         if let Some(channel_id) = channel_id {
             for role_id in &user_roles {
                 let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id);
-                let is_allowed = Self::compare_perms(perms, check_for);
+                let is_allowed = has_permission(perms.iter(), check_for);
                 if let Some(allow) = is_allowed {
                     if allow {
                         return true;
@@ -2667,7 +2631,7 @@ impl ChatTree {
 
         for role_id in user_roles {
             let perms = self.get_permissions_logic(guild_id, None, role_id);
-            let is_allowed = Self::compare_perms(perms, check_for);
+            let is_allowed = has_permission(perms.iter(), check_for);
             if let Some(allow) = is_allowed {
                 if allow {
                     return true;
@@ -2940,99 +2904,5 @@ impl ChatTree {
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .is_ok(),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use harmony_rust_sdk::api::chat::Permission;
-
-    use crate::impls::chat::ChatTree;
-
-    fn mk_perms<const LEN: usize>(arr: [(&'static str, bool); LEN]) -> Vec<Permission> {
-        std::array::IntoIter::new(arr)
-            .map(|(matches, ok)| Permission {
-                matches: matches.to_string(),
-                ok,
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_perm_compare_equal_allow() {
-        let ok = ChatTree::compare_perms(mk_perms([("messages.send", true)]), "messages.send");
-        assert_eq!(ok, Some(true));
-    }
-
-    #[test]
-    fn test_perm_compare_equal_deny() {
-        let ok = ChatTree::compare_perms(mk_perms([("messages.send", false)]), "messages.send");
-        assert_eq!(ok, Some(false));
-    }
-
-    #[test]
-    fn test_perm_compare_nonequal_allow() {
-        let ok = ChatTree::compare_perms(mk_perms([("messages.sendd", true)]), "messages.send");
-        assert_eq!(ok, None);
-    }
-
-    #[test]
-    fn test_perm_compare_nonequal_deny() {
-        let ok = ChatTree::compare_perms(mk_perms([("messages.sendd", false)]), "messages.send");
-        assert_eq!(ok, None);
-    }
-
-    #[test]
-    fn test_perm_compare_glob_allow() {
-        let perms = mk_perms([("messages.*", true)]);
-        let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
-        assert_eq!(ok, Some(true));
-        let ok = ChatTree::compare_perms(perms, "messages.view");
-        assert_eq!(ok, Some(true));
-    }
-
-    #[test]
-    fn test_perm_compare_glob_deny() {
-        let perms = mk_perms([("messages.*", false)]);
-        let ok = ChatTree::compare_perms(perms.clone(), "messages.send");
-        assert_eq!(ok, Some(false));
-        let ok = ChatTree::compare_perms(perms, "messages.view");
-        assert_eq!(ok, Some(false));
-    }
-
-    #[test]
-    fn test_perm_compare_specific_deny() {
-        let perms = mk_perms([("messages.*", true), ("messages.send", false)]);
-        let ok = ChatTree::compare_perms(perms, "messages.send");
-        assert_eq!(ok, Some(false));
-    }
-
-    #[test]
-    fn test_perm_compare_specific_allow() {
-        let perms = mk_perms([("messages.*", false), ("messages.send", true)]);
-        let ok = ChatTree::compare_perms(perms, "messages.send");
-        assert_eq!(ok, Some(true));
-    }
-
-    #[test]
-    fn test_perm_compare_depth_allow() {
-        let perms = mk_perms([
-            ("messages.*", false),
-            ("messages.send", false),
-            ("messages.send.send", true),
-        ]);
-        let ok = ChatTree::compare_perms(perms, "messages.send.send");
-        assert_eq!(ok, Some(true));
-    }
-
-    #[test]
-    fn test_perm_compare_depth_deny() {
-        let perms = mk_perms([
-            ("messages.*", true),
-            ("messages.send", true),
-            ("messages.send.send", false),
-        ]);
-        let ok = ChatTree::compare_perms(perms, "messages.send.send");
-        assert_eq!(ok, Some(false));
     }
 }
