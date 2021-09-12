@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod batch;
 pub mod chat;
 pub mod emote;
 pub mod mediaproxy;

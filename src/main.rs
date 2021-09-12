@@ -10,6 +10,7 @@ use std::{
 
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
+    batch::batch_service_server::BatchServiceServer,
     chat::{chat_service_server::ChatServiceServer, Guild, Invite},
     emote::emote_service_server::EmoteServiceServer,
     exports::{
@@ -30,7 +31,7 @@ use scherzo::{
         Db,
     },
     impls::{
-        against_proxy, auth::AuthServer, chat::ChatServer, emote::EmoteServer,
+        against_proxy, auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
         mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer, Dependencies,
     },
     ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
@@ -331,6 +332,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let chat_server = ChatServer::new(&deps);
     let mediaproxy_server = MediaproxyServer::new(&deps);
     let sync_server = SyncServer::new(&deps, fed_event_receiver);
+    let batch_server = BatchServer::new(&deps);
 
     let profile = ProfileServiceServer::new(profile_server).filters();
     let emote = EmoteServiceServer::new(emote_server).filters();
@@ -340,6 +342,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
     let about = scherzo::impls::about(&deps);
+    let batch = BatchServiceServer::new(batch_server).filters();
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -365,15 +368,26 @@ pub async fn run(filter_level: Level, db_path: String) {
     let shared_config = SharedConfig::new(SharedConfigData::default().into());
     let serve = hrpc::warp::serve(
         against_proxy()
+            .or(batch)
+            .boxed()
             .or(auth)
+            .boxed()
             .or(chat)
+            .boxed()
             .or(mediaproxy)
+            .boxed()
             .or(rest)
+            .boxed()
             .or(sync)
+            .boxed()
             .or(emote)
+            .boxed()
             .or(profile)
+            .boxed()
             .or(about)
+            .boxed()
             .with(warp::trace::request())
+            .boxed()
             .recover(hrpc::server::handle_rejection::<ServerError>)
             .boxed(),
     );
