@@ -333,17 +333,16 @@ impl auth_service_server::AuthService for AuthServer {
     async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<StreamStepsResponse>) {
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id.clone(), tx);
-        loop {
-            while let Some(step) = rx.recv().await {
-                if let Err(err) = socket
-                    .send_message(StreamStepsResponse { step: Some(step) })
-                    .await
-                {
-                    tracing::error!("error occured: {}", err);
+        while let Some(step) = rx.recv().await {
+            if let Err(err) = socket
+                .send_message(StreamStepsResponse { step: Some(step) })
+                .await
+            {
+                tracing::error!("error occured: {}", err);
 
-                    // Remove send step channel after we are done
-                    self.send_step.remove(&auth_id);
-                }
+                // Remove send step channel after we are done
+                self.send_step.remove(&auth_id);
+                return;
             }
         }
     }
@@ -679,6 +678,7 @@ impl auth_service_server::AuthService for AuthServer {
         }
 
         if let Some(chan) = self.send_step.get(auth_id.as_str()) {
+            tracing::debug!("sending next step to {} stream", auth_id);
             if let Err(err) = chan.send(next_step.clone()).await {
                 tracing::error!("failed to send auth step to {}: {}", auth_id, err);
             }
@@ -723,6 +723,7 @@ impl auth_service_server::AuthService for AuthServer {
             // Safety: step stack can never be empty [ref:step_stack_non_empty]
             prev_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
             if let Some(chan) = self.send_step.get(auth_id.as_str()) {
+                tracing::debug!("sending prev step to {} stream", auth_id);
                 if let Err(err) = chan.send(prev_step.clone()).await {
                     tracing::error!("failed to send auth step to {}: {}", auth_id, err);
                 }
