@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem::size_of, time::Duration};
+use std::{convert::TryInto, time::Duration};
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -340,11 +340,11 @@ impl auth_service_server::AuthService for AuthServer {
             {
                 tracing::error!("error occured: {}", err);
 
-                // Remove send step channel after we are done
-                self.send_step.remove(&auth_id);
-                return;
+                // Break from loop since we errored
+                break;
             }
         }
+        self.send_step.remove(&auth_id);
     }
 
     #[rate(2, 5)]
@@ -548,16 +548,12 @@ impl auth_service_server::AuthService for AuthServer {
                                     let password_hashed = hash_password(password_raw);
                                     let email = try_get_email(&mut values)?;
 
-                                    let user_id = if let Ok(Some(user_id)) =
-                                        self.auth_tree.get(email.as_bytes())
+                                    let user_id = if let Some(user_id) =
+                                        self.auth_tree.get(email.as_bytes()).unwrap()
                                     {
-                                        // Safety: this unwrap can never cause UB since we split at u64 boundary
+                                        // Safety: this unwrap can never cause UB since we only store u64
                                         u64::from_be_bytes(unsafe {
-                                            user_id
-                                                .split_at(size_of::<u64>())
-                                                .0
-                                                .try_into()
-                                                .unwrap_unchecked()
+                                            user_id.try_into().unwrap_unchecked()
                                         })
                                     } else {
                                         return Err(ServerError::WrongUserOrPassword {
@@ -691,7 +687,6 @@ impl auth_service_server::AuthService for AuthServer {
                 session
             );
             self.step_map.remove(auth_id.as_str());
-            self.send_step.remove(auth_id.as_str());
         }
 
         Ok(NextStepResponse {

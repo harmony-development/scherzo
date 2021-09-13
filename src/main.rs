@@ -551,7 +551,6 @@ pub async fn run(filter_level: Level, db_path: String) {
                             .len()
                             .saturating_sub(lines.len().min(line_num as usize)),
                     );
-                    lines.reverse();
 
                     for line in lines {
                         println!("{}", line);
@@ -559,7 +558,7 @@ pub async fn run(filter_level: Level, db_path: String) {
                 }
                 Err(err) => {
                     if err.kind() == std::io::ErrorKind::NotFound {
-                        println!("log file {} not yet created", log_file_path);
+                        println!("<nothing written yet>");
                     } else {
                         println!("log file {} cant be read: {}", log_file_path, err);
                     }
