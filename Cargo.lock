@@ -845,8 +845,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.10.7"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#e2cd5122b545aec46897e0d9b7e86bced0a7fc84"
+version = "0.10.8"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#cdf7af7569571a273a0fc56043798c39da9fa470"
 dependencies = [
  "ahash",
  "async-trait",
@@ -869,7 +869,7 @@ dependencies = [
 [[package]]
 name = "hrpc-build"
 version = "0.7.5"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#e2cd5122b545aec46897e0d9b7e86bced0a7fc84"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#cdf7af7569571a273a0fc56043798c39da9fa470"
 dependencies = [
  "proc-macro2",
  "prost-build",
