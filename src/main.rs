@@ -332,7 +332,6 @@ pub async fn run(filter_level: Level, db_path: String) {
     let chat_server = ChatServer::new(&deps);
     let mediaproxy_server = MediaproxyServer::new(&deps);
     let sync_server = SyncServer::new(&deps, fed_event_receiver);
-    let batch_server = BatchServer::new(&deps);
 
     let profile = ProfileServiceServer::new(profile_server).filters();
     let emote = EmoteServiceServer::new(emote_server).filters();
@@ -342,7 +341,29 @@ pub async fn run(filter_level: Level, db_path: String) {
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
     let about = scherzo::impls::about(&deps);
-    let batch = BatchServiceServer::new(batch_server).filters();
+
+    let filters = against_proxy()
+        .boxed()
+        .or(auth)
+        .boxed()
+        .or(chat)
+        .boxed()
+        .or(mediaproxy)
+        .boxed()
+        .or(rest)
+        .boxed()
+        .or(sync)
+        .boxed()
+        .or(emote)
+        .boxed()
+        .or(profile)
+        .boxed()
+        .or(about)
+        .boxed()
+        .with(warp::trace::request())
+        .boxed()
+        .recover(hrpc::server::handle_rejection::<ServerError>)
+        .boxed();
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -366,31 +387,10 @@ pub async fn run(filter_level: Level, db_path: String) {
     });
 
     let shared_config = SharedConfig::new(SharedConfigData::default().into());
-    let serve = hrpc::warp::serve(
-        against_proxy()
-            .or(batch)
-            .boxed()
-            .or(auth)
-            .boxed()
-            .or(chat)
-            .boxed()
-            .or(mediaproxy)
-            .boxed()
-            .or(rest)
-            .boxed()
-            .or(sync)
-            .boxed()
-            .or(emote)
-            .boxed()
-            .or(profile)
-            .boxed()
-            .or(about)
-            .boxed()
-            .with(warp::trace::request())
-            .boxed()
-            .recover(hrpc::server::handle_rejection::<ServerError>)
-            .boxed(),
-    );
+
+    let batch_server = BatchServer::new(&deps, filters.clone());
+    let batch = BatchServiceServer::new(batch_server).filters();
+    let serve = hrpc::warp::serve(batch.or(filters));
 
     let addr = if deps.config.listen_on_localhost {
         ([127, 0, 0, 1], deps.config.port)

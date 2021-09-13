@@ -1,60 +1,53 @@
 use crate::ServerError;
 use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
-    exports::hrpc::{server::ServerError as HrpcServerError, Request},
+    exports::hrpc::{
+        server::{prelude::BoxedFilter, ServerError as HrpcServerError},
+        warp::{self, Reply},
+        Request,
+    },
 };
-use reqwest::{
-    header::{HeaderValue, AUTHORIZATION},
-    Url,
-};
+use reqwest::header::{HeaderValue, AUTHORIZATION};
 use scherzo_derive::*;
 
 use super::Dependencies;
 
-pub struct BatchServer {
-    http: reqwest::Client,
-    local_url: Url,
+pub struct BatchServer<R: Reply + 'static> {
     disable_ratelimits: bool,
+    filters: BoxedFilter<(R,)>,
 }
 
-impl BatchServer {
-    pub fn new(deps: &Dependencies) -> Self {
+impl<R: Reply + 'static> BatchServer<R> {
+    pub fn new(deps: &Dependencies, filters: BoxedFilter<(R,)>) -> Self {
         Self {
-            local_url: format!(
-                "https://{}:{}",
-                deps.config
-                    .listen_on_localhost
-                    .then(|| "127.0.0.1")
-                    .unwrap_or("0.0.0.0"),
-                deps.config.port
-            )
-            .parse()
-            .unwrap(),
             disable_ratelimits: deps.config.disable_ratelimits,
-            http: reqwest::Client::new(),
+            filters,
         }
     }
 
     async fn make_req(
         &self,
         body: Vec<u8>,
-        endpoint: Url,
+        path: &str,
         auth_header: Option<HeaderValue>,
     ) -> Result<Vec<u8>, ServerError> {
-        // TODO: propagate errors to client
-        let mut req = reqwest::Request::new(reqwest::Method::POST, endpoint);
+        let mut req = warp::test::request().method("POST").body(body).path(path);
         if let Some(auth) = auth_header {
-            req.headers_mut().insert(AUTHORIZATION, auth);
+            req = req.header(AUTHORIZATION, auth);
         }
-        *req.body_mut() = Some(body.into());
 
-        let resp = self.http.execute(req).await?.error_for_status().unwrap();
-        Ok(resp.bytes().await?.to_vec())
+        let resp = req.reply(&self.filters).await;
+
+        // TODO: propagate errors to client
+        resp.status()
+            .is_success()
+            .then(|| resp.into_body().to_vec())
+            .ok_or(ServerError::InternalServerError)
     }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
-impl BatchService for BatchServer {
+impl<R: Reply + 'static> BatchService for BatchServer<R> {
     type Error = ServerError;
 
     #[rate(5, 5)]
@@ -72,8 +65,7 @@ impl BatchService for BatchServer {
             let resp = self
                 .make_req(
                     request.request,
-                    // TODO: handle invalid url error
-                    self.local_url.join(request.endpoint.as_str()).unwrap(),
+                    request.endpoint.as_str(),
                     auth_header.clone(),
                 )
                 .await?;
@@ -94,11 +86,10 @@ impl BatchService for BatchServer {
         let mut responses = Vec::with_capacity(requests.len());
 
         let auth_header = headers.remove(&AUTHORIZATION);
-        // TODO: handle invalid url error
-        let url = self.local_url.join(endpoint.as_str()).unwrap();
+
         for request in requests {
             let resp = self
-                .make_req(request, url.clone(), auth_header.clone())
+                .make_req(request, endpoint.as_str(), auth_header.clone())
                 .await?;
             responses.push(resp);
         }
