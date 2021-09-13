@@ -2621,10 +2621,8 @@ impl ChatTree {
             for role_id in &user_roles {
                 let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id);
                 let is_allowed = has_permission(perms.iter(), check_for);
-                if let Some(allow) = is_allowed {
-                    if allow {
-                        return true;
-                    }
+                if let Some(true) = is_allowed {
+                    return true;
                 }
             }
         }
@@ -2632,10 +2630,8 @@ impl ChatTree {
         for role_id in user_roles {
             let perms = self.get_permissions_logic(guild_id, None, role_id);
             let is_allowed = has_permission(perms.iter(), check_for);
-            if let Some(allow) = is_allowed {
-                if allow {
-                    return true;
-                }
+            if let Some(true) = is_allowed {
+                return true;
             }
         }
 
@@ -2747,6 +2743,7 @@ impl ChatTree {
             );
             batch.insert(key, value);
         }
+        self.chat_tree.apply_batch(batch).unwrap();
     }
 
     pub fn create_channel_logic(
