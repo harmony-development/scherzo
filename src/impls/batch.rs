@@ -36,28 +36,27 @@ impl<R: Reply + 'static> BatchServer<R> {
         auth_header: Option<HeaderValue>,
     ) -> Result<Vec<u8>, HrpcServerError<ServerError>> {
         let filters = self.filters.clone();
+        let handle = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
-            tokio::task::block_in_place(move || {
-                tokio::runtime::Handle::current().block_on(async move {
-                    let mut req = warp::test::request()
-                        .method("POST")
-                        .body(body)
-                        .path(path.as_str());
-                    if let Some(auth) = auth_header {
-                        req = req.header(AUTHORIZATION, auth);
-                    }
+            handle.block_on(async move {
+                let mut req = warp::test::request()
+                    .method("POST")
+                    .body(body)
+                    .path(path.as_str());
+                if let Some(auth) = auth_header {
+                    req = req.header(AUTHORIZATION, auth);
+                }
 
-                    let resp = req.filter(filters.as_ref()).await;
+                let resp = req.filter(filters.as_ref()).await;
 
-                    match resp {
-                        Ok(r) => Ok(warp::hyper::body::aggregate(r.into_response().into_body())
-                            .await
-                            .unwrap()
-                            .chunk()
-                            .to_vec()),
-                        Err(e) => Err(HrpcServerError::Warp(e)),
-                    }
-                })
+                match resp {
+                    Ok(r) => Ok(warp::hyper::body::aggregate(r.into_response().into_body())
+                        .await
+                        .unwrap()
+                        .chunk()
+                        .to_vec()),
+                    Err(e) => Err(HrpcServerError::Warp(e)),
+                }
             })
         })
         .join()
