@@ -24,7 +24,7 @@ impl BatchServer {
                 "https://{}:{}",
                 deps.config
                     .listen_on_localhost
-                    .then(|| "127.0.0.0")
+                    .then(|| "127.0.0.1")
                     .unwrap_or("0.0.0.0"),
                 deps.config.port
             )
