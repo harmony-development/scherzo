@@ -29,34 +29,41 @@ impl<R: Reply + 'static> BatchServer<R> {
         }
     }
 
-    async fn make_req<'a>(
+    async fn make_req(
         &self,
-        body: Vec<u8>,
-        path: String,
+        requests: Vec<AnyRequest>,
         auth_header: Option<HeaderValue>,
-    ) -> Result<Vec<u8>, HrpcServerError<ServerError>> {
+    ) -> Result<Vec<Vec<u8>>, HrpcServerError<ServerError>> {
         let filters = self.filters.clone();
         let handle = tokio::runtime::Handle::current();
+
         std::thread::spawn(move || {
             handle.block_on(async move {
-                let mut req = warp::test::request()
-                    .method("POST")
-                    .body(body)
-                    .path(path.as_str());
-                if let Some(auth) = auth_header {
-                    req = req.header(AUTHORIZATION, auth);
-                }
+                let mut responses = Vec::with_capacity(requests.len());
 
-                let resp = req.filter(filters.as_ref()).await;
+                for request in requests {
+                    let mut req = warp::test::request()
+                        .method("POST")
+                        .body(request.request)
+                        .path(request.endpoint.as_str());
+                    if let Some(auth) = auth_header.clone() {
+                        req = req.header(AUTHORIZATION, auth);
+                    }
 
-                match resp {
-                    Ok(r) => Ok(warp::hyper::body::aggregate(r.into_response().into_body())
+                    let reply = req
+                        .filter(filters.as_ref())
+                        .await
+                        .map_err(HrpcServerError::Warp)?;
+                    let body = warp::hyper::body::aggregate(reply.into_response().into_body())
                         .await
                         .unwrap()
                         .chunk()
-                        .to_vec()),
-                    Err(e) => Err(HrpcServerError::Warp(e)),
+                        .to_vec();
+
+                    responses.push(body);
                 }
+
+                Ok(responses)
             })
         })
         .join()
@@ -76,15 +83,8 @@ impl<R: Reply + 'static> BatchService for BatchServer<R> {
         let (body, mut headers, _) = request.into_parts();
         let BatchRequest { requests } = body.into_message().await??;
 
-        let mut responses = Vec::with_capacity(requests.len());
-
         let auth_header = headers.remove(&AUTHORIZATION);
-        for request in requests {
-            let resp = self
-                .make_req(request.request, request.endpoint, auth_header.clone())
-                .await?;
-            responses.push(resp);
-        }
+        let responses = self.make_req(requests, auth_header).await?;
 
         Ok(BatchResponse { responses })
     }
@@ -97,16 +97,19 @@ impl<R: Reply + 'static> BatchService for BatchServer<R> {
         let (body, mut headers, _) = request.into_parts();
         let BatchSameRequest { endpoint, requests } = body.into_message().await??;
 
-        let mut responses = Vec::with_capacity(requests.len());
-
         let auth_header = headers.remove(&AUTHORIZATION);
-
-        for request in requests {
-            let resp = self
-                .make_req(request, endpoint.clone(), auth_header.clone())
-                .await?;
-            responses.push(resp);
-        }
+        let responses = self
+            .make_req(
+                requests
+                    .into_iter()
+                    .map(|a| AnyRequest {
+                        request: a,
+                        endpoint: endpoint.clone(),
+                    })
+                    .collect(),
+                auth_header,
+            )
+            .await?;
 
         Ok(BatchSameResponse { responses })
     }
