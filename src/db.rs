@@ -20,6 +20,7 @@ pub mod noop;
 #[cfg(feature = "sled")]
 pub mod sled;
 
+#[must_use]
 #[derive(Default)]
 pub struct Batch {
     inserts: Vec<(Vec<u8>, Option<Vec<u8>>)>,

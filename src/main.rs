@@ -78,8 +78,10 @@ pub enum Command {
     Help,
     Invalid(String),
     GetVersionInfo,
+    Exit,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Command {
     fn default() -> Self {
         Command::Invalid(String::default())
@@ -182,6 +184,7 @@ fn process_cmd(cmd: &str) -> Command {
         "help" => Command::Help,
         "clear_sessions" => Command::ClearValidSessions,
         "version" => Command::GetVersionInfo,
+        "quit" | "exit" => Command::Exit,
         x => Command::Invalid(x.to_string()),
     }
 }
@@ -246,8 +249,11 @@ pub async fn run(filter_level: Level, db_path: String) {
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
-    let filter =
-        tracing_subscriber::EnvFilter::from_default_env().add_directive(filter_level.into());
+    let filter = tracing_subscriber::EnvFilter::from_default_env()
+        .add_directive(filter_level.into())
+        .add_directive("rustyline=error".parse().unwrap())
+        .add_directive("sled=error".parse().unwrap())
+        .add_directive("hyper=error".parse().unwrap());
     #[cfg(feature = "console")]
     let filter = filter.add_directive("tokio=trace".parse().unwrap());
     #[cfg(feature = "console")]
@@ -410,175 +416,179 @@ pub async fn run(filter_level: Level, db_path: String) {
         tokio::spawn(serve.run(addr));
     }
 
-    let handle_cmd = |command| match command {
-        Command::GetVersionInfo => {
-            let db_version = get_db_version(db.as_ref()).unwrap().0;
-            println!(
-                "scherzo version {}, database version {}",
-                SCHERZO_VERSION, db_version
-            );
-        }
-        Command::Help => println!("{}", HELP_TEXT),
-        Command::GetInvites => {
-            let invites = deps
-                .chat_tree
-                .chat_tree
-                .scan_prefix(INVITE_PREFIX)
-                .map(|res| {
-                    let (_, value) = res.unwrap();
-                    let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
-                    // Safety: this unwrap cannot fail since we split at u64 boundary
-                    let id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                    let invite = scherzo::db::deser_invite(invite_raw.into());
-                    (id, invite)
-                });
-
-            for (id, data) in invites {
-                println!("{}: {:?}", id, data);
+    let handle_cmd = |command| {
+        match command {
+            Command::GetVersionInfo => {
+                let db_version = get_db_version(db.as_ref()).unwrap().0;
+                println!(
+                    "scherzo version {}, database version {}",
+                    SCHERZO_VERSION, db_version
+                );
             }
-        }
-        Command::GetMembers => {
-            let members = deps
-                .profile_tree
-                .inner
-                .scan_prefix(USER_PREFIX)
-                .flatten()
-                .map(|(k, v)| {
-                    let member_id =
-                        u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
-                    let member_data = Profile::decode(v.as_ref()).unwrap();
-                    (member_id, member_data)
-                });
+            Command::Help => println!("{}", HELP_TEXT),
+            Command::GetInvites => {
+                let invites = deps
+                    .chat_tree
+                    .chat_tree
+                    .scan_prefix(INVITE_PREFIX)
+                    .map(|res| {
+                        let (_, value) = res.unwrap();
+                        let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
+                        // Safety: this unwrap cannot fail since we split at u64 boundary
+                        let id = u64::from_be_bytes(id_raw.try_into().unwrap());
+                        let invite = scherzo::db::deser_invite(invite_raw.into());
+                        (id, invite)
+                    });
 
-            for (id, data) in members {
-                println!("{}: {:?}", id, data);
+                for (id, data) in invites {
+                    println!("{}: {:?}", id, data);
+                }
             }
-        }
-        Command::GetGuilds => {
-            let guilds = deps
-                .chat_tree
-                .chat_tree
-                .scan_prefix(&[])
-                .flatten()
-                .filter_map(|(k, v)| {
-                    if k.len() == 8 {
-                        let guild_id = u64::from_be_bytes(k.try_into().unwrap());
-                        let guild_data = Guild::decode(v.as_ref()).unwrap();
+            Command::GetMembers => {
+                let members = deps
+                    .profile_tree
+                    .inner
+                    .scan_prefix(USER_PREFIX)
+                    .flatten()
+                    .map(|(k, v)| {
+                        let member_id =
+                            u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
+                        let member_data = Profile::decode(v.as_ref()).unwrap();
+                        (member_id, member_data)
+                    });
 
-                        Some((guild_id, guild_data))
-                    } else {
-                        None
-                    }
-                });
-
-            for (id, data) in guilds {
-                println!("{}: {:?}", id, data);
+                for (id, data) in members {
+                    println!("{}: {:?}", id, data);
+                }
             }
-        }
-        Command::GetGuildInvites(id) => {
-            let invites = deps.chat_tree.get_guild_invites_logic(id);
-            println!("{:#?}", invites.invites)
-        }
-        Command::GetGuildChannels(id) => {
-            let channels = deps.chat_tree.get_guild_channels_logic(id, 0);
-            println!("{:#?}", channels.channels)
-        }
-        Command::GetInvite(id) => {
-            let invite = deps
-                .chat_tree
-                .chat_tree
-                .get(&make_invite_key(id.as_str()))
-                .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
-            println!("{:#?}", invite);
-        }
-        Command::GetMessage {
-            guild_id,
-            channel_id,
-            message_id,
-        } => {
-            let message = deps
-                .chat_tree
-                .get_message_logic(guild_id, channel_id, message_id);
-            println!("{:#?}", message);
-        }
-        Command::GetChannelMessages {
-            guild_id,
-            channel_id,
-            before_message_id,
-        } => {
-            let messages = deps.chat_tree.get_channel_messages_logic(
+            Command::GetGuilds => {
+                let guilds = deps
+                    .chat_tree
+                    .chat_tree
+                    .scan_prefix(&[])
+                    .flatten()
+                    .filter_map(|(k, v)| {
+                        if k.len() == 8 {
+                            let guild_id = u64::from_be_bytes(k.try_into().unwrap());
+                            let guild_data = Guild::decode(v.as_ref()).unwrap();
+
+                            Some((guild_id, guild_data))
+                        } else {
+                            None
+                        }
+                    });
+
+                for (id, data) in guilds {
+                    println!("{}: {:?}", id, data);
+                }
+            }
+            Command::GetGuildInvites(id) => {
+                let invites = deps.chat_tree.get_guild_invites_logic(id);
+                println!("{:#?}", invites.invites)
+            }
+            Command::GetGuildChannels(id) => {
+                let channels = deps.chat_tree.get_guild_channels_logic(id, 0);
+                println!("{:#?}", channels.channels)
+            }
+            Command::GetInvite(id) => {
+                let invite = deps
+                    .chat_tree
+                    .chat_tree
+                    .get(&make_invite_key(id.as_str()))
+                    .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
+                println!("{:#?}", invite);
+            }
+            Command::GetMessage {
                 guild_id,
                 channel_id,
-                before_message_id.unwrap_or(0),
-                None,
-                None,
-            );
-            for message in messages.messages {
-                println!("{:?}", message);
+                message_id,
+            } => {
+                let message = deps
+                    .chat_tree
+                    .get_message_logic(guild_id, channel_id, message_id);
+                println!("{:#?}", message);
             }
-        }
-        Command::GetGuild(id) => {
-            let guild = deps.chat_tree.get_guild_logic(id);
-            println!("{:#?}", guild);
-        }
-        Command::GetMember(id) => {
-            let member = deps.profile_tree.get_profile_logic(id);
-            println!("{:#?}", member);
-        }
-        Command::GetGuildRoles(id) => {
-            let roles = deps.chat_tree.get_guild_roles_logic(id);
-            println!("{:#?}", roles)
-        }
-        Command::GetGuildMembers(id) => {
-            let members = deps.chat_tree.get_guild_members_logic(id);
-            println!("{:?}", members.members);
-        }
-        Command::ChangeMotd(string) => {
-            let mut guard = shared_config.lock();
-            guard.motd.clear();
-            guard.motd.push_str(&string);
-        }
-        Command::ShowLog(line_num) => {
-            let mut log_file_path = String::from("./logs/log.");
-            ChronoUtc::with_format("%Y-%m-%d-%H".to_string())
-                .format_time(&mut log_file_path)
-                .unwrap();
-            match std::fs::read_to_string(&log_file_path) {
-                Ok(log_file) => {
-                    let mut lines = log_file.lines().collect::<Vec<_>>();
-                    lines.drain(
-                        ..lines
-                            .len()
-                            .saturating_sub(lines.len().min(line_num as usize)),
-                    );
-
-                    for line in lines {
-                        println!("{}", line);
-                    }
-                }
-                Err(err) => {
-                    if err.kind() == std::io::ErrorKind::NotFound {
-                        println!("<nothing written yet>");
-                    } else {
-                        println!("log file {} cant be read: {}", log_file_path, err);
-                    }
-                }
-            }
-        }
-        Command::ClearValidSessions => deps.valid_sessions.clear(),
-        Command::Invalid(x) => println!("invalid cmd: {}", x),
-        Command::GetRolePerms {
-            guild_id,
-            channel_id,
-            role_id,
-        } => {
-            let perms = deps.chat_tree.get_permissions_logic(
+            Command::GetChannelMessages {
                 guild_id,
-                channel_id.eq(&0).then(|| None).unwrap_or(Some(channel_id)),
+                channel_id,
+                before_message_id,
+            } => {
+                let messages = deps.chat_tree.get_channel_messages_logic(
+                    guild_id,
+                    channel_id,
+                    before_message_id.unwrap_or(0),
+                    None,
+                    None,
+                );
+                for message in messages.messages {
+                    println!("{:?}", message);
+                }
+            }
+            Command::GetGuild(id) => {
+                let guild = deps.chat_tree.get_guild_logic(id);
+                println!("{:#?}", guild);
+            }
+            Command::GetMember(id) => {
+                let member = deps.profile_tree.get_profile_logic(id);
+                println!("{:#?}", member);
+            }
+            Command::GetGuildRoles(id) => {
+                let roles = deps.chat_tree.get_guild_roles_logic(id);
+                println!("{:#?}", roles)
+            }
+            Command::GetGuildMembers(id) => {
+                let members = deps.chat_tree.get_guild_members_logic(id);
+                println!("{:?}", members.members);
+            }
+            Command::ChangeMotd(string) => {
+                let mut guard = shared_config.lock();
+                guard.motd.clear();
+                guard.motd.push_str(&string);
+            }
+            Command::ShowLog(line_num) => {
+                let mut log_file_path = String::from("./logs/log.");
+                ChronoUtc::with_format("%Y-%m-%d-%H".to_string())
+                    .format_time(&mut log_file_path)
+                    .unwrap();
+                match std::fs::read_to_string(&log_file_path) {
+                    Ok(log_file) => {
+                        let mut lines = log_file.lines().collect::<Vec<_>>();
+                        lines.drain(
+                            ..lines
+                                .len()
+                                .saturating_sub(lines.len().min(line_num as usize)),
+                        );
+
+                        for line in lines {
+                            println!("{}", line);
+                        }
+                    }
+                    Err(err) => {
+                        if err.kind() == std::io::ErrorKind::NotFound {
+                            println!("<nothing written yet>");
+                        } else {
+                            println!("log file {} cant be read: {}", log_file_path, err);
+                        }
+                    }
+                }
+            }
+            Command::ClearValidSessions => deps.valid_sessions.clear(),
+            Command::Invalid(x) => println!("invalid cmd: {}", x),
+            Command::GetRolePerms {
+                guild_id,
+                channel_id,
                 role_id,
-            );
-            println!("{:#?}", perms);
+            } => {
+                let perms = deps.chat_tree.get_permissions_logic(
+                    guild_id,
+                    channel_id.eq(&0).then(|| None).unwrap_or(Some(channel_id)),
+                    role_id,
+                );
+                println!("{:#?}", perms);
+            }
+            Command::Exit => return true,
         }
+        false
     };
 
     let mut rl = Editor::<()>::new();
@@ -599,7 +609,10 @@ pub async fn run(filter_level: Level, db_path: String) {
         match readline {
             Ok(line) => {
                 let command = process_cmd(&line);
-                handle_cmd(command);
+                let do_exit = handle_cmd(command);
+                if do_exit {
+                    break;
+                }
                 rl.add_history_entry(line);
             }
             // We don't want to accidentally shut down the whole server

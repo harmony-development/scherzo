@@ -75,6 +75,7 @@ pub struct AuthServer {
     valid_sessions: SessionMap,
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
+    queued_steps: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     auth_tree: ArcTree,
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
@@ -151,6 +152,7 @@ impl AuthServer {
             valid_sessions: deps.valid_sessions.clone(),
             step_map: DashMap::default(),
             send_step: DashMap::default(),
+            queued_steps: DashMap::default(),
             auth_tree: deps.auth_tree.clone(),
             profile_tree: deps.profile_tree.clone(),
             keys_manager: deps.key_manager.clone(),
@@ -320,8 +322,10 @@ impl auth_service_server::AuthService for AuthServer {
             let auth_id = msg.auth_id;
 
             if self.step_map.contains_key(auth_id.as_str()) {
+                tracing::debug!("auth id {} validated", auth_id);
                 Ok(auth_id.into())
             } else {
+                tracing::error!("auth id {} is not valid", auth_id);
                 Err(ServerError::InvalidAuthId.into())
             }
         } else {
@@ -331,20 +335,63 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(2, 5)]
     async fn stream_steps(&self, auth_id: SmolStr, mut socket: WriteSocket<StreamStepsResponse>) {
+        tracing::debug!("creating stream for id {}", auth_id);
+
+        if let Some(mut queued_steps) = self.queued_steps.get_mut(auth_id.as_str()) {
+            for step in queued_steps.drain(..) {
+                if let Err(err) = socket
+                    .send_message(StreamStepsResponse { step: Some(step) })
+                    .await
+                {
+                    tracing::error!(
+                        "error occured while sending step to id {}: {}",
+                        auth_id,
+                        err
+                    );
+
+                    // Return from func since we errored
+                    return;
+                }
+            }
+        }
+
         let (tx, mut rx) = mpsc::channel(64);
         self.send_step.insert(auth_id.clone(), tx);
+        tracing::debug!("pushed stream tx for id {}", auth_id);
+
+        let mut end_stream;
         while let Some(step) = rx.recv().await {
+            tracing::debug!("received auth step to send to id {}", auth_id);
+            end_stream = matches!(
+                step,
+                AuthStep {
+                    step: Some(auth_step::Step::Session(_)),
+                    ..
+                }
+            );
+
             if let Err(err) = socket
                 .send_message(StreamStepsResponse { step: Some(step) })
                 .await
             {
-                tracing::error!("error occured: {}", err);
+                tracing::error!(
+                    "error occured while sending step to id {}: {}",
+                    auth_id,
+                    err
+                );
 
                 // Break from loop since we errored
                 break;
             }
+
+            // Break if we authed
+            if end_stream {
+                break;
+            }
         }
+
         self.send_step.remove(&auth_id);
+        tracing::debug!("removing stream for id {}", auth_id);
     }
 
     #[rate(2, 5)]
@@ -388,6 +435,10 @@ impl auth_service_server::AuthService for AuthServer {
             auth_id,
             step: maybe_step,
         } = req.into_parts().0.into_message().await??;
+
+        let auth_id: SmolStr = auth_id.into();
+
+        tracing::debug!("got next step for auth id {}", auth_id);
 
         let next_step;
 
@@ -678,6 +729,12 @@ impl auth_service_server::AuthService for AuthServer {
             if let Err(err) = chan.send(next_step.clone()).await {
                 tracing::error!("failed to send auth step to {}: {}", auth_id, err);
             }
+        } else {
+            tracing::debug!("no stream found for auth id {}, pushing to queue", auth_id);
+            self.queued_steps
+                .entry(auth_id.clone())
+                .and_modify(|s| s.push(next_step.clone()))
+                .or_insert_with(|| vec![next_step.clone()]);
         }
 
         if let Some(auth_step::Step::Session(session)) = &next_step.step {
@@ -687,6 +744,7 @@ impl auth_service_server::AuthService for AuthServer {
                 session
             );
             self.step_map.remove(auth_id.as_str());
+            self.queued_steps.remove(auth_id.as_str());
         }
 
         Ok(NextStepResponse {
