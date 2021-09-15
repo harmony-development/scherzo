@@ -11,7 +11,7 @@ use crate::travel_error;
 use cached::proc_macro::cached;
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
-    exports::prost::Message,
+    emote::{Emote, EmotePack},
     profile::Profile,
 };
 
@@ -27,13 +27,12 @@ pub struct Batch {
 }
 
 impl Batch {
-    pub fn insert(&mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-        self.inserts
-            .push((key.as_ref().to_vec(), Some(value.as_ref().to_vec())));
+    pub fn insert(&mut self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
+        self.inserts.push((key.into(), Some(value.into())));
     }
 
-    pub fn remove(&mut self, key: impl AsRef<[u8]>) {
-        self.inserts.push((key.as_ref().to_vec(), None));
+    pub fn remove(&mut self, key: impl Into<Vec<u8>>) {
+        self.inserts.push((key.into(), None));
     }
 }
 
@@ -322,6 +321,8 @@ crate::impl_deser! {
     guild, Guild, 1024;
     chan, Channel, 1024;
     role, Role, 1024;
+    emote, Emote, 1024;
+    emote_pack, EmotePack, 1024;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
@@ -345,7 +346,8 @@ macro_rules! impl_deser {
             $(
                 #[cached(size = $size)]
                 pub fn [<deser_ $name>](data: Vec<u8>) -> $msg {
-                    $msg::decode(data.as_ref()).unwrap()
+                    let archive = rkyv_arch::<$msg>(data.as_slice());
+                    unsafe { archive.deserialize(&mut rkyv::Infallible).unwrap_unchecked() }
                 }
             )*
         }
@@ -368,4 +370,20 @@ const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
         arr_index += 1;
     }
     new
+}
+
+use rkyv::{
+    archived_root,
+    ser::{serializers::AllocSerializer, Serializer},
+    AlignedVec, Archive, Deserialize, Serialize,
+};
+
+pub fn rkyv_ser<Value: Serialize<AllocSerializer<256>>>(value: &Value) -> AlignedVec {
+    let mut ser = AllocSerializer::<256>::default();
+    ser.serialize_value(value).unwrap();
+    ser.into_serializer().into_inner()
+}
+
+pub fn rkyv_arch<As: Archive>(data: &[u8]) -> &<As as Archive>::Archived {
+    unsafe { archived_root::<As>(data) }
 }

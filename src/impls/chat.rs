@@ -5,14 +5,11 @@ use harmony_rust_sdk::api::{
         get_channel_messages_request::Direction, permission::has_permission, stream_event,
         Message as HarmonyMessage, *,
     },
-    exports::{
-        hrpc::{
-            encode_protobuf_message, return_print,
-            server::{ServerError as HrpcServerError, Socket, SocketError, WriteSocket},
-            warp::reply::Response,
-            BodyKind, Request,
-        },
-        prost::{bytes::BytesMut, Message},
+    exports::hrpc::{
+        return_print,
+        server::{ServerError as HrpcServerError, Socket, SocketError, WriteSocket},
+        warp::reply::Response,
+        BodyKind, Request,
     },
     harmonytypes::{ItemPosition, Metadata},
     rest::FileId,
@@ -40,7 +37,7 @@ use triomphe::Arc;
 
 use crate::{
     append_list::AppendList,
-    db::{self, chat::*, Batch, Db, DbResult},
+    db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
     impls::{
         auth, get_time_secs,
         rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
@@ -310,7 +307,7 @@ impl chat_service_server::ChatService for ChatServer {
             owner_id: user_id,
             metadata,
         };
-        let buf = encode_protobuf_message(guild);
+        let buf = rkyv_ser(&guild);
 
         chat_insert!(guild_id.to_be_bytes() / buf);
         chat_insert!(make_member_key(guild_id, user_id) / []);
@@ -417,7 +414,7 @@ impl chat_service_server::ChatService for ChatServer {
             possible_uses,
             use_count: 0,
         };
-        let buf = encode_protobuf_message(invite);
+        let buf = rkyv_ser(&invite);
 
         chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
 
@@ -667,7 +664,7 @@ impl chat_service_server::ChatService for ChatServer {
             guild_info.metadata = Some(new_metadata);
         }
 
-        let buf = encode_protobuf_message(guild_info);
+        let buf = rkyv_ser(&guild_info);
         chat_insert!(key / buf);
 
         self.send_event_through_chan(
@@ -726,7 +723,7 @@ impl chat_service_server::ChatService for ChatServer {
             chan_info.metadata = Some(new_metadata);
         }
 
-        let buf = encode_protobuf_message(chan_info);
+        let buf = rkyv_ser(&chan_info);
         chat_insert!(key / buf);
 
         self.send_event_through_chan(
@@ -893,7 +890,7 @@ impl chat_service_server::ChatService for ChatServer {
         let edited_at = get_time_secs();
         message.edited_at = Some(edited_at);
 
-        let buf = encode_protobuf_message(message);
+        let buf = rkyv_ser(&message);
         chat_insert!(key / buf);
 
         self.send_event_through_chan(
@@ -1047,7 +1044,7 @@ impl chat_service_server::ChatService for ChatServer {
         for key in channel_data {
             batch.remove(key);
         }
-        batch.insert(&key, serialized_ordering);
+        batch.insert(key, serialized_ordering);
         self.chat_tree.chat_tree.apply_batch(batch).unwrap();
 
         self.send_event_through_chan(
@@ -1187,7 +1184,7 @@ impl chat_service_server::ChatService for ChatServer {
             }
         }
 
-        let buf = encode_protobuf_message(invite);
+        let buf = rkyv_ser(&invite);
         chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
 
         Ok(JoinGuildResponse { guild_id })
@@ -1506,10 +1503,8 @@ impl chat_service_server::ChatService for ChatServer {
             reactions: Vec::new(),
         };
 
-        let mut buf = BytesMut::with_capacity(message.encoded_len());
-        // This can never fail, so we ignore the result
-        let _ = message.encode(&mut buf);
-        chat_insert!(key / buf);
+        let value = db::rkyv_ser(&message);
+        chat_insert!(key / value);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1792,7 +1787,7 @@ impl chat_service_server::ChatService for ChatServer {
             role.pingable = new_pingable;
         }
 
-        let ser_role = encode_protobuf_message(role);
+        let ser_role = rkyv_ser(&role);
         chat_insert!(key / ser_role);
 
         self.send_event_through_chan(
@@ -2366,8 +2361,7 @@ impl ChatTree {
                         .is_ok()
                         // Safety: this unwrap is safe since we only store valid Channel message
                         .then(|| {
-                            let channel =
-                                unsafe { Channel::decode(value.as_ref()).unwrap_unchecked() };
+                            let channel = db::deser_chan(value);
                             ChannelWithId {
                                 channel_id,
                                 channel: Some(channel),
@@ -2721,7 +2715,7 @@ impl ChatTree {
             }
             (role_id, key)
         };
-        let ser_role = encode_protobuf_message(role);
+        let ser_role = rkyv_ser(&role);
         cchat_insert!(key / ser_role);
         self.move_role_logic(guild_id, role_id, Place::between(0, 0))?;
         Ok(role_id)
@@ -2771,7 +2765,7 @@ impl ChatTree {
             channel_name,
             is_category,
         };
-        let buf = encode_protobuf_message(channel);
+        let buf = rkyv_ser(&channel);
         cchat_insert!(key / buf);
 
         // Add from ordering list

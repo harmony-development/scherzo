@@ -7,8 +7,8 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            async_trait, encode_protobuf_message, futures_util::TryFutureExt,
-            server::ServerError as HrpcServerError, Request,
+            async_trait, futures_util::TryFutureExt, server::ServerError as HrpcServerError,
+            Request,
         },
         prost::Message,
     },
@@ -16,13 +16,14 @@ use harmony_rust_sdk::api::{
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
 use reqwest::{header::HeaderValue, Url};
+use rkyv::Deserialize;
 use smol_str::SmolStr;
 use tokio::sync::mpsc::UnboundedReceiver;
 use triomphe::Arc;
 
 use crate::{
     config::FederationConfig,
-    db::{sync::*, ArcTree},
+    db::{rkyv_arch, rkyv_ser, sync::*, ArcTree},
     impls::{chat::ChatTree, get_time_secs, http},
     key::{self, Manager as KeyManager},
     ServerError,
@@ -152,7 +153,7 @@ impl SyncServer {
         };
 
         let token = self.keys_manager()?.generate_token(data).await?;
-        let token = encode_protobuf_message(token).freeze();
+        let token = rkyv_ser(&token);
 
         Ok(
             Request::new(msg).header(http::header::AUTHORIZATION, unsafe {
@@ -231,7 +232,9 @@ impl SyncServer {
             .get(&key)
             .unwrap()
             .map_or_else(PullResponse::default, |val| {
-                PullResponse::decode(val.as_ref()).unwrap()
+                rkyv_arch::<PullResponse>(&val)
+                    .deserialize(&mut rkyv::Infallible)
+                    .unwrap()
             });
         self.sync_tree.remove(&key).unwrap();
         queue
@@ -240,7 +243,7 @@ impl SyncServer {
     fn push_to_event_queue(&self, host: &str, mut queue: PullResponse, event: Event) {
         // TODO: this is a waste, find a way to optimize this
         queue.event_queue.push(event);
-        let buf = encode_protobuf_message(queue);
+        let buf = rkyv_ser(&queue);
         self.sync_tree
             .insert(&make_host_key(host), buf.as_ref())
             .unwrap();

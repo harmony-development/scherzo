@@ -2,9 +2,10 @@ use std::convert::TryInto;
 
 use crate::{
     db::{
+        self,
         emote::*,
         profile::{make_user_profile_key, USER_PREFIX},
-        ArcTree, Batch, Db, DbResult,
+        rkyv_ser, ArcTree, Batch, Db, DbResult,
     },
     impls::{
         chat::{EventContext, EventSub},
@@ -15,10 +16,7 @@ use crate::{
 use harmony_rust_sdk::api::{
     chat::Event,
     emote::{emote_service_server::EmoteService, *},
-    exports::{
-        hrpc::{encode_protobuf_message, server::ServerError as HrpcServerError, Request},
-        prost::Message,
-    },
+    exports::hrpc::{server::ServerError as HrpcServerError, Request},
 };
 use scherzo_derive::*;
 use triomphe::Arc;
@@ -163,7 +161,7 @@ impl EmoteService for EmoteServer {
 
         let key = make_emote_pack_key(pack_id);
         if let Some(data) = emote_get!(key) {
-            let pack = EmotePack::decode(data.as_ref()).unwrap();
+            let pack = db::deser_emote_pack(data);
             self.emote_tree.equip_emote_pack_logic(user_id, pack_id);
             self.send_event_through_chan(
                 EventSub::Homeserver,
@@ -193,7 +191,7 @@ impl EmoteService for EmoteServer {
                 .check_if_emote_pack_owner(pack_id, user_id)?;
 
             let emote_key = make_emote_pack_emote_key(pack_id, &emote.name);
-            let data = encode_protobuf_message(emote.clone());
+            let data = rkyv_ser(&emote);
 
             emote_insert!(emote_key / data);
 
@@ -253,7 +251,7 @@ impl EmoteService for EmoteServer {
                 })?;
                 equipped_packs
                     .contains(&pack_id)
-                    .then(|| EmotePack::decode(val.as_ref()).unwrap())
+                    .then(|| db::deser_emote_pack(val))
             })
             .collect();
 
@@ -281,7 +279,7 @@ impl EmoteService for EmoteServer {
             .scan_prefix(&pack_key)
             .flat_map(|res| {
                 let (key, value) = res.unwrap();
-                (key.len() > pack_key.len()).then(|| Emote::decode(value.as_ref()).unwrap())
+                (key.len() > pack_key.len()).then(|| db::deser_emote(value))
             })
             .collect();
 
@@ -305,7 +303,7 @@ impl EmoteService for EmoteServer {
             pack_name,
             pack_owner: user_id,
         };
-        let data = encode_protobuf_message(emote_pack.clone());
+        let data = rkyv_ser(&emote_pack);
 
         emote_insert!(key / data);
 
@@ -342,7 +340,7 @@ impl EmoteTree {
         let key = make_emote_pack_key(pack_id);
 
         let pack = if let Some(data) = eemote_get!(key) {
-            let pack = EmotePack::decode(data.as_ref()).unwrap();
+            let pack = db::deser_emote_pack(data);
 
             if pack.pack_owner != user_id {
                 return Err(ServerError::NotEmotePackOwner);

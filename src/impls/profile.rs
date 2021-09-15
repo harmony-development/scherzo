@@ -1,13 +1,13 @@
 use std::{convert::TryInto, mem::size_of};
 
 use crate::{
-    db::{self, profile::*, ArcTree, Db, DbResult},
+    db::{self, profile::*, rkyv_ser, ArcTree, Db, DbResult},
     impls::chat::{EventContext, EventSub},
     ServerError,
 };
 use harmony_rust_sdk::api::{
     chat::Event,
-    exports::hrpc::{encode_protobuf_message, server::ServerError as HrpcServerError, Request},
+    exports::hrpc::{server::ServerError as HrpcServerError, Request},
     profile::{profile_service_server::ProfileService, *},
 };
 use scherzo_derive::*;
@@ -130,7 +130,7 @@ impl ProfileService for ProfileServer {
             profile.is_bot = new_is_bot;
         }
 
-        let buf = encode_protobuf_message(profile);
+        let buf = rkyv_ser(&profile);
         profile_insert!(key / buf);
 
         self.send_event_through_chan(

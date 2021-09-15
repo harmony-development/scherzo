@@ -6,7 +6,6 @@ use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
     exports::{
         hrpc::{
-            encode_protobuf_message,
             server::{ServerError as HrpcServerError, Socket},
             warp::reply::Response,
             Request,
@@ -32,7 +31,7 @@ use crate::{
         profile::{
             make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
         },
-        ArcTree, Batch, Tree,
+        rkyv_ser, ArcTree, Batch, Tree,
     },
     http,
     impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
@@ -131,11 +130,14 @@ impl AuthServer {
 
                                 if vs.contains_key(token) {
                                     // [ref:atime_u64_key] [ref:atime_u64_value]
-                                    batch.insert(&atime_key(id), &get_time_secs().to_be_bytes());
+                                    batch.insert(
+                                        atime_key(id).to_vec(),
+                                        get_time_secs().to_be_bytes().to_vec(),
+                                    );
                                 } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
                                     tracing::debug!("user {} session has expired", id);
-                                    batch.remove(&token_key(id));
-                                    batch.remove(&atime_key(id));
+                                    batch.remove(token_key(id).to_vec());
+                                    batch.remove(atime_key(id).to_vec());
                                     vs.remove(token);
                                 } else {
                                     // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
@@ -262,13 +264,13 @@ impl auth_service_server::AuthService for AuthServer {
                     let mut batch = Batch::default();
                     // Add the local to foreign user key entry
                     batch.insert(
-                        &make_local_to_foreign_user_key(local_id),
+                        make_local_to_foreign_user_key(local_id).to_vec(),
                         [&foreign_id.to_be_bytes(), server_id.as_bytes()].concat(),
                     );
                     // Add the foreign to local user key entry
                     batch.insert(
                         make_foreign_to_local_user_key(foreign_id, &server_id),
-                        &local_id.to_be_bytes(),
+                        local_id.to_be_bytes().to_vec(),
                     );
                     // Add the profile entry
                     let profile = Profile {
@@ -277,8 +279,8 @@ impl auth_service_server::AuthService for AuthServer {
                         user_avatar: avatar,
                         user_name: username,
                     };
-                    let buf = encode_protobuf_message(profile);
-                    batch.insert(&make_user_profile_key(local_id), buf.to_vec());
+                    let buf = rkyv_ser(&profile);
+                    batch.insert(make_user_profile_key(local_id).to_vec(), buf);
                     self.profile_tree.inner.apply_batch(batch).unwrap();
 
                     local_id
@@ -660,12 +662,15 @@ impl auth_service_server::AuthService for AuthServer {
                                     let session_token = self.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
                                     let mut batch = Batch::default();
                                     // [ref:token_u64_key]
-                                    batch.insert(&token_key(user_id), session_token.as_str());
+                                    batch.insert(
+                                        token_key(user_id).to_vec(),
+                                        session_token.as_str().as_bytes().to_vec(),
+                                    );
                                     batch.insert(
                                         // [ref:atime_u64_key]
-                                        &atime_key(user_id),
+                                        atime_key(user_id).to_vec(),
                                         // [ref:atime_u64_value]
-                                        &get_time_secs().to_be_bytes(),
+                                        get_time_secs().to_be_bytes().to_vec(),
                                     );
                                     self.auth_tree.apply_batch(batch).unwrap();
 
@@ -700,31 +705,34 @@ impl auth_service_server::AuthService for AuthServer {
                                     let session_token = self.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
                                     let mut batch = Batch::default();
-                                    batch.insert(email.as_str(), &user_id.to_be_bytes());
-                                    batch.insert(&user_id.to_be_bytes(), password_hashed.as_ref());
+                                    batch
+                                        .insert(email.into_bytes(), user_id.to_be_bytes().to_vec());
+                                    batch.insert(
+                                        user_id.to_be_bytes().to_vec(),
+                                        password_hashed.as_ref().to_vec(),
+                                    );
                                     // [ref:token_u64_key]
-                                    batch.insert(&token_key(user_id), session_token.as_str());
+                                    batch.insert(
+                                        token_key(user_id).to_vec(),
+                                        session_token.as_str().as_bytes().to_vec(),
+                                    );
                                     batch.insert(
                                         // [ref:atime_u64_key]
-                                        &atime_key(user_id),
+                                        atime_key(user_id).to_vec(),
                                         // [ref:atime_u64_value]
-                                        &get_time_secs().to_be_bytes(),
+                                        get_time_secs().to_be_bytes().to_vec(),
                                     );
                                     self.auth_tree
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
-                                    let buf = encode_protobuf_message(Profile {
+                                    let buf = rkyv_ser(&Profile {
                                         user_name: username,
                                         ..Default::default()
                                     });
                                     profile_insert!(make_user_profile_key(user_id) / buf);
 
-                                    tracing::debug!(
-                                        "new user {} registered with email {}",
-                                        user_id,
-                                        email,
-                                    );
+                                    tracing::debug!("new user {} registered", user_id,);
 
                                     next_step = AuthStep {
                                         can_go_back: false,

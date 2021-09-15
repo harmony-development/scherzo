@@ -11,14 +11,11 @@ use std::{
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
-    chat::{chat_service_server::ChatServiceServer, Guild, Invite},
+    chat::chat_service_server::ChatServiceServer,
     emote::emote_service_server::EmoteServiceServer,
-    exports::{
-        hrpc::{self, warp::Filter},
-        prost::Message,
-    },
+    exports::hrpc::{self, warp::Filter},
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
-    profile::{profile_service_server::ProfileServiceServer, Profile},
+    profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
@@ -453,7 +450,7 @@ pub async fn run(filter_level: Level, db_path: String) {
                     .map(|(k, v)| {
                         let member_id =
                             u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
-                        let member_data = Profile::decode(v.as_ref()).unwrap();
+                        let member_data = scherzo::db::deser_profile(v);
                         (member_id, member_data)
                     });
 
@@ -470,7 +467,7 @@ pub async fn run(filter_level: Level, db_path: String) {
                     .filter_map(|(k, v)| {
                         if k.len() == 8 {
                             let guild_id = u64::from_be_bytes(k.try_into().unwrap());
-                            let guild_data = Guild::decode(v.as_ref()).unwrap();
+                            let guild_data = scherzo::db::deser_guild(v);
 
                             Some((guild_id, guild_data))
                         } else {
@@ -495,7 +492,7 @@ pub async fn run(filter_level: Level, db_path: String) {
                     .chat_tree
                     .chat_tree
                     .get(&make_invite_key(id.as_str()))
-                    .map(|v| v.map(|v| Invite::decode(v.as_ref()).unwrap()));
+                    .map(|v| v.map(scherzo::db::deser_invite));
                 println!("{:#?}", invite);
             }
             Command::GetMessage {
