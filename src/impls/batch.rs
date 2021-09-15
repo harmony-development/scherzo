@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
             warp::{self, Reply},
             Request,
         },
-        prost::bytes::Buf,
+        prost::bytes::Bytes,
     },
 };
 use reqwest::header::{HeaderValue, AUTHORIZATION};
@@ -15,6 +15,11 @@ use scherzo_derive::*;
 use triomphe::Arc;
 
 use super::Dependencies;
+
+enum Endpoint {
+    Same(String),
+    Different(Vec<String>),
+}
 
 pub struct BatchServer<R: Reply + 'static> {
     disable_ratelimits: bool,
@@ -31,36 +36,54 @@ impl<R: Reply + 'static> BatchServer<R> {
 
     async fn make_req(
         &self,
-        requests: Vec<AnyRequest>,
+        bodies: Vec<Bytes>,
+        endpoint: Endpoint,
         auth_header: Option<HeaderValue>,
-    ) -> Result<Vec<Vec<u8>>, HrpcServerError<ServerError>> {
+    ) -> Result<Vec<Bytes>, HrpcServerError<ServerError>> {
+        async fn process_request<R: Reply + 'static>(
+            body: Bytes,
+            endpoint: &str,
+            auth_header: &Option<HeaderValue>,
+            filters: &BoxedFilter<(R,)>,
+        ) -> Result<Bytes, HrpcServerError<ServerError>> {
+            let mut req = warp::test::request()
+                .method("POST")
+                .body(body)
+                .path(endpoint);
+            if let Some(auth) = auth_header {
+                req = req.header(AUTHORIZATION, auth.clone());
+            }
+
+            let reply = req.filter(filters).await.map_err(HrpcServerError::Warp)?;
+            let body = warp::hyper::body::to_bytes(reply.into_response().into_body())
+                .await
+                .unwrap();
+
+            Ok(body)
+        }
+
         let filters = self.filters.clone();
         let handle = tokio::runtime::Handle::current();
 
         std::thread::spawn(move || {
             handle.block_on(async move {
-                let mut responses = Vec::with_capacity(requests.len());
+                let mut responses = Vec::with_capacity(bodies.len());
 
-                for request in requests {
-                    let mut req = warp::test::request()
-                        .method("POST")
-                        .body(request.request)
-                        .path(request.endpoint.as_str());
-                    if let Some(auth) = auth_header.clone() {
-                        req = req.header(AUTHORIZATION, auth);
+                let filters = filters.as_ref();
+                let auth_header = &auth_header;
+                match &endpoint {
+                    Endpoint::Same(endpoint) => {
+                        for body in bodies {
+                            responses
+                                .push(process_request(body, endpoint, auth_header, filters).await?);
+                        }
                     }
-
-                    let reply = req
-                        .filter(filters.as_ref())
-                        .await
-                        .map_err(HrpcServerError::Warp)?;
-                    let body = warp::hyper::body::aggregate(reply.into_response().into_body())
-                        .await
-                        .unwrap()
-                        .chunk()
-                        .to_vec();
-
-                    responses.push(body);
+                    Endpoint::Different(a) => {
+                        for (body, endpoint) in bodies.into_iter().zip(a) {
+                            responses
+                                .push(process_request(body, endpoint, auth_header, filters).await?);
+                        }
+                    }
                 }
 
                 Ok(responses)
@@ -84,7 +107,21 @@ impl<R: Reply + 'static> BatchService for BatchServer<R> {
         let BatchRequest { requests } = body.into_message().await??;
 
         let auth_header = headers.remove(&AUTHORIZATION);
-        let responses = self.make_req(requests, auth_header).await?;
+        let request_len = requests.len();
+        let (bodies, endpoints) = requests.into_iter().fold(
+            (
+                Vec::with_capacity(request_len),
+                Vec::with_capacity(request_len),
+            ),
+            |(mut bodies, mut endpoints), request| {
+                bodies.push(request.request);
+                endpoints.push(request.endpoint);
+                (bodies, endpoints)
+            },
+        );
+        let responses = self
+            .make_req(bodies, Endpoint::Different(endpoints), auth_header)
+            .await?;
 
         Ok(BatchResponse { responses })
     }
@@ -99,16 +136,7 @@ impl<R: Reply + 'static> BatchService for BatchServer<R> {
 
         let auth_header = headers.remove(&AUTHORIZATION);
         let responses = self
-            .make_req(
-                requests
-                    .into_iter()
-                    .map(|a| AnyRequest {
-                        request: a,
-                        endpoint: endpoint.clone(),
-                    })
-                    .collect(),
-                auth_header,
-            )
+            .make_req(requests, Endpoint::Same(endpoint), auth_header)
             .await?;
 
         Ok(BatchSameResponse { responses })

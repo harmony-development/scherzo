@@ -147,7 +147,7 @@ impl SyncServer {
 
     async fn generate_request<Msg: Message>(&self, msg: Msg) -> Result<Request<Msg>, ServerError> {
         let data = AuthData {
-            host: self.host.clone(),
+            server_id: self.host.clone(),
             time: get_time_secs(),
         };
 
@@ -181,17 +181,17 @@ impl SyncServer {
         if let Some(auth) = maybe_auth.map(|h| h.as_bytes()) {
             let token = Token::decode(auth).map_err(|_| ServerError::InvalidToken)?;
 
-            let AuthData { host, time } = AuthData::decode(token.data.as_slice())
+            let AuthData { server_id, time } = AuthData::decode(token.data.as_slice())
                 .map_err(|_| ServerError::InvalidTokenData)?;
 
-            self.is_host_allowed(&host)?;
+            self.is_host_allowed(&server_id)?;
 
             let cur_time = get_time_secs();
             // Check time variance (1 minute)
             if time < cur_time + 30 && time > cur_time - 30 {
                 let keys_manager = self.keys_manager()?;
 
-                let host: SmolStr = host.into();
+                let host: SmolStr = server_id.into();
                 let get_key = || keys_manager.get_key(host.clone());
                 let mut pubkey = get_key().await?;
 
@@ -273,5 +273,12 @@ impl postbox_service_server::PostboxService for SyncServer {
             self.push_logic(&host, event);
         }
         Ok(PushResponse {})
+    }
+
+    async fn notify_new_id(
+        &self,
+        _request: Request<NotifyNewIdRequest>,
+    ) -> Result<NotifyNewIdResponse, HrpcServerError<Self::Error>> {
+        Err(ServerError::NotImplemented.into())
     }
 }

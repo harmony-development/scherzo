@@ -213,13 +213,13 @@ impl auth_service_server::AuthService for AuthServer {
         let keys_manager = self.keys_manager()?;
 
         let profile = self.profile_tree.get_profile_logic(user_id)?;
-        let target = request.into_parts().0.into_message().await??.target;
+        let server_id = request.into_parts().0.into_message().await??.server_id;
 
-        self.is_host_allowed(&target)?;
+        self.is_host_allowed(&server_id)?;
 
         let data = TokenData {
             user_id,
-            target,
+            server_id,
             username: profile.user_name,
             avatar: profile.user_avatar,
         };
@@ -234,18 +234,20 @@ impl auth_service_server::AuthService for AuthServer {
         &self,
         request: Request<LoginFederatedRequest>,
     ) -> Result<LoginFederatedResponse, HrpcServerError<Self::Error>> {
-        let LoginFederatedRequest { auth_token, domain } =
-            request.into_parts().0.into_message().await??;
+        let LoginFederatedRequest {
+            auth_token,
+            server_id,
+        } = request.into_parts().0.into_message().await??;
 
-        self.is_host_allowed(&domain)?;
+        self.is_host_allowed(&server_id)?;
 
         if let Some(token) = auth_token {
             let keys_manager = self.keys_manager()?;
-            let pubkey = keys_manager.get_key(domain.into()).await?;
+            let pubkey = keys_manager.get_key(server_id.into()).await?;
             key::verify_token(&token, &pubkey)?;
             let TokenData {
                 user_id: foreign_id,
-                target,
+                server_id,
                 username,
                 avatar,
             } = TokenData::decode(token.data.as_slice())
@@ -253,7 +255,7 @@ impl auth_service_server::AuthService for AuthServer {
 
             let local_user_id = self
                 .profile_tree
-                .foreign_to_local_id(foreign_id, &target)
+                .foreign_to_local_id(foreign_id, &server_id)
                 .unwrap_or_else(|| {
                     let local_id = gen_rand_u64();
 
@@ -261,11 +263,11 @@ impl auth_service_server::AuthService for AuthServer {
                     // Add the local to foreign user key entry
                     batch.insert(
                         &make_local_to_foreign_user_key(local_id),
-                        [&foreign_id.to_be_bytes(), target.as_bytes()].concat(),
+                        [&foreign_id.to_be_bytes(), server_id.as_bytes()].concat(),
                     );
                     // Add the foreign to local user key entry
                     batch.insert(
-                        make_foreign_to_local_user_key(foreign_id, &target),
+                        make_foreign_to_local_user_key(foreign_id, &server_id),
                         &local_id.to_be_bytes(),
                     );
                     // Add the profile entry

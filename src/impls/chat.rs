@@ -499,7 +499,7 @@ impl chat_service_server::ChatService for ChatServer {
 
                 GuildListEntry {
                     guild_id,
-                    host: host.to_string(),
+                    server_id: host.to_string(),
                 }
             })
             .collect();
@@ -890,8 +890,8 @@ impl chat_service_server::ChatService for ChatServer {
             content: new_content.clone(),
         }));
 
-        let edited_at = Some(std::time::SystemTime::now().into());
-        message.edited_at = edited_at.clone();
+        let edited_at = get_time_secs();
+        message.edited_at = Some(edited_at);
 
         let buf = encode_protobuf_message(message);
         chat_insert!(key / buf);
@@ -1296,7 +1296,7 @@ impl chat_service_server::ChatService for ChatServer {
             });
         let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
-        let created_at = Some(std::time::SystemTime::now().into());
+        let created_at = get_time_secs();
         let edited_at = None;
 
         let inner_content = content.and_then(|c| c.content);
