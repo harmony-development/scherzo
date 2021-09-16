@@ -102,9 +102,11 @@ pub fn get_arg_as_u64(val: &str, index: usize) -> Option<u64> {
 async fn main() {
     let mut filter_level = Level::INFO;
     let mut db_path = "db".to_string();
+    let mut run_with_console = false;
 
     for (index, arg) in std::env::args().enumerate() {
         match arg.as_str() {
+            "--console" => run_with_console = true,
             "-v" | "--verbose" => filter_level = Level::TRACE,
             "-d" | "--debug" => filter_level = Level::DEBUG,
             "-q" | "--quiet" => filter_level = Level::WARN,
@@ -118,7 +120,7 @@ async fn main() {
         }
     }
 
-    run(filter_level, db_path).await
+    run(filter_level, db_path, run_with_console).await
 }
 
 fn process_cmd(cmd: &str) -> Command {
@@ -242,7 +244,7 @@ fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
     return Box::new(scherzo::db::noop::NoopDb);
 }
 
-pub async fn run(filter_level: Level, db_path: String) {
+pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
     let file_appender = tracing_appender::rolling::hourly("logs", "log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
@@ -267,7 +269,12 @@ pub async fn run(filter_level: Level, db_path: String) {
         .with(console_layer)
         .with(file_logger);
 
-    base_loggers.init();
+    if run_with_console {
+        base_loggers.init();
+    } else {
+        let term_logger = fmt::layer();
+        base_loggers.with(term_logger).init();
+    }
 
     info!("logging initialized");
 
@@ -401,17 +408,17 @@ pub async fn run(filter_level: Level, db_path: String) {
         ([0, 0, 0, 0], deps.config.port)
     };
 
-    if let Some(tls_config) = deps.config.tls.as_ref() {
+    let spawn_handle = if let Some(tls_config) = deps.config.tls.as_ref() {
         tokio::spawn(
             serve
                 .tls()
                 .cert_path(tls_config.cert_file.clone())
                 .key_path(tls_config.key_file.clone())
                 .run(addr),
-        );
+        )
     } else {
-        tokio::spawn(serve.run(addr));
-    }
+        tokio::spawn(serve.run(addr))
+    };
 
     let handle_cmd = |command| {
         match command {
@@ -588,37 +595,42 @@ pub async fn run(filter_level: Level, db_path: String) {
         false
     };
 
-    let mut rl = Editor::<()>::new();
-    let path = std::env::var("HOME")
-        .ok()
-        .map(|h| Path::new(&h).join(".cache/scherzo-shell-history"))
-        .unwrap_or_else(|| Path::new("/tmp/scherzo-shell-history").to_path_buf());
-    if rl.load_history(&path).is_err() && rl.load_history("/tmp/scherzo-shell-history").is_err() {
-        eprintln!("failed to load shell history");
-    }
-    loop {
-        let prompt = format!(
-            "({} streams) ({} valid sessions)> ",
-            deps.chat_event_sender.receiver_count(),
-            deps.valid_sessions.len()
-        );
-        let readline = rl.readline(&prompt);
-        match readline {
-            Ok(line) => {
-                let command = process_cmd(&line);
-                let do_exit = handle_cmd(command);
-                if do_exit {
+    if run_with_console {
+        let mut rl = Editor::<()>::new();
+        let path = std::env::var("HOME")
+            .ok()
+            .map(|h| Path::new(&h).join(".cache/scherzo-shell-history"))
+            .unwrap_or_else(|| Path::new("/tmp/scherzo-shell-history").to_path_buf());
+        if rl.load_history(&path).is_err() && rl.load_history("/tmp/scherzo-shell-history").is_err()
+        {
+            eprintln!("failed to load shell history");
+        }
+        loop {
+            let prompt = format!(
+                "({} streams) ({} valid sessions)> ",
+                deps.chat_event_sender.receiver_count(),
+                deps.valid_sessions.len()
+            );
+            let readline = rl.readline(&prompt);
+            match readline {
+                Ok(line) => {
+                    let command = process_cmd(&line);
+                    let do_exit = handle_cmd(command);
+                    if do_exit {
+                        break;
+                    }
+                    rl.add_history_entry(line);
+                }
+                // We don't want to accidentally shut down the whole server
+                Err(ReadlineError::Interrupted | ReadlineError::Eof) => {}
+                Err(err) => {
+                    println!("Error: {:?}", err);
                     break;
                 }
-                rl.add_history_entry(line);
-            }
-            // We don't want to accidentally shut down the whole server
-            Err(ReadlineError::Interrupted | ReadlineError::Eof) => {}
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
             }
         }
+    } else {
+        spawn_handle.await.unwrap();
     }
 }
 
