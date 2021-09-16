@@ -798,6 +798,12 @@ impl auth_service_server::AuthService for AuthServer {
                 if let Err(err) = chan.send(prev_step.clone()).await {
                     tracing::error!("failed to send auth step to {}: {}", auth_id, err);
                 }
+            } else {
+                tracing::debug!("no stream found for auth id {}, pushing to queue", auth_id);
+                self.queued_steps
+                    .entry(auth_id.into())
+                    .and_modify(|s| s.push(prev_step.clone()))
+                    .or_insert_with(|| vec![prev_step.clone()]);
             }
         } else {
             return Err(ServerError::InvalidAuthId.into());
