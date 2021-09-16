@@ -162,7 +162,7 @@ impl ChatServer {
                 .await
                 .map_or_else(
                     |err| {
-                        if !matches!(err, SocketError::ClosedNormally) {
+                        if !matches!(err, SocketError::Closed) {
                             tracing::error!(
                                 "couldnt write to stream events socket for user {}: {}",
                                 user_id,
