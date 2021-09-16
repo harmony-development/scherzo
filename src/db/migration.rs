@@ -16,11 +16,23 @@ pub fn get_db_version(db: &dyn Db) -> DbResult<(usize, bool)> {
 }
 
 pub fn apply_migrations(db: &dyn Db, current_version: usize) -> DbResult<()> {
-    for migration in std::array::IntoIter::new(MIGRATIONS).skip(current_version) {
-        migration(db)?;
-        increment_db_version(db)?;
+    if current_version == 0 {
+        initial_db_version(db)
+    } else {
+        for (version, migration) in std::array::IntoIter::new(MIGRATIONS)
+            .enumerate()
+            .skip(current_version)
+        {
+            tracing::warn!(
+                "migrating database from version {} to {}",
+                version,
+                version + 1
+            );
+            migration(db)?;
+            increment_db_version(db)?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn increment_db_version(db: &dyn Db) -> DbResult<()> {
@@ -30,8 +42,8 @@ fn increment_db_version(db: &dyn Db) -> DbResult<()> {
         .and_then(|raw| Some(usize::from_be_bytes(raw.try_into().ok()?)))
     {
         let new_version = version + 1;
-        tracing::warn!(
-            "migrating database from version {} to {}",
+        tracing::info!(
+            "migrated database from version {} to {}",
             version,
             new_version
         );
@@ -43,7 +55,7 @@ fn increment_db_version(db: &dyn Db) -> DbResult<()> {
 fn initial_db_version(db: &dyn Db) -> DbResult<()> {
     let version_tree = db.open_tree(b"version")?;
     if !version_tree.contains_key(b"version")? {
-        version_tree.insert(b"version", &0_usize.to_be_bytes())?;
+        version_tree.insert(b"version", &MIGRATIONS.len().to_be_bytes())?;
     }
     Ok(())
 }
