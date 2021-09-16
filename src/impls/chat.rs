@@ -7,7 +7,7 @@ use harmony_rust_sdk::api::{
     },
     exports::hrpc::{
         return_print,
-        server::{ServerError as HrpcServerError, Socket, SocketError, WriteSocket},
+        server::{ServerError as HrpcServerError, Socket, SocketError},
         warp::reply::Response,
         BodyKind, Request,
     },
@@ -148,30 +148,31 @@ impl ChatServer {
         &self,
         user_id: u64,
         mut sub_rx: Receiver<EventSub>,
-        mut ws: WriteSocket<StreamEventsResponse>,
+        socket: Socket<StreamEventsRequest, StreamEventsResponse>,
     ) -> JoinHandle<()> {
         async fn send_event(
-            ws: &mut WriteSocket<StreamEventsResponse>,
+            socket: &Socket<StreamEventsRequest, StreamEventsResponse>,
             broadcast: &EventBroadcast,
             user_id: u64,
         ) -> bool {
-            ws.send_message(StreamEventsResponse {
-                event: Some(broadcast.event.clone().into()),
-            })
-            .await
-            .map_or_else(
-                |err| {
-                    if !matches!(err, SocketError::ClosedNormally) {
-                        tracing::error!(
-                            "couldnt write to stream events socket for user {}: {}",
-                            user_id,
-                            err
-                        );
-                    }
-                    true
-                },
-                |_| false,
-            )
+            socket
+                .send_message(StreamEventsResponse {
+                    event: Some(broadcast.event.clone().into()),
+                })
+                .await
+                .map_or_else(
+                    |err| {
+                        if !matches!(err, SocketError::ClosedNormally) {
+                            tracing::error!(
+                                "couldnt write to stream events socket for user {}: {}",
+                                user_id,
+                                err
+                            );
+                        }
+                        true
+                    },
+                    |_| false,
+                )
         }
 
         let mut rx = self.broadcast_send.subscribe();
@@ -217,12 +218,12 @@ impl ChatServer {
                                 if !broadcast.context.user_ids.is_empty() {
                                     if broadcast.context.user_ids.contains(&user_id)
                                         && check_perms()
-                                        && send_event(&mut ws, broadcast.as_ref(), user_id).await
+                                        && send_event(&socket, broadcast.as_ref(), user_id).await
                                     {
                                         return true;
                                     }
                                 } else if check_perms()
-                                    && send_event(&mut ws, broadcast.as_ref(), user_id).await
+                                    && send_event(&socket, broadcast.as_ref(), user_id).await
                                 {
                                     return true;
                                 }
@@ -2111,15 +2112,14 @@ impl chat_service_server::ChatService for ChatServer {
         user_id: u64,
         socket: Socket<StreamEventsRequest, StreamEventsResponse>,
     ) {
-        let (mut rs, ws) = socket.split();
         let (sub_tx, sub_rx) = mpsc::channel(64);
         let chat_tree = self.chat_tree.clone();
 
-        let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, ws);
+        let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, socket.clone());
         let recv_loop = async move {
             loop {
-                return_print!(rs.receive_message().await, |maybe_req| {
-                    if let Some(req) = maybe_req.and_then(|r| r.request) {
+                return_print!(socket.receive_message().await, |req| {
+                    if let Some(req) = req.request {
                         use stream_events_request::*;
 
                         let sub = match req {

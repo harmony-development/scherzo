@@ -345,8 +345,6 @@ impl auth_service_server::AuthService for AuthServer {
         auth_id: SmolStr,
         socket: Socket<StreamStepsRequest, StreamStepsResponse>,
     ) {
-        let mut socket = socket.clonable();
-
         tracing::debug!("creating stream for id {}", auth_id);
 
         if let Some(mut queued_steps) = self.queued_steps.get_mut(auth_id.as_str()) {
@@ -371,57 +369,37 @@ impl auth_service_server::AuthService for AuthServer {
         self.send_step.insert(auth_id.clone(), tx);
         tracing::debug!("pushed stream tx for id {}", auth_id);
 
-        let sock = socket.clone();
-        let recv_fut = async {
-            loop {
-                if sock.receive_message().await.is_err() {
-                    break;
+        let mut end_stream;
+        while let Some(step) = rx.recv().await {
+            tracing::debug!("received auth step to send to id {}", auth_id);
+            end_stream = matches!(
+                step,
+                AuthStep {
+                    step: Some(auth_step::Step::Session(_)),
+                    ..
                 }
-                if sock.is_closed().await {
-                    break;
-                }
-            }
-        };
+            );
 
-        let send_fut = async {
-            let mut end_stream;
-            while let Some(step) = rx.recv().await {
-                tracing::debug!("received auth step to send to id {}", auth_id);
-                end_stream = matches!(
-                    step,
-                    AuthStep {
-                        step: Some(auth_step::Step::Session(_)),
-                        ..
-                    }
+            if let Err(err) = socket
+                .send_message(StreamStepsResponse { step: Some(step) })
+                .await
+            {
+                tracing::error!(
+                    "error occured while sending step to id {}: {}",
+                    auth_id,
+                    err
                 );
 
-                if socket.is_closed().await {
-                    break;
-                }
-                if let Err(err) = socket
-                    .send_message(StreamStepsResponse { step: Some(step) })
-                    .await
-                {
-                    tracing::error!(
-                        "error occured while sending step to id {}: {}",
-                        auth_id,
-                        err
-                    );
-
-                    // Break from loop since we errored
-                    break;
-                }
-
-                // Break if we authed
-                if end_stream {
-                    break;
-                }
+                // Break from loop since we errored
+                break;
             }
-        };
 
-        tokio::select! {
-            _ = recv_fut => {},
-            _ = send_fut => {},
+            // Break if we authed
+            if end_stream {
+                // Close the socket
+                socket.close().await;
+                break;
+            }
         }
 
         self.send_step.remove(&auth_id);
