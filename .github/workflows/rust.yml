@@ -70,31 +70,35 @@ jobs:
           chmod +x pyuploadtool-x86_64.AppImage
           ./pyuploadtool-x86_64.AppImage target/x86_64-unknown-linux-musl/release/scherzo
 
-  #update:
-  #  needs: build
-  #  name: Update Scherzo at harmonyapp.io
-  #  runs-on: ubuntu-latest
-  #  if: github.event_name == 'push'
-  #  steps:
-     # - run: 'echo "$SSH_KEY" > key && chmod 600 key'
-     #   shell: bash
-     #   env:
-     #     SSH_KEY: ${{secrets.ACTIONS_SSH_KEY}}
-     # - run: 'echo "$KNOWN_HOSTS" > known_hosts && chmod 600 known_hosts'
-     #   shell: bash
-     #   env:
-     #     KNOWN_HOSTS: ${{secrets.ACTIONS_SSH_KNOWN_HOSTS}}
-     # - run: 'ssh -i key -o UserKnownHostsFile=known_hosts "root@$SSH_HOST" update-scherzo'
-     #   shell: bash
-     #   env:
-     #     SSH_HOST: ${{secrets.ACTIONS_SSH_HOST}}
-     # - name: Trigger integration testing
-     #   if: ${{ github.ref == 'refs/heads/master' }}
-     #   uses: peter-evans/repository-dispatch@v1
-     #   with:
-     #     token: ${{ secrets.INTEGRATION_TEST_PAT }}
-     #     repository: harmony-development/integration-testing
-     #     event-type: dep-updated
+  update:
+    needs: build
+    name: Update Scherzo at harmonyapp.io
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          repository: 'harmony-development/ansible'
+      - run: 'echo "$SSH_KEY" > key && chmod 600 key'
+        shell: bash
+        env:
+          SSH_KEY: ${{secrets.ACTIONS_SSH_KEY}}
+      - run: 'echo "$KNOWN_HOSTS" > known_hosts && chmod 600 known_hosts'
+        shell: bash
+        env:
+          KNOWN_HOSTS: ${{secrets.ACTIONS_SSH_KNOWN_HOSTS}}
+      - run: 'ansible-playbook only-scherzo.yml --key-file key'
+        shell: bash
+        env:
+          SSH_HOST: ${{secrets.ACTIONS_SSH_HOST}}
+      - name: Trigger integration testing
+        if: ${{ github.ref == 'refs/heads/master' }}
+        uses: peter-evans/repository-dispatch@v1
+        with:
+          token: ${{ secrets.INTEGRATION_TEST_PAT }}
+          repository: harmony-development/integration-testing
+          event-type: dep-updated
 
   docker:
     needs: build
