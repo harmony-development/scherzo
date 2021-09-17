@@ -183,59 +183,47 @@ impl ChatServer {
 
             loop {
                 tokio::select! {
-                    _ = async {
-                        // Push all the subs
-                        while let Some(sub) = sub_rx.recv().await {
-                            subs.append(sub);
-                        }
-                    } => { }
-                    res = async {
-                        // Broadcast all events
-                        // TODO: what do we do when RecvError::Lagged?
-                        while let Ok(broadcast) = rx.recv().await {
-                            let check_perms = || {
-                                broadcast.perm_check.map_or(true, |perm_check| {
-                                    let PermCheck {
-                                        guild_id,
-                                        channel_id,
-                                        check_for,
-                                        must_be_guild_owner,
-                                    } = perm_check;
+                    Some(sub) = sub_rx.recv() => {
+                        subs.append(sub);
+                    }
+                    Ok(broadcast) = rx.recv() => {
+                        let check_perms = || {
+                            broadcast.perm_check.map_or(true, |perm_check| {
+                                let PermCheck {
+                                    guild_id,
+                                    channel_id,
+                                    check_for,
+                                    must_be_guild_owner,
+                                } = perm_check;
 
-                                    let perm = chat_tree.check_perms(
-                                        guild_id,
-                                        channel_id,
-                                        user_id,
-                                        check_for,
-                                        must_be_guild_owner,
-                                    );
+                                let perm = chat_tree.check_perms(
+                                    guild_id,
+                                    channel_id,
+                                    user_id,
+                                    check_for,
+                                    must_be_guild_owner,
+                                );
 
-                                    matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
-                                })
-                            };
+                                matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
+                            })
+                        };
 
-                            if subs.iter().any(|val| val.eq(&broadcast.sub)) {
-                                if !broadcast.context.user_ids.is_empty() {
-                                    if broadcast.context.user_ids.contains(&user_id)
-                                        && check_perms()
-                                        && send_event(&socket, broadcast.as_ref(), user_id).await
-                                    {
-                                        return true;
-                                    }
-                                } else if check_perms()
+                        if subs.iter().any(|val| val.eq(&broadcast.sub)) {
+                            if !broadcast.context.user_ids.is_empty() {
+                                if broadcast.context.user_ids.contains(&user_id)
+                                    && check_perms()
                                     && send_event(&socket, broadcast.as_ref(), user_id).await
                                 {
-                                    return true;
+                                    return;
                                 }
+                            } else if check_perms()
+                                && send_event(&socket, broadcast.as_ref(), user_id).await
+                            {
+                                return;
                             }
                         }
-
-                        false
-                    } => {
-                        if res {
-                            break;
-                        }
                     }
+                    else => tokio::task::yield_now().await,
                 }
             }
         })
@@ -2103,6 +2091,7 @@ impl chat_service_server::ChatService for ChatServer {
         request: Request<Option<StreamEventsRequest>>,
     ) -> Result<u64, HrpcServerError<Self::Error>> {
         auth!();
+        tracing::debug!("stream events validated for user {}", user_id);
         Ok(user_id)
     }
 
@@ -2112,6 +2101,7 @@ impl chat_service_server::ChatService for ChatServer {
         user_id: u64,
         socket: Socket<StreamEventsRequest, StreamEventsResponse>,
     ) {
+        tracing::debug!("creating stream events for user {}", user_id);
         let (sub_tx, sub_rx) = mpsc::channel(64);
         let chat_tree = self.chat_tree.clone();
 
@@ -2121,6 +2111,8 @@ impl chat_service_server::ChatService for ChatServer {
                 return_print!(socket.receive_message().await, |req| {
                     if let Some(req) = req.request {
                         use stream_events_request::*;
+
+                        tracing::debug!("got new stream events request for user {}", user_id);
 
                         let sub = match req {
                             Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
@@ -2152,6 +2144,7 @@ impl chat_service_server::ChatService for ChatServer {
                 res.unwrap();
             }
         );
+        tracing::debug!("stream events ended for user {}", user_id);
     }
 
     async fn add_reaction(
