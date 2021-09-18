@@ -78,6 +78,11 @@ impl<R: Reply + 'static> BatchServer<R> {
                 let auth_header = &auth_header;
                 match &endpoint {
                     Endpoint::Same(endpoint) => {
+                        tracing::info!(
+                            "batching {} requests for endpoint {}",
+                            bodies.len(),
+                            endpoint
+                        );
                         for body in bodies {
                             responses
                                 .push(process_request(body, endpoint, auth_header, filters).await?);
@@ -85,6 +90,7 @@ impl<R: Reply + 'static> BatchServer<R> {
                     }
                     Endpoint::Different(a) => {
                         for (body, endpoint) in bodies.into_iter().zip(a) {
+                            tracing::info!("batching request for endpoint {}", endpoint);
                             responses
                                 .push(process_request(body, endpoint, auth_header, filters).await?);
                         }
