@@ -144,6 +144,8 @@ pub enum ServerError {
     NotMedia,
     InvalidAgainst(HomeserverIdParseError),
     CantKickOrBanYourself,
+    TooManyBatchedRequests,
+    InvalidBatchEndpoint,
 }
 
 impl StdError for ServerError {
@@ -298,6 +300,12 @@ impl Display for ServerError {
             ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
             ServerError::NotMedia => write!(f, "the requested URL does not point to media"),
             ServerError::CantKickOrBanYourself => write!(f, "you can't ban or kick yourself"),
+            ServerError::InvalidBatchEndpoint => {
+                write!(f, "batch requests cant contain other batch requests")
+            }
+            ServerError::TooManyBatchedRequests => {
+                write!(f, "too many requests in one batch (cannot exceed 64)")
+            }
         }
     }
 }
@@ -350,7 +358,9 @@ impl CustomError for ServerError {
             | ServerError::UnderSpecifiedChannels
             | ServerError::NotMedia
             | ServerError::InvalidAgainst(_)
-            | ServerError::CantKickOrBanYourself => StatusCode::BAD_REQUEST,
+            | ServerError::CantKickOrBanYourself
+            | ServerError::InvalidBatchEndpoint
+            | ServerError::TooManyBatchedRequests => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -435,6 +445,8 @@ impl CustomError for ServerError {
             ServerError::InviteExists(_) => "h.invite-exists",
             ServerError::InvalidAgainst(_) => "h.invalid-against",
             ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
+            ServerError::InvalidBatchEndpoint => "h.invalid-batch",
+            ServerError::TooManyBatchedRequests => "h.too-many-batches",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),

@@ -21,6 +21,11 @@ enum Endpoint {
     Different(Vec<String>),
 }
 
+fn is_valid_endpoint(endpoint: &str) -> bool {
+    let endpoint = endpoint.trim_end_matches('/');
+    !(endpoint.ends_with("BatchRequest") || endpoint.ends_with("BatchSameRequest"))
+}
+
 pub struct BatchServer<R: Reply + 'static> {
     disable_ratelimits: bool,
     filters: Arc<BoxedFilter<(R,)>>,
@@ -67,6 +72,10 @@ impl<R: Reply + 'static> BatchServer<R> {
             Ok(body)
         }
 
+        if bodies.len() > 64 {
+            return Err(ServerError::TooManyBatchedRequests.into());
+        }
+
         let filters = self.filters.clone();
         let handle = tokio::runtime::Handle::current();
 
@@ -83,6 +92,9 @@ impl<R: Reply + 'static> BatchServer<R> {
                             bodies.len(),
                             endpoint
                         );
+                        if !is_valid_endpoint(endpoint) {
+                            return Err(ServerError::InvalidBatchEndpoint.into());
+                        }
                         for body in bodies {
                             responses
                                 .push(process_request(body, endpoint, auth_header, filters).await?);
@@ -91,6 +103,9 @@ impl<R: Reply + 'static> BatchServer<R> {
                     Endpoint::Different(a) => {
                         for (body, endpoint) in bodies.into_iter().zip(a) {
                             tracing::info!("batching request for endpoint {}", endpoint);
+                            if !is_valid_endpoint(endpoint) {
+                                return Err(ServerError::InvalidBatchEndpoint.into());
+                            }
                             responses
                                 .push(process_request(body, endpoint, auth_header, filters).await?);
                         }
