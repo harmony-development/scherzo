@@ -22,7 +22,6 @@ use reqwest::Url;
 use smol_str::SmolStr;
 use triomphe::Arc;
 
-pub mod append_list;
 pub mod config;
 pub mod db;
 pub mod impls;

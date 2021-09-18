@@ -1,4 +1,7 @@
-use std::{convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf,
+    str::FromStr,
+};
 
 use harmony_rust_sdk::api::{
     chat::{
@@ -36,7 +39,6 @@ use tokio::{
 use triomphe::Arc;
 
 use crate::{
-    append_list::AppendList,
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
     impls::{
         auth, get_time_secs,
@@ -48,7 +50,7 @@ use crate::{
 
 use super::{profile::ProfileTree, Dependencies};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSub {
     Guild(u64),
     Homeserver,
@@ -80,12 +82,14 @@ impl<'a> PermCheck<'a> {
 }
 
 pub struct EventContext {
-    user_ids: Vec<u64>,
+    user_ids: HashSet<u64, ahash::RandomState>,
 }
 
 impl EventContext {
-    pub const fn new(user_ids: Vec<u64>) -> Self {
-        Self { user_ids }
+    pub fn new(user_ids: Vec<u64>) -> Self {
+        Self {
+            user_ids: user_ids.into_iter().collect(),
+        }
     }
 
     pub fn empty() -> Self {
@@ -179,12 +183,12 @@ impl ChatServer {
         let chat_tree = self.chat_tree.clone();
 
         tokio::spawn(async move {
-            let subs = AppendList::new();
+            let mut subs = HashSet::with_hasher(ahash::RandomState::new());
 
             loop {
                 tokio::select! {
                     Some(sub) = sub_rx.recv() => {
-                        subs.append(sub);
+                        subs.insert(sub);
                     }
                     Ok(broadcast) = rx.recv() => {
                         let check_perms = || {
@@ -208,7 +212,7 @@ impl ChatServer {
                             })
                         };
 
-                        if subs.iter().any(|val| val.eq(&broadcast.sub)) {
+                        if subs.contains(&broadcast.sub) {
                             if !broadcast.context.user_ids.is_empty() {
                                 if broadcast.context.user_ids.contains(&user_id)
                                     && check_perms()
@@ -2042,6 +2046,29 @@ impl chat_service_server::ChatService for ChatServer {
             None,
             EventContext::empty(),
         );
+
+        match self.profile_tree.local_to_foreign_id(user_to_kick) {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
+            None => {
+                self.chat_tree
+                    .remove_guild_from_guild_list(user_to_kick, guild_id, "");
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
+                        guild_id,
+                        homeserver: String::new(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_to_kick]),
+                );
+            }
+        }
 
         Ok(KickUserResponse {})
     }
