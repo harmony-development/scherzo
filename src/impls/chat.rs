@@ -1981,9 +1981,28 @@ impl chat_service_server::ChatService for ChatServer {
 
     async fn get_banned_users(
         &self,
-        _request: Request<GetBannedUsersRequest>,
+        request: Request<GetBannedUsersRequest>,
     ) -> Result<GetBannedUsersResponse, HrpcServerError<Self::Error>> {
-        Err(ServerError::NotImplemented.into())
+        auth!();
+
+        let GetBannedUsersRequest { guild_id } = request.into_parts().0.into_message().await??;
+
+        let prefix = make_guild_banned_mem_prefix(guild_id);
+        let banned_users = self
+            .chat_tree
+            .chat_tree
+            .scan_prefix(&prefix)
+            .flat_map(|res| {
+                let (key, _) = res.unwrap();
+                (key.len() == make_banned_member_key(0, 0).len()).then(|| {
+                    u64::from_be_bytes(unsafe {
+                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                    })
+                })
+            })
+            .collect();
+
+        Ok(GetBannedUsersResponse { banned_users })
     }
 
     #[rate(4, 5)]
