@@ -2014,6 +2014,29 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
+        match self.profile_tree.local_to_foreign_id(user_to_ban) {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
+            None => {
+                self.chat_tree
+                    .remove_guild_from_guild_list(user_to_ban, guild_id, "");
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
+                        guild_id,
+                        homeserver: String::new(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_to_ban]),
+                );
+            }
+        }
+
         Ok(BanUserResponse {})
     }
 
