@@ -259,6 +259,31 @@ impl ChatServer {
         };
         drop(self.dispatch_tx.send(dispatch));
     }
+
+    fn dispatch_guild_leave(&self, guild_id: u64, user_id: u64) {
+        match self.profile_tree.local_to_foreign_id(user_id) {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
+                    user_id: foreign_id,
+                    guild_id,
+                }),
+            ),
+            None => {
+                self.chat_tree
+                    .remove_guild_from_guild_list(user_id, guild_id, "");
+                self.send_event_through_chan(
+                    EventSub::Homeserver,
+                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
+                        guild_id,
+                        homeserver: String::new(),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+        }
+    }
 }
 
 #[harmony_rust_sdk::api::exports::hrpc::async_trait]
@@ -1210,28 +1235,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.profile_tree.local_to_foreign_id(user_id) {
-            Some((foreign_id, target)) => self.dispatch_event(
-                target,
-                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
-                    user_id: foreign_id,
-                    guild_id,
-                }),
-            ),
-            None => {
-                self.chat_tree
-                    .remove_guild_from_guild_list(user_id, guild_id, "");
-                self.send_event_through_chan(
-                    EventSub::Homeserver,
-                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
-                        guild_id,
-                        homeserver: String::new(),
-                    }),
-                    None,
-                    EventContext::new(vec![user_id]),
-                );
-            }
-        }
+        self.dispatch_guild_leave(guild_id, user_id);
 
         Ok(LeaveGuildResponse {})
     }
@@ -2014,28 +2018,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.profile_tree.local_to_foreign_id(user_to_ban) {
-            Some((foreign_id, target)) => self.dispatch_event(
-                target,
-                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
-                    user_id: foreign_id,
-                    guild_id,
-                }),
-            ),
-            None => {
-                self.chat_tree
-                    .remove_guild_from_guild_list(user_to_ban, guild_id, "");
-                self.send_event_through_chan(
-                    EventSub::Homeserver,
-                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
-                        guild_id,
-                        homeserver: String::new(),
-                    }),
-                    None,
-                    EventContext::new(vec![user_to_ban]),
-                );
-            }
-        }
+        self.dispatch_guild_leave(guild_id, user_to_ban);
 
         Ok(BanUserResponse {})
     }
@@ -2070,28 +2053,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.profile_tree.local_to_foreign_id(user_to_kick) {
-            Some((foreign_id, target)) => self.dispatch_event(
-                target,
-                DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
-                    user_id: foreign_id,
-                    guild_id,
-                }),
-            ),
-            None => {
-                self.chat_tree
-                    .remove_guild_from_guild_list(user_to_kick, guild_id, "");
-                self.send_event_through_chan(
-                    EventSub::Homeserver,
-                    stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
-                        guild_id,
-                        homeserver: String::new(),
-                    }),
-                    None,
-                    EventContext::new(vec![user_to_kick]),
-                );
-            }
-        }
+        self.dispatch_guild_leave(guild_id, user_to_kick);
 
         Ok(KickUserResponse {})
     }
