@@ -9,11 +9,14 @@ use std::{
 };
 
 use harmony_rust_sdk::api::{
-    exports::hrpc::{
-        encode_protobuf_message, http,
-        server::{CustomError, StatusCode},
-        url::ParseError as UrlParseError,
-        warp::{self, reply::Response},
+    exports::{
+        hrpc::{
+            encode_protobuf_message, http,
+            server::{CustomError, StatusCode},
+            url::ParseError as UrlParseError,
+            warp::{self, reply::Response},
+        },
+        prost::bytes::Bytes,
     },
     HomeserverIdParseError,
 };
@@ -27,7 +30,6 @@ pub mod db;
 pub mod impls;
 pub mod key;
 
-pub const HARMONY_PROTO_NAME: &str = "harmony";
 pub const SCHERZO_VERSION: &str = git_version::git_version!(
     prefix = "git:",
     cargo_prefix = "cargo:",
@@ -38,7 +40,7 @@ pub fn set_proto_name(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(http::header::SEC_WEBSOCKET_PROTOCOL, unsafe {
-            http::HeaderValue::from_maybe_shared_unchecked(HARMONY_PROTO_NAME)
+            http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"harmony"))
         });
     response
 }
