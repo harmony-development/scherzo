@@ -355,9 +355,22 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
 
     let filters =
         balanced_or_tree!(against, auth, chat, mediaproxy, rest, sync, emote, profile, about)
-            .with(warp::trace::request())
-            .recover(hrpc::server::handle_rejection::<ServerError>)
             .boxed();
+
+    let batch_server = BatchServer::new(
+        &deps,
+        filters
+            .clone()
+            .recover(hrpc::server::handle_rejection::<ServerError>)
+            .boxed(),
+    );
+    let batch = BatchServiceServer::new(batch_server).filters();
+
+    let filters = (filters.or(batch))
+        .with(warp::trace::request())
+        .with(warp::compression::gzip())
+        .recover(hrpc::server::handle_rejection::<ServerError>)
+        .boxed();
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -382,9 +395,7 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
 
     let shared_config = SharedConfig::new(SharedConfigData::default().into());
 
-    let batch_server = BatchServer::new(&deps, filters.clone());
-    let batch = BatchServiceServer::new(batch_server).filters();
-    let serve = hrpc::warp::serve(batch.or(filters));
+    let serve = hrpc::warp::serve(filters);
 
     let addr = if deps.config.listen_on_localhost {
         ([127, 0, 0, 1], deps.config.port)

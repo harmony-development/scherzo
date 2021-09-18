@@ -35,6 +35,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35ef4730490ad1c4eae5c4325b2a95f521d023e5c885853ff7aca0a6a1631db3"
+
+[[package]]
+name = "alloc-stdlib"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "697ed7edc0f1711de49ce108c541623a0af97c6c60b2f6e2b65229847ac843c2"
+dependencies = [
+ "alloc-no-stdlib",
+]
+
+[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -54,6 +69,20 @@ name = "arrayvec"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
+
+[[package]]
+name = "async-compression"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5443ccbb270374a2b1055fc72da40e1f237809cd6bb0e97e66d264cd138473a6"
+dependencies = [
+ "brotli",
+ "flate2",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+]
 
 [[package]]
 name = "async-mutex"
@@ -141,6 +170,27 @@ name = "block-padding"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d696c370c750c948ada61c69a0ee2cbbb9c50b1019ddb86d9317157a99c2cae"
+
+[[package]]
+name = "brotli"
+version = "3.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71cb90ade945043d3d53597b2fc359bb063db8ade2bcffe7997351d0756e9d50"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+ "brotli-decompressor",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ad2d4653bf5ca36ae797b1f4bb4dbddb60ce49ca4aed8a2ce4829f60425b80"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+]
 
 [[package]]
 name = "buf_redux"
@@ -791,7 +841,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36dca8c7ba1d7374ebe1b95e6eef921e2ca8b0c0"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#27344e218c248510655bd95fc2c20cd30a6abbcd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -801,7 +851,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#36dca8c7ba1d7374ebe1b95e6eef921e2ca8b0c0"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#27344e218c248510655bd95fc2c20cd30a6abbcd"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -886,8 +936,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.11.8"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#be8f583e90f8b35ceca8c38290964f913637722d"
+version = "0.11.9"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#9bdac988210b02b607399333a35ef9fb75b06e5d"
 dependencies = [
  "ahash",
  "async-trait",
@@ -910,8 +960,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.8.1"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#be8f583e90f8b35ceca8c38290964f913637722d"
+version = "0.8.2"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=feat/body#9bdac988210b02b607399333a35ef9fb75b06e5d"
 dependencies = [
  "proc-macro2",
  "prost-build",
@@ -1859,6 +1909,7 @@ version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "246e9f61b9bb77df069a947682be06e31ac43ea37862e244a69f177694ea6d22"
 dependencies = [
+ "async-compression",
  "base64",
  "bytes",
  "encoding_rs",
@@ -1881,6 +1932,7 @@ dependencies = [
  "serde_urlencoded",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2873,6 +2925,7 @@ name = "warp"
 version = "0.3.1"
 source = "git+https://github.com/yusdacra/warp.git?branch=chore/deps#2207d489cad42ce18fda208d70b7a23caee847e1"
 dependencies = [
+ "async-compression",
  "bytes",
  "futures",
  "headers",
