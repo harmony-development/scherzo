@@ -10,7 +10,7 @@ use harmony_rust_sdk::api::{
         prost::bytes::Bytes,
     },
 };
-use reqwest::header::{HeaderValue, AUTHORIZATION};
+use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use scherzo_derive::*;
 use triomphe::Arc;
 
@@ -47,6 +47,11 @@ impl<R: Reply + 'static> BatchServer<R> {
             filters: &BoxedFilter<(R,)>,
         ) -> Result<Bytes, HrpcServerError<ServerError>> {
             let mut req = warp::test::request()
+                .header(CONTENT_TYPE, unsafe {
+                    HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
+                        b"application/hrpc",
+                    ))
+                })
                 .method("POST")
                 .body(body)
                 .path(endpoint);
