@@ -143,6 +143,7 @@ pub enum ServerError {
     InviteNameEmpty,
     NotMedia,
     InvalidAgainst(HomeserverIdParseError),
+    CantKickOrBanYourself,
 }
 
 impl StdError for ServerError {
@@ -296,6 +297,7 @@ impl Display for ServerError {
             ServerError::InviteExists(name) => write!(f, "invite {} already exists", name),
             ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
             ServerError::NotMedia => write!(f, "the requested URL does not point to media"),
+            ServerError::CantKickOrBanYourself => write!(f, "you can't ban or kick yourself"),
         }
     }
 }
@@ -347,7 +349,8 @@ impl CustomError for ServerError {
             | ServerError::InviteNameEmpty
             | ServerError::UnderSpecifiedChannels
             | ServerError::NotMedia
-            | ServerError::InvalidAgainst(_) => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidAgainst(_)
+            | ServerError::CantKickOrBanYourself => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -431,6 +434,7 @@ impl CustomError for ServerError {
             ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
             ServerError::InviteExists(_) => "h.invite-exists",
             ServerError::InvalidAgainst(_) => "h.invalid-against",
+            ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),

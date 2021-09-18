@@ -2017,6 +2017,10 @@ impl chat_service_server::ChatService for ChatServer {
             user_id: user_to_ban,
         } = request.into_parts().0.into_message().await??;
 
+        if user_id == user_to_ban {
+            return Err(ServerError::CantKickOrBanYourself.into());
+        }
+
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
         self.chat_tree
@@ -2053,6 +2057,10 @@ impl chat_service_server::ChatService for ChatServer {
             guild_id,
             user_id: user_to_kick,
         } = request.into_parts().0.into_message().await??;
+
+        if user_id == user_to_kick {
+            return Err(ServerError::CantKickOrBanYourself.into());
+        }
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
         self.chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
