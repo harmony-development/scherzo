@@ -1634,7 +1634,13 @@ impl chat_service_server::ChatService for ChatServer {
 
         let perms = self
             .chat_tree
-            .get_permissions_logic(guild_id, channel_id, role_id);
+            .get_permissions_logic(guild_id, channel_id, role_id)
+            .into_iter()
+            .map(|(m, ok)| Permission {
+                matches: m.into(),
+                ok,
+            })
+            .collect();
 
         Ok(GetPermissionsResponse { perms })
     }
@@ -2607,7 +2613,8 @@ impl ChatTree {
         if let Some(channel_id) = channel_id {
             for role_id in &user_roles {
                 let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id);
-                let is_allowed = has_permission(perms.iter(), check_for);
+                let is_allowed =
+                    has_permission(perms.iter().map(|(m, ok)| (m.as_str(), *ok)), check_for);
                 if let Some(true) = is_allowed {
                     return true;
                 }
@@ -2616,7 +2623,8 @@ impl ChatTree {
 
         for role_id in user_roles {
             let perms = self.get_permissions_logic(guild_id, None, role_id);
-            let is_allowed = has_permission(perms.iter(), check_for);
+            let is_allowed =
+                has_permission(perms.iter().map(|(m, ok)| (m.as_str(), *ok)), check_for);
             if let Some(true) = is_allowed {
                 return true;
             }
@@ -2833,7 +2841,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: Option<u64>,
         role_id: u64,
-    ) -> Vec<Permission> {
+    ) -> Vec<(SmolStr, bool)> {
         let get = |prefix: &[u8]| {
             self.chat_tree
                 .scan_prefix(prefix)
@@ -2842,10 +2850,7 @@ impl ChatTree {
                     let matches_raw = key.split_at(prefix.len()).1;
                     let matches = unsafe { std::str::from_utf8_unchecked(matches_raw) };
                     let ok = value[0] != 0;
-                    Permission {
-                        matches: matches.to_string(),
-                        ok,
-                    }
+                    (matches.into(), ok)
                 })
                 .collect()
         };

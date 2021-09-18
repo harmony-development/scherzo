@@ -13,7 +13,7 @@ use harmony_rust_sdk::api::{
     batch::batch_service_server::BatchServiceServer,
     chat::chat_service_server::ChatServiceServer,
     emote::emote_service_server::EmoteServiceServer,
-    exports::hrpc::{self, warp::Filter},
+    exports::hrpc::{self, balanced_or_tree, warp::Filter},
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
@@ -351,29 +351,13 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
     let about = scherzo::impls::about(&deps);
+    let against = against_proxy();
 
-    let filters = against_proxy()
-        .boxed()
-        .or(auth)
-        .boxed()
-        .or(chat)
-        .boxed()
-        .or(mediaproxy)
-        .boxed()
-        .or(rest)
-        .boxed()
-        .or(sync)
-        .boxed()
-        .or(emote)
-        .boxed()
-        .or(profile)
-        .boxed()
-        .or(about)
-        .boxed()
-        .with(warp::trace::request())
-        .boxed()
-        .recover(hrpc::server::handle_rejection::<ServerError>)
-        .boxed();
+    let filters =
+        balanced_or_tree!(against, auth, chat, mediaproxy, rest, sync, emote, profile, about)
+            .with(warp::trace::request())
+            .recover(hrpc::server::handle_rejection::<ServerError>)
+            .boxed();
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
