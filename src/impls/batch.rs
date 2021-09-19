@@ -23,7 +23,7 @@ enum Endpoint {
 
 fn is_valid_endpoint(endpoint: &str) -> bool {
     let endpoint = endpoint.trim_end_matches('/');
-    !(endpoint.ends_with("BatchRequest") || endpoint.ends_with("BatchSameRequest"))
+    !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
 }
 
 pub struct BatchServer<R: Reply + 'static> {
