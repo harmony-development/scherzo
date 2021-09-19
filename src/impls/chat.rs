@@ -12,7 +12,7 @@ use harmony_rust_sdk::api::{
         return_print,
         server::{ServerError as HrpcServerError, Socket, SocketError},
         warp::reply::Response,
-        BodyKind, Request,
+        Request,
     },
     harmonytypes::{ItemPosition, Metadata},
     rest::FileId,
@@ -284,97 +284,8 @@ impl ChatServer {
             }
         }
     }
-}
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
-impl chat_service_server::ChatService for ChatServer {
-    type Error = ServerError;
-
-    #[rate(1, 5)]
-    async fn create_guild(
-        &self,
-        request: Request<CreateGuildRequest>,
-    ) -> Result<CreateGuildResponse, HrpcServerError<Self::Error>> {
-        auth!();
-
-        let (body, headers, addr) = request.into_parts();
-
-        let CreateGuildRequest {
-            metadata,
-            name,
-            picture,
-        } = body.into_message().await??;
-
-        let guild_id = {
-            let mut rng = rand::thread_rng();
-            let mut guild_id = rng.gen_range(1..u64::MAX);
-            while self
-                .chat_tree
-                .chat_tree
-                .contains_key(&guild_id.to_be_bytes())
-                .unwrap()
-            {
-                guild_id = rng.gen_range(1..u64::MAX);
-            }
-            guild_id
-        };
-
-        let guild = Guild {
-            name,
-            picture,
-            owner_id: user_id,
-            metadata,
-        };
-        let buf = rkyv_ser(&guild);
-
-        chat_insert!(guild_id.to_be_bytes() / buf);
-        chat_insert!(make_member_key(guild_id, user_id) / []);
-
-        // Some basic default setup
-        let everyone_role_id = self.chat_tree.add_guild_role_logic(
-            guild_id,
-            Role {
-                name: "everyone".to_string(),
-                pingable: false,
-                ..Default::default()
-            },
-        )?;
-        // [tag:default_role_store]
-        chat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
-        self.chat_tree.add_default_role_to(guild_id, user_id)?;
-        let def_perms = [
-            "messages.send",
-            "messages.view",
-            "roles.get",
-            "roles.user.get",
-        ]
-        .iter()
-        .map(|m| Permission {
-            matches: m.to_string(),
-            ok: true,
-        })
-        .collect::<Vec<_>>();
-        self.chat_tree
-            .set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone());
-        let channel_id = self
-            .create_channel(Request::from_parts((
-                BodyKind::DecodedMessage(CreateChannelRequest {
-                    guild_id,
-                    channel_name: "general".to_string(),
-                    ..Default::default()
-                }),
-                headers,
-                addr,
-            )))
-            .await?
-            .channel_id;
-        self.chat_tree.set_permissions_logic(
-            guild_id,
-            Some(channel_id),
-            everyone_role_id,
-            def_perms,
-        );
-
+    fn dispatch_guild_join(&self, guild_id: u64, user_id: u64) {
         match self.profile_tree.local_to_foreign_id(user_id) {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
@@ -397,6 +308,31 @@ impl chat_service_server::ChatService for ChatServer {
                 );
             }
         }
+    }
+}
+
+#[harmony_rust_sdk::api::exports::hrpc::async_trait]
+impl chat_service_server::ChatService for ChatServer {
+    type Error = ServerError;
+
+    #[rate(1, 5)]
+    async fn create_guild(
+        &self,
+        request: Request<CreateGuildRequest>,
+    ) -> Result<CreateGuildResponse, HrpcServerError<Self::Error>> {
+        auth!();
+
+        let CreateGuildRequest {
+            metadata,
+            name,
+            picture,
+        } = request.into_parts().0.into_message().await??;
+
+        let guild_id = self
+            .chat_tree
+            .create_guild_logic(user_id, name, picture, metadata)?;
+
+        self.dispatch_guild_join(guild_id, user_id);
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -1179,28 +1115,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        match self.profile_tree.local_to_foreign_id(user_id) {
-            Some((foreign_id, target)) => self.dispatch_event(
-                target,
-                DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
-                    user_id: foreign_id,
-                    guild_id,
-                }),
-            ),
-            None => {
-                self.chat_tree
-                    .add_guild_to_guild_list(user_id, guild_id, "");
-                self.send_event_through_chan(
-                    EventSub::Homeserver,
-                    stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
-                        guild_id,
-                        homeserver: String::new(),
-                    }),
-                    None,
-                    EventContext::new(vec![user_id]),
-                );
-            }
-        }
+        self.dispatch_guild_join(guild_id, user_id);
 
         let buf = rkyv_ser(&invite);
         chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
@@ -2816,6 +2731,70 @@ impl ChatTree {
         )?;
 
         Ok(channel_id)
+    }
+
+    pub fn create_guild_logic(
+        &self,
+        user_id: u64,
+        name: String,
+        picture: String,
+        metadata: Option<Metadata>,
+    ) -> Result<u64, ServerError> {
+        let guild_id = {
+            let mut rng = rand::thread_rng();
+            let mut guild_id = rng.gen_range(1..u64::MAX);
+            while self
+                .chat_tree
+                .contains_key(&guild_id.to_be_bytes())
+                .unwrap()
+            {
+                guild_id = rng.gen_range(1..u64::MAX);
+            }
+            guild_id
+        };
+
+        let guild = Guild {
+            name,
+            picture,
+            owner_id: user_id,
+            metadata,
+        };
+        let buf = rkyv_ser(&guild);
+
+        cchat_insert!(guild_id.to_be_bytes() / buf);
+        cchat_insert!(make_member_key(guild_id, user_id) / []);
+
+        // Some basic default setup
+        let everyone_role_id = self.add_guild_role_logic(
+            guild_id,
+            Role {
+                name: "everyone".to_string(),
+                pingable: false,
+                ..Default::default()
+            },
+        )?;
+        // [tag:default_role_store]
+        cchat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
+        self.add_default_role_to(guild_id, user_id)?;
+        let def_perms = [
+            "messages.send",
+            "messages.view",
+            "roles.get",
+            "roles.user.get",
+        ]
+        .iter()
+        .map(|m| Permission {
+            matches: m.to_string(),
+            ok: true,
+        })
+        .collect::<Vec<_>>();
+        self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone());
+        let channel_id =
+            self.create_channel_logic(guild_id, "general".to_string(), false, None, None)?;
+
+        self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms);
+
+        Ok(guild_id)
     }
 
     /// Calculates all users which can "see" the given user

@@ -679,8 +679,15 @@ impl auth_service_server::AuthService for AuthServer {
                                     if self.policy_config.disable_registration {
                                         let token_raw = try_get_token(&mut values)?;
                                         let token_hashed = hash_password(token_raw);
-                                        if self.auth_tree.get(token_hashed.as_ref()).unwrap().is_none() {
-                                            return Err(ServerError::InvalidRegistrationToken.into());
+                                        if self
+                                            .auth_tree
+                                            .get(token_hashed.as_ref())
+                                            .unwrap()
+                                            .is_none()
+                                        {
+                                            return Err(
+                                                ServerError::InvalidRegistrationToken.into()
+                                            );
                                         }
                                     }
                                     let password_raw = try_get_password(&mut values)?;
