@@ -1,7 +1,6 @@
 #![recursion_limit = "256"]
 
 use std::{
-    convert::TryInto,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
@@ -19,95 +18,41 @@ use harmony_rust_sdk::api::{
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::warp;
-use rustyline::{error::ReadlineError, Editor};
 use scherzo::{
     config::DbConfig,
     db::{
-        chat::{make_invite_key, INVITE_PREFIX},
         migration::{apply_migrations, get_db_version},
-        profile::USER_PREFIX,
         Db,
     },
     impls::{
-        against_proxy, auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
-        mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer, Dependencies,
+        against_proxy,
+        auth::AuthServer,
+        batch::BatchServer,
+        chat::{AdminLogChannelLogger, ChatServer},
+        emote::EmoteServer,
+        mediaproxy::MediaproxyServer,
+        profile::ProfileServer,
+        sync::SyncServer,
+        Dependencies,
     },
-    ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
+    ServerError,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{
-    fmt::{
-        self,
-        time::{ChronoUtc, FormatTime},
-    },
+    fmt::{self},
     prelude::*,
 };
 
-#[derive(Debug)]
-pub enum Command {
-    GetInvites,
-    GetInvite(String),
-    GetMembers,
-    GetMember(u64),
-    GetGuilds,
-    GetGuild(u64),
-    GetGuildRoles(u64),
-    GetRolePerms {
-        guild_id: u64,
-        channel_id: u64,
-        role_id: u64,
-    },
-    GetGuildInvites(u64),
-    GetGuildChannels(u64),
-    GetGuildMembers(u64),
-    GetChannelMessages {
-        guild_id: u64,
-        channel_id: u64,
-        before_message_id: Option<u64>,
-    },
-    GetMessage {
-        guild_id: u64,
-        channel_id: u64,
-        message_id: u64,
-    },
-    ShowLog(u64),
-    ChangeMotd(String),
-    ClearValidSessions,
-    Help,
-    Invalid(String),
-    GetVersionInfo,
-    Exit,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for Command {
-    fn default() -> Self {
-        Command::Invalid(String::default())
-    }
-}
-
 // TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
-
-pub fn get_arg(val: &str, index: usize) -> Option<&str> {
-    val.split_whitespace().nth(index)
-}
-
-pub fn get_arg_as_u64(val: &str, index: usize) -> Option<u64> {
-    val.split_whitespace()
-        .nth(index)
-        .and_then(|a| a.parse().ok())
-}
 
 #[tokio::main]
 async fn main() {
     let mut filter_level = Level::INFO;
     let mut db_path = "db".to_string();
-    let mut run_with_console = false;
 
     for (index, arg) in std::env::args().enumerate() {
         match arg.as_str() {
-            "--console" => run_with_console = true,
             "-v" | "--verbose" => filter_level = Level::TRACE,
             "-d" | "--debug" => filter_level = Level::DEBUG,
             "-q" | "--quiet" => filter_level = Level::WARN,
@@ -121,84 +66,8 @@ async fn main() {
         }
     }
 
-    run(filter_level, db_path, run_with_console).await
+    run(filter_level, db_path).await
 }
-
-fn process_cmd(cmd: &str) -> Command {
-    match get_arg(cmd, 0).unwrap_or("") {
-        "get_invites" => Command::GetInvites,
-        "get_guilds" => Command::GetGuilds,
-        "get_members" => Command::GetMembers,
-        "get_guild" => get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuild),
-        "get_guild_members" => {
-            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildMembers)
-        }
-        "get_guild_roles" => {
-            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildRoles)
-        }
-        "get_role_perms" => get_arg_as_u64(cmd, 1)
-            .and_then(|guild_id| get_arg_as_u64(cmd, 2).map(|role_id| (guild_id, role_id)))
-            .map(|(gid, rid)| (gid, rid, get_arg_as_u64(cmd, 3).unwrap_or(0)))
-            .map_or_else(Default::default, |(guild_id, role_id, channel_id)| {
-                Command::GetRolePerms {
-                    guild_id,
-                    role_id,
-                    channel_id,
-                }
-            }),
-        "get_guild_channels" => {
-            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildChannels)
-        }
-        "get_guild_invites" => {
-            get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetGuildInvites)
-        }
-        "get_channel_messages" => get_arg_as_u64(cmd, 1)
-            .and_then(|id| get_arg_as_u64(cmd, 2).map(|id_2| (id, id_2)))
-            .map_or_else(Default::default, |(guild_id, channel_id)| {
-                Command::GetChannelMessages {
-                    guild_id,
-                    channel_id,
-                    before_message_id: get_arg_as_u64(cmd, 3),
-                }
-            }),
-        "get_message" => get_arg_as_u64(cmd, 1)
-            .and_then(|gid| {
-                get_arg_as_u64(cmd, 2)
-                    .and_then(|cid| get_arg_as_u64(cmd, 3).map(|mid| (gid, cid, mid)))
-            })
-            .map_or_else(Default::default, |(guild_id, channel_id, message_id)| {
-                Command::GetMessage {
-                    guild_id,
-                    channel_id,
-                    message_id,
-                }
-            }),
-        "get_member" => get_arg_as_u64(cmd, 1).map_or_else(Default::default, Command::GetMember),
-        "get_invite" => {
-            get_arg(cmd, 1).map_or_else(Default::default, |id| Command::GetInvite(id.to_string()))
-        }
-        "change_motd" => get_arg(cmd, 1).map_or_else(Default::default, |motd| {
-            Command::ChangeMotd(motd.to_string())
-        }),
-        "show_log" => get_arg_as_u64(cmd, 1).map_or_else(|| Command::ShowLog(20), Command::ShowLog),
-        "help" => Command::Help,
-        "clear_sessions" => Command::ClearValidSessions,
-        "version" => Command::GetVersionInfo,
-        "quit" | "exit" => Command::Exit,
-        x => Command::Invalid(x.to_string()),
-    }
-}
-
-// TODO: write the rest of help text
-const HELP_TEXT: &str = r#"
-help key: command <argument: default> -> description
-
-help -> shows help text
-version -> shows version information
-show_log <max_lines: 20> -> shows last log lines, limited by max_lines
-change_motd <new motd> -> changes the message of the day 
-clear_sessions -> clears all valid sessions from memory (not from DB)
-"#;
 
 #[cfg(feature = "sled")]
 fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
@@ -244,10 +113,11 @@ fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
     return Box::new(scherzo::db::noop::NoopDb);
 }
 
-pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
-    let file_appender = tracing_appender::rolling::hourly("logs", "log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let file_logger = fmt::layer().with_ansi(false).with_writer(non_blocking);
+pub async fn run(filter_level: Level, db_path: String) {
+    let (wrapped_admin_logger, admin_logger_handle) = tracing_subscriber::reload::Layer::new(
+        fmt::layer().event_format(AdminLogChannelLogger::empty()),
+    );
+    let term_logger = fmt::layer();
     let filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive(filter_level.into())
         .add_directive("rustyline=error".parse().unwrap())
@@ -261,20 +131,17 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
     #[cfg(not(feature = "console"))]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
-        .with(file_logger);
+        .with(term_logger)
+        .with(wrapped_admin_logger);
 
     #[cfg(feature = "console")]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
         .with(console_layer)
-        .with(file_logger);
+        .with(term_logger)
+        .with(wrapped_admin_logger);
 
-    if run_with_console {
-        base_loggers.init();
-    } else {
-        let term_logger = fmt::layer();
-        base_loggers.with(term_logger).init();
-    }
+    base_loggers.init();
 
     info!("logging initialized");
 
@@ -312,18 +179,20 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
         .expect("something went wrong while checking if the db needs migrations!!!");
     if needs_migration {
         // Backup db before attempting to apply migrations
-        let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
-        let db_backup_path = config.db.db_backup_path.as_ref().map_or_else(
-            || Path::new(&db_backup_name).to_path_buf(),
-            |path| path.join(&db_backup_name),
-        );
-        warn!(
-            "preparing to migrate the database, backing up to {:?}!",
-            db_backup_path
-        );
-        copy_dir_all(Path::new(&db_path).to_path_buf(), db_backup_path)
-            .await
-            .expect("could not backup the db, so not applying migrations!!!");
+        if current_db_version > 0 {
+            let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
+            let db_backup_path = config.db.db_backup_path.as_ref().map_or_else(
+                || Path::new(&db_backup_name).to_path_buf(),
+                |path| path.join(&db_backup_name),
+            );
+            warn!(
+                "preparing to migrate the database, backing up to {:?}!",
+                db_backup_path
+            );
+            copy_dir_all(Path::new(&db_path).to_path_buf(), db_backup_path)
+                .await
+                .expect("could not backup the db, so not applying migrations!!!");
+        }
 
         warn!("applying database migrations!");
         apply_migrations(db.as_ref(), current_db_version)
@@ -331,6 +200,32 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
     }
 
     let (deps, fed_event_receiver) = Dependencies::new(db.as_ref(), config).unwrap();
+
+    if current_db_version == 0 {
+        let guild_id = deps
+            .chat_tree
+            .create_guild_logic(0, "Admin".to_string(), String::new(), None)
+            .unwrap();
+        let log_id = deps
+            .chat_tree
+            .create_channel_logic(guild_id, "logs".to_string(), false, None, None)
+            .unwrap();
+        let cmd_id = deps
+            .chat_tree
+            .create_channel_logic(guild_id, "command".to_string(), false, None, None)
+            .unwrap();
+        let invite_id = format!("{}", guild_id);
+        deps.chat_tree
+            .create_invite_logic(guild_id, &invite_id, 1)
+            .unwrap();
+        deps.chat_tree
+            .set_admin_guild_keys(guild_id, log_id, cmd_id);
+        warn!("admin guild created! use the invite {} to join", invite_id);
+    }
+
+    admin_logger_handle
+        .reload(fmt::layer().event_format(AdminLogChannelLogger::new(&deps)))
+        .unwrap();
 
     let profile_server = ProfileServer::new(&deps);
     let emote_server = EmoteServer::new(&deps);
@@ -389,8 +284,6 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
         }
     });
 
-    let shared_config = SharedConfig::new(SharedConfigData::default().into());
-
     let serve = hrpc::warp::serve(filters);
 
     let addr = if deps.config.listen_on_localhost {
@@ -411,218 +304,7 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
         tokio::spawn(serve.run(addr))
     };
 
-    let handle_cmd = |command| {
-        match command {
-            Command::GetVersionInfo => {
-                let db_version = get_db_version(db.as_ref()).unwrap().0;
-                println!(
-                    "scherzo version {}, database version {}",
-                    SCHERZO_VERSION, db_version
-                );
-            }
-            Command::Help => println!("{}", HELP_TEXT),
-            Command::GetInvites => {
-                let invites = deps
-                    .chat_tree
-                    .chat_tree
-                    .scan_prefix(INVITE_PREFIX)
-                    .map(|res| {
-                        let (_, value) = res.unwrap();
-                        let (id_raw, invite_raw) = value.split_at(std::mem::size_of::<u64>());
-                        // Safety: this unwrap cannot fail since we split at u64 boundary
-                        let id = u64::from_be_bytes(id_raw.try_into().unwrap());
-                        let invite = scherzo::db::deser_invite(invite_raw.into());
-                        (id, invite)
-                    });
-
-                for (id, data) in invites {
-                    println!("{}: {:?}", id, data);
-                }
-            }
-            Command::GetMembers => {
-                let members = deps
-                    .profile_tree
-                    .inner
-                    .scan_prefix(USER_PREFIX)
-                    .flatten()
-                    .map(|(k, v)| {
-                        let member_id =
-                            u64::from_be_bytes(k.split_at(USER_PREFIX.len()).1.try_into().unwrap());
-                        let member_data = scherzo::db::deser_profile(v);
-                        (member_id, member_data)
-                    });
-
-                for (id, data) in members {
-                    println!("{}: {:?}", id, data);
-                }
-            }
-            Command::GetGuilds => {
-                let guilds = deps
-                    .chat_tree
-                    .chat_tree
-                    .scan_prefix(&[])
-                    .flatten()
-                    .filter_map(|(k, v)| {
-                        if k.len() == 8 {
-                            let guild_id = u64::from_be_bytes(k.try_into().unwrap());
-                            let guild_data = scherzo::db::deser_guild(v);
-
-                            Some((guild_id, guild_data))
-                        } else {
-                            None
-                        }
-                    });
-
-                for (id, data) in guilds {
-                    println!("{}: {:?}", id, data);
-                }
-            }
-            Command::GetGuildInvites(id) => {
-                let invites = deps.chat_tree.get_guild_invites_logic(id);
-                println!("{:#?}", invites.invites)
-            }
-            Command::GetGuildChannels(id) => {
-                let channels = deps.chat_tree.get_guild_channels_logic(id, 0);
-                println!("{:#?}", channels.channels)
-            }
-            Command::GetInvite(id) => {
-                let invite = deps
-                    .chat_tree
-                    .chat_tree
-                    .get(&make_invite_key(id.as_str()))
-                    .map(|v| v.map(scherzo::db::deser_invite));
-                println!("{:#?}", invite);
-            }
-            Command::GetMessage {
-                guild_id,
-                channel_id,
-                message_id,
-            } => {
-                let message = deps
-                    .chat_tree
-                    .get_message_logic(guild_id, channel_id, message_id);
-                println!("{:#?}", message);
-            }
-            Command::GetChannelMessages {
-                guild_id,
-                channel_id,
-                before_message_id,
-            } => {
-                let messages = deps.chat_tree.get_channel_messages_logic(
-                    guild_id,
-                    channel_id,
-                    before_message_id.unwrap_or(0),
-                    None,
-                    None,
-                );
-                for message in messages.messages {
-                    println!("{:?}", message);
-                }
-            }
-            Command::GetGuild(id) => {
-                let guild = deps.chat_tree.get_guild_logic(id);
-                println!("{:#?}", guild);
-            }
-            Command::GetMember(id) => {
-                let member = deps.profile_tree.get_profile_logic(id);
-                println!("{:#?}", member);
-            }
-            Command::GetGuildRoles(id) => {
-                let roles = deps.chat_tree.get_guild_roles_logic(id);
-                println!("{:#?}", roles)
-            }
-            Command::GetGuildMembers(id) => {
-                let members = deps.chat_tree.get_guild_members_logic(id);
-                println!("{:?}", members.members);
-            }
-            Command::ChangeMotd(string) => {
-                let mut guard = shared_config.lock();
-                guard.motd.clear();
-                guard.motd.push_str(&string);
-            }
-            Command::ShowLog(line_num) => {
-                let mut log_file_path = String::from("./logs/log.");
-                ChronoUtc::with_format("%Y-%m-%d-%H".to_string())
-                    .format_time(&mut log_file_path)
-                    .unwrap();
-                match std::fs::read_to_string(&log_file_path) {
-                    Ok(log_file) => {
-                        let mut lines = log_file.lines().collect::<Vec<_>>();
-                        lines.drain(
-                            ..lines
-                                .len()
-                                .saturating_sub(lines.len().min(line_num as usize)),
-                        );
-
-                        for line in lines {
-                            println!("{}", line);
-                        }
-                    }
-                    Err(err) => {
-                        if err.kind() == std::io::ErrorKind::NotFound {
-                            println!("<nothing written yet>");
-                        } else {
-                            println!("log file {} cant be read: {}", log_file_path, err);
-                        }
-                    }
-                }
-            }
-            Command::ClearValidSessions => deps.valid_sessions.clear(),
-            Command::Invalid(x) => println!("invalid cmd: {}", x),
-            Command::GetRolePerms {
-                guild_id,
-                channel_id,
-                role_id,
-            } => {
-                let perms = deps.chat_tree.get_permissions_logic(
-                    guild_id,
-                    channel_id.eq(&0).then(|| None).unwrap_or(Some(channel_id)),
-                    role_id,
-                );
-                println!("{:#?}", perms);
-            }
-            Command::Exit => return true,
-        }
-        false
-    };
-
-    if run_with_console {
-        let mut rl = Editor::<()>::new();
-        let path = std::env::var("HOME")
-            .ok()
-            .map(|h| Path::new(&h).join(".cache/scherzo-shell-history"))
-            .unwrap_or_else(|| Path::new("/tmp/scherzo-shell-history").to_path_buf());
-        if rl.load_history(&path).is_err() && rl.load_history("/tmp/scherzo-shell-history").is_err()
-        {
-            eprintln!("failed to load shell history");
-        }
-        loop {
-            let prompt = format!(
-                "({} streams) ({} valid sessions)> ",
-                deps.chat_event_sender.receiver_count(),
-                deps.valid_sessions.len()
-            );
-            let readline = rl.readline(&prompt);
-            match readline {
-                Ok(line) => {
-                    let command = process_cmd(&line);
-                    let do_exit = handle_cmd(command);
-                    if do_exit {
-                        break;
-                    }
-                    rl.add_history_entry(line);
-                }
-                // We don't want to accidentally shut down the whole server
-                Err(ReadlineError::Interrupted | ReadlineError::Eof) => {}
-                Err(err) => {
-                    println!("Error: {:?}", err);
-                    break;
-                }
-            }
-        }
-    } else {
-        spawn_handle.await.unwrap();
-    }
+    spawn_handle.await.unwrap();
 }
 
 use tokio::fs;

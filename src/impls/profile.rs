@@ -113,25 +113,13 @@ impl ProfileService for ProfileServer {
             new_is_bot,
         } = request.into_parts().0.into_message().await??;
 
-        let key = make_user_profile_key(user_id);
-
-        let mut profile = profile_get!(key).map_or_else(Profile::default, db::deser_profile);
-
-        if let Some(new_username) = new_user_name.clone() {
-            profile.user_name = new_username;
-        }
-        if let Some(new_avatar) = new_user_avatar.clone() {
-            profile.user_avatar = new_avatar;
-        }
-        if let Some(new_status) = new_user_status {
-            profile.user_status = new_status;
-        }
-        if let Some(new_is_bot) = new_is_bot {
-            profile.is_bot = new_is_bot;
-        }
-
-        let buf = rkyv_ser(&profile);
-        profile_insert!(key / buf);
+        self.profile_tree.update_profile_logic(
+            user_id,
+            new_user_name.clone(),
+            new_user_avatar.clone(),
+            new_user_status,
+            new_is_bot,
+        );
 
         self.send_event_through_chan(
             EventSub::Homeserver,
@@ -161,10 +149,39 @@ impl ProfileTree {
         Ok(Self { inner })
     }
 
+    pub fn update_profile_logic(
+        &self,
+        user_id: u64,
+        new_user_name: Option<String>,
+        new_user_avatar: Option<String>,
+        new_user_status: Option<i32>,
+        new_is_bot: Option<bool>,
+    ) {
+        let key = make_user_profile_key(user_id);
+
+        let mut profile = pprofile_get!(key).map_or_else(Profile::default, db::deser_profile);
+
+        if let Some(new_username) = new_user_name {
+            profile.user_name = new_username;
+        }
+        if let Some(new_avatar) = new_user_avatar {
+            profile.user_avatar = new_avatar;
+        }
+        if let Some(new_status) = new_user_status {
+            profile.user_status = new_status;
+        }
+        if let Some(new_is_bot) = new_is_bot {
+            profile.is_bot = new_is_bot;
+        }
+
+        let buf = rkyv_ser(&profile);
+        pprofile_insert!(key / buf);
+    }
+
     pub fn get_profile_logic(&self, user_id: u64) -> Result<Profile, ServerError> {
         let key = make_user_profile_key(user_id);
 
-        let profile = if let Some(profile_raw) = self.inner.get(&key).unwrap() {
+        let profile = if let Some(profile_raw) = pprofile_get!(key) {
             db::deser_profile(profile_raw)
         } else {
             return Err(ServerError::NoSuchUser(user_id));

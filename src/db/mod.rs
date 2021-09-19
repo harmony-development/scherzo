@@ -146,6 +146,7 @@ pub mod chat {
     use super::concat_static;
 
     pub const INVITE_PREFIX: &[u8] = b"invite_";
+    pub const ADMIN_GUILD_KEY: &[u8] = b"admin_guild_key_data";
 
     // perms
 

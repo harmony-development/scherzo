@@ -1,5 +1,10 @@
 use std::{
-    collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::PathBuf,
+    collections::HashSet,
+    convert::TryInto,
+    io::BufReader,
+    mem::size_of,
+    ops::Not,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -14,7 +19,7 @@ use harmony_rust_sdk::api::{
         warp::reply::Response,
         Request,
     },
-    harmonytypes::{ItemPosition, Metadata},
+    harmonytypes::{Empty, FormattedText, ItemPosition, Metadata},
     rest::FileId,
     sync::{
         event::{
@@ -354,23 +359,8 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "invites.manage.create", false)?;
 
-        let key = make_invite_key(name.as_str());
-
-        if name.is_empty() {
-            return Err(ServerError::InviteNameEmpty.into());
-        }
-
-        if chat_get!(key).is_some() {
-            return Err(ServerError::InviteExists(name).into());
-        }
-
-        let invite = Invite {
-            possible_uses,
-            use_count: 0,
-        };
-        let buf = rkyv_ser(&invite);
-
-        chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
+        self.chat_tree
+            .create_invite_logic(guild_id, name.as_str(), possible_uses)?;
 
         Ok(CreateInviteResponse { invite_id: name })
     }
@@ -1170,253 +1160,26 @@ impl chat_service_server::ChatService for ChatServer {
     ) -> Result<SendMessageResponse, HrpcServerError<Self::Error>> {
         auth!();
 
-        let SendMessageRequest {
-            guild_id,
-            channel_id,
-            content,
-            in_reply_to,
-            overrides,
-            echo_id,
-            metadata,
-        } = request.into_parts().0.into_message().await??;
+        let mut request = request.into_parts().0.into_message().await??;
+        let guild_id = request.guild_id;
+        let channel_id = request.channel_id;
+        let echo_id = request.echo_id;
 
         self.chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)?;
         self.chat_tree
             .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
 
-        let msg_prefix = make_msg_prefix(guild_id, channel_id);
-        let message_id = self
+        let content = self
             .chat_tree
-            .chat_tree
-            .scan_prefix(&msg_prefix)
-            .last()
-            // Ensure that the first message ID is always 1!
-            .map_or(1, |res| {
-                // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
-                u64::from_be_bytes(unsafe {
-                    res.unwrap()
-                        .0
-                        .split_at(msg_prefix.len())
-                        .1
-                        .try_into()
-                        .unwrap_unchecked()
-                }) + 1
-            });
-        let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
-
-        let created_at = get_time_secs();
-        let edited_at = None;
-
-        let inner_content = content.and_then(|c| c.content);
-        let content = if let Some(content) = inner_content {
-            let content = match content {
-                content::Content::TextMessage(text) => {
-                    if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
-                        return Err(ServerError::MessageContentCantBeEmpty.into());
-                    }
-                    content::Content::TextMessage(text)
-                }
-                content::Content::PhotoMessage(mut photos) => {
-                    if photos.photos.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty.into());
-                    }
-                    for photo in photos.photos.drain(..).collect::<Vec<_>>() {
-                        // TODO: return error for invalid hmc
-                        if let Ok(hmc) = Hmc::from_str(&photo.hmc) {
-                            const FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
-
-                            // TODO: check if the hmc host matches ours, if not fetch the image from the other host
-                            let id = hmc.id();
-
-                            let image_jpeg_id = format!("{}_{}", id, "jpeg");
-                            let image_jpeg_path = self.media_root.join(&image_jpeg_id);
-                            let minithumbnail_jpeg_id = format!("{}_{}", id, "jpegthumb");
-                            let minithumbnail_jpeg_path =
-                                self.media_root.join(&minithumbnail_jpeg_id);
-
-                            let ((file_size, isize), minithumbnail) = if image_jpeg_path.exists()
-                                && minithumbnail_jpeg_path.exists()
-                            {
-                                let minifile = BufReader::new(
-                                    tokio::fs::File::open(&minithumbnail_jpeg_path)
-                                        .await
-                                        .map_err(ServerError::from)?
-                                        .into_std()
-                                        .await,
-                                );
-                                let mut minireader = image::io::Reader::new(minifile);
-                                minireader.set_format(FORMAT);
-                                let minisize = minireader
-                                    .into_dimensions()
-                                    .map_err(|_| ServerError::InternalServerError)?;
-                                let minithumbnail_jpeg = tokio::fs::read(&minithumbnail_jpeg_path)
-                                    .await
-                                    .map_err(ServerError::from)?;
-
-                                let ifile = tokio::fs::File::open(&image_jpeg_path)
-                                    .await
-                                    .map_err(ServerError::from)?;
-                                let file_size =
-                                    ifile.metadata().await.map_err(ServerError::from)?.len();
-                                let ifile = BufReader::new(ifile.into_std().await);
-                                let mut ireader = image::io::Reader::new(ifile);
-                                ireader.set_format(FORMAT);
-                                let isize = ireader
-                                    .into_dimensions()
-                                    .map_err(|_| ServerError::InternalServerError)?;
-
-                                (
-                                    (file_size as u32, isize),
-                                    Minithumbnail {
-                                        width: minisize.0,
-                                        height: minisize.1,
-                                        data: minithumbnail_jpeg,
-                                    },
-                                )
-                            } else {
-                                let (_, _, data, _) =
-                                    get_file_full(self.media_root.as_path(), id).await?;
-
-                                if image::guess_format(&data).is_err() {
-                                    return Err(ServerError::NotAnImage.into());
-                                }
-
-                                let image = image::load_from_memory(&data)
-                                    .map_err(|_| ServerError::InternalServerError)?;
-                                let image_size = image.dimensions();
-                                let mut image_jpeg = Vec::new();
-                                image
-                                    .write_to(&mut image_jpeg, FORMAT)
-                                    .map_err(|_| ServerError::InternalServerError)?;
-                                let file_size = image_jpeg.len();
-                                tokio::fs::write(&image_jpeg_path, image_jpeg)
-                                    .await
-                                    .map_err(ServerError::from)?;
-
-                                let minithumbnail = image.thumbnail(64, 64);
-                                let minithumb_size = minithumbnail.dimensions();
-                                let mut minithumbnail_jpeg = Vec::new();
-                                minithumbnail
-                                    .write_to(&mut minithumbnail_jpeg, FORMAT)
-                                    .map_err(|_| ServerError::InternalServerError)?;
-                                tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
-                                    .await
-                                    .map_err(ServerError::from)?;
-
-                                (
-                                    (file_size as u32, image_size),
-                                    Minithumbnail {
-                                        width: minithumb_size.0,
-                                        height: minithumb_size.1,
-                                        data: minithumbnail_jpeg,
-                                    },
-                                )
-                            };
-
-                            photos.photos.push(Photo {
-                                hmc: Hmc::new(&self.host, image_jpeg_id).unwrap().into(),
-                                minithumbnail: Some(minithumbnail),
-                                width: isize.0,
-                                height: isize.1,
-                                file_size: file_size as u32,
-                                ..photo
-                            });
-                        } else {
-                            photos.photos.push(photo);
-                        }
-                    }
-                    content::Content::PhotoMessage(photos)
-                }
-                content::Content::AttachmentMessage(mut files) => {
-                    if files.files.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty.into());
-                    }
-                    for attachment in files.files.drain(..).collect::<Vec<_>>() {
-                        if let Ok(id) = FileId::from_str(&attachment.id) {
-                            let media_root = self.media_root.as_path();
-                            let fill_file_local = move |attachment: Attachment, id: String| async move {
-                                let is_jpeg = is_id_jpeg(&id);
-                                let (mut file, metadata) = get_file_handle(media_root, &id).await?;
-                                let (filename_raw, mimetype_raw, _) =
-                                    read_bufs(&mut file, is_jpeg).await?;
-                                let (start, end) = calculate_range(
-                                    &filename_raw,
-                                    &mimetype_raw,
-                                    &metadata,
-                                    is_jpeg,
-                                );
-                                let size = end - start;
-
-                                Result::<_, ServerError>::Ok(Attachment {
-                                    name: attachment
-                                        .name
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(filename_raw)
-                                        })
-                                        .unwrap_or(attachment.name),
-                                    size: attachment
-                                        .size
-                                        .eq(&0)
-                                        .then(|| size as u32)
-                                        .unwrap_or(attachment.size),
-                                    mimetype: attachment
-                                        .mimetype
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(mimetype_raw)
-                                        })
-                                        .unwrap_or(attachment.mimetype),
-                                    ..attachment
-                                })
-                            };
-                            match id {
-                                FileId::Hmc(hmc) => {
-                                    // TODO: fetch file from remote host if its not local
-                                    let id = hmc.id();
-                                    files
-                                        .files
-                                        .push(fill_file_local(attachment, id.to_string()).await?);
-                                }
-                                FileId::Id(id) => {
-                                    files.files.push(fill_file_local(attachment, id).await?)
-                                }
-                                _ => files.files.push(attachment),
-                            }
-                        } else {
-                            files.files.push(attachment);
-                        }
-                    }
-                    content::Content::AttachmentMessage(files)
-                }
-                content::Content::EmbedMessage(embed) => {
-                    if embed.embed.is_none() {
-                        return Err(ServerError::MessageContentCantBeEmpty.into());
-                    }
-                    content::Content::EmbedMessage(embed)
-                }
-            };
-            Some(Content {
-                content: Some(content),
-            })
-        } else {
-            return Err(ServerError::MessageContentCantBeEmpty.into());
-        };
-
-        let message = HarmonyMessage {
-            metadata,
-            author_id: user_id,
-            created_at,
-            edited_at,
-            content,
-            in_reply_to,
-            overrides,
-            reactions: Vec::new(),
-        };
-
-        let value = db::rkyv_ser(&message);
-        chat_insert!(key / value);
+            .process_message_content(
+                request.content.take(),
+                self.media_root.as_path(),
+                &self.host,
+            )
+            .await?;
+        request.content = Some(content);
+        let (message_id, message) = self.chat_tree.send_message_logic(user_id, request);
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -2762,7 +2525,9 @@ impl ChatTree {
         let buf = rkyv_ser(&guild);
 
         cchat_insert!(guild_id.to_be_bytes() / buf);
-        cchat_insert!(make_member_key(guild_id, user_id) / []);
+        if user_id != 0 {
+            cchat_insert!(make_member_key(guild_id, user_id) / []);
+        }
 
         // Some basic default setup
         let everyone_role_id = self.add_guild_role_logic(
@@ -2775,7 +2540,9 @@ impl ChatTree {
         )?;
         // [tag:default_role_store]
         cchat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
-        self.add_default_role_to(guild_id, user_id)?;
+        if user_id != 0 {
+            self.add_default_role_to(guild_id, user_id)?;
+        }
         let def_perms = [
             "messages.send",
             "messages.view",
@@ -2795,6 +2562,33 @@ impl ChatTree {
         self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms);
 
         Ok(guild_id)
+    }
+
+    pub fn create_invite_logic(
+        &self,
+        guild_id: u64,
+        name: &str,
+        possible_uses: u32,
+    ) -> Result<(), ServerError> {
+        let key = make_invite_key(name);
+
+        if name.is_empty() {
+            return Err(ServerError::InviteNameEmpty);
+        }
+
+        if cchat_get!(key).is_some() {
+            return Err(ServerError::InviteExists(name.to_string()));
+        }
+
+        let invite = Invite {
+            possible_uses,
+            use_count: 0,
+        };
+        let buf = rkyv_ser(&invite);
+
+        cchat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
+
+        Ok(())
     }
 
     /// Calculates all users which can "see" the given user
@@ -2911,5 +2705,412 @@ impl ChatTree {
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .is_ok(),
         })
+    }
+
+    pub fn get_next_message_id(&self, guild_id: u64, channel_id: u64) -> u64 {
+        let msg_prefix = make_msg_prefix(guild_id, channel_id);
+        self.chat_tree
+            .scan_prefix(&msg_prefix)
+            .last()
+            // Ensure that the first message ID is always 1!
+            .map_or(1, |res| {
+                // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
+                u64::from_be_bytes(unsafe {
+                    res.unwrap()
+                        .0
+                        .split_at(msg_prefix.len())
+                        .1
+                        .try_into()
+                        .unwrap_unchecked()
+                }) + 1
+            })
+    }
+
+    pub fn send_message_logic(
+        &self,
+        user_id: u64,
+        request: SendMessageRequest,
+    ) -> (u64, HarmonyMessage) {
+        let SendMessageRequest {
+            guild_id,
+            channel_id,
+            content,
+            echo_id: _,
+            overrides,
+            in_reply_to,
+            metadata,
+        } = request;
+
+        let message_id = self.get_next_message_id(guild_id, channel_id);
+        let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
+
+        let created_at = get_time_secs();
+        let edited_at = None;
+
+        let message = HarmonyMessage {
+            metadata,
+            author_id: user_id,
+            created_at,
+            edited_at,
+            content,
+            in_reply_to,
+            overrides,
+            reactions: Vec::new(),
+        };
+
+        let value = db::rkyv_ser(&message);
+        cchat_insert!(key / value);
+
+        (message_id, message)
+    }
+
+    pub async fn process_message_content(
+        &self,
+        content: Option<Content>,
+        media_root: &Path,
+        host: &str,
+    ) -> Result<Content, ServerError> {
+        let inner_content = content.and_then(|c| c.content);
+        let content = if let Some(content) = inner_content {
+            let content = match content {
+                content::Content::TextMessage(text) => {
+                    if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    content::Content::TextMessage(text)
+                }
+                content::Content::PhotoMessage(mut photos) => {
+                    if photos.photos.is_empty() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    for photo in photos.photos.drain(..).collect::<Vec<_>>() {
+                        // TODO: return error for invalid hmc
+                        if let Ok(hmc) = Hmc::from_str(&photo.hmc) {
+                            const FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
+
+                            // TODO: check if the hmc host matches ours, if not fetch the image from the other host
+                            let id = hmc.id();
+
+                            let image_jpeg_id = format!("{}_{}", id, "jpeg");
+                            let image_jpeg_path = media_root.join(&image_jpeg_id);
+                            let minithumbnail_jpeg_id = format!("{}_{}", id, "jpegthumb");
+                            let minithumbnail_jpeg_path = media_root.join(&minithumbnail_jpeg_id);
+
+                            let ((file_size, isize), minithumbnail) = if image_jpeg_path.exists()
+                                && minithumbnail_jpeg_path.exists()
+                            {
+                                let minifile = BufReader::new(
+                                    tokio::fs::File::open(&minithumbnail_jpeg_path)
+                                        .await
+                                        .map_err(ServerError::from)?
+                                        .into_std()
+                                        .await,
+                                );
+                                let mut minireader = image::io::Reader::new(minifile);
+                                minireader.set_format(FORMAT);
+                                let minisize = minireader
+                                    .into_dimensions()
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let minithumbnail_jpeg = tokio::fs::read(&minithumbnail_jpeg_path)
+                                    .await
+                                    .map_err(ServerError::from)?;
+
+                                let ifile = tokio::fs::File::open(&image_jpeg_path)
+                                    .await
+                                    .map_err(ServerError::from)?;
+                                let file_size =
+                                    ifile.metadata().await.map_err(ServerError::from)?.len();
+                                let ifile = BufReader::new(ifile.into_std().await);
+                                let mut ireader = image::io::Reader::new(ifile);
+                                ireader.set_format(FORMAT);
+                                let isize = ireader
+                                    .into_dimensions()
+                                    .map_err(|_| ServerError::InternalServerError)?;
+
+                                (
+                                    (file_size as u32, isize),
+                                    Minithumbnail {
+                                        width: minisize.0,
+                                        height: minisize.1,
+                                        data: minithumbnail_jpeg,
+                                    },
+                                )
+                            } else {
+                                let (_, _, data, _) = get_file_full(media_root, id).await?;
+
+                                if image::guess_format(&data).is_err() {
+                                    return Err(ServerError::NotAnImage);
+                                }
+
+                                let image = image::load_from_memory(&data)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let image_size = image.dimensions();
+                                let mut image_jpeg = Vec::new();
+                                image
+                                    .write_to(&mut image_jpeg, FORMAT)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let file_size = image_jpeg.len();
+                                tokio::fs::write(&image_jpeg_path, image_jpeg)
+                                    .await
+                                    .map_err(ServerError::from)?;
+
+                                let minithumbnail = image.thumbnail(64, 64);
+                                let minithumb_size = minithumbnail.dimensions();
+                                let mut minithumbnail_jpeg = Vec::new();
+                                minithumbnail
+                                    .write_to(&mut minithumbnail_jpeg, FORMAT)
+                                    .map_err(|_| ServerError::InternalServerError)?;
+                                tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
+                                    .await
+                                    .map_err(ServerError::from)?;
+
+                                (
+                                    (file_size as u32, image_size),
+                                    Minithumbnail {
+                                        width: minithumb_size.0,
+                                        height: minithumb_size.1,
+                                        data: minithumbnail_jpeg,
+                                    },
+                                )
+                            };
+
+                            photos.photos.push(Photo {
+                                hmc: Hmc::new(host, image_jpeg_id).unwrap().into(),
+                                minithumbnail: Some(minithumbnail),
+                                width: isize.0,
+                                height: isize.1,
+                                file_size,
+                                ..photo
+                            });
+                        } else {
+                            photos.photos.push(photo);
+                        }
+                    }
+                    content::Content::PhotoMessage(photos)
+                }
+                content::Content::AttachmentMessage(mut files) => {
+                    if files.files.is_empty() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    for attachment in files.files.drain(..).collect::<Vec<_>>() {
+                        if let Ok(id) = FileId::from_str(&attachment.id) {
+                            let fill_file_local = move |attachment: Attachment, id: String| async move {
+                                let is_jpeg = is_id_jpeg(&id);
+                                let (mut file, metadata) = get_file_handle(media_root, &id).await?;
+                                let (filename_raw, mimetype_raw, _) =
+                                    read_bufs(&mut file, is_jpeg).await?;
+                                let (start, end) = calculate_range(
+                                    &filename_raw,
+                                    &mimetype_raw,
+                                    &metadata,
+                                    is_jpeg,
+                                );
+                                let size = end - start;
+
+                                Result::<_, ServerError>::Ok(Attachment {
+                                    name: attachment
+                                        .name
+                                        .is_empty()
+                                        .then(|| unsafe {
+                                            String::from_utf8_unchecked(filename_raw)
+                                        })
+                                        .unwrap_or(attachment.name),
+                                    size: attachment
+                                        .size
+                                        .eq(&0)
+                                        .then(|| size as u32)
+                                        .unwrap_or(attachment.size),
+                                    mimetype: attachment
+                                        .mimetype
+                                        .is_empty()
+                                        .then(|| unsafe {
+                                            String::from_utf8_unchecked(mimetype_raw)
+                                        })
+                                        .unwrap_or(attachment.mimetype),
+                                    ..attachment
+                                })
+                            };
+                            match id {
+                                FileId::Hmc(hmc) => {
+                                    // TODO: fetch file from remote host if its not local
+                                    let id = hmc.id();
+                                    files
+                                        .files
+                                        .push(fill_file_local(attachment, id.to_string()).await?);
+                                }
+                                FileId::Id(id) => {
+                                    files.files.push(fill_file_local(attachment, id).await?)
+                                }
+                                _ => files.files.push(attachment),
+                            }
+                        } else {
+                            files.files.push(attachment);
+                        }
+                    }
+                    content::Content::AttachmentMessage(files)
+                }
+                content::Content::EmbedMessage(embed) => {
+                    if embed.embed.is_none() {
+                        return Err(ServerError::MessageContentCantBeEmpty);
+                    }
+                    content::Content::EmbedMessage(embed)
+                }
+            };
+            Content {
+                content: Some(content),
+            }
+        } else {
+            return Err(ServerError::MessageContentCantBeEmpty);
+        };
+
+        Ok(content)
+    }
+
+    pub fn get_admin_guild_keys(&self) -> Option<(u64, u64, u64)> {
+        cchat_get!(ADMIN_GUILD_KEY).map(|raw| {
+            let (gid_raw, rest) = raw.split_at(size_of::<u64>());
+            let guild_id = unsafe { u64::from_be_bytes(gid_raw.try_into().unwrap_unchecked()) };
+            let (log_raw, cmd_raw) = rest.split_at(size_of::<u64>());
+            let log_id = unsafe { u64::from_be_bytes(log_raw.try_into().unwrap_unchecked()) };
+            let cmd_id = unsafe { u64::from_be_bytes(cmd_raw.try_into().unwrap_unchecked()) };
+            (guild_id, log_id, cmd_id)
+        })
+    }
+
+    pub fn set_admin_guild_keys(&self, guild_id: u64, log_id: u64, cmd_id: u64) {
+        let value = [
+            guild_id.to_be_bytes(),
+            log_id.to_be_bytes(),
+            cmd_id.to_be_bytes(),
+        ]
+        .concat();
+        cchat_insert!(ADMIN_GUILD_KEY / value);
+    }
+}
+
+use std::fmt::{self, Debug};
+use tracing::Subscriber;
+use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, FormattedFields};
+use tracing_subscriber::registry::LookupSpan;
+
+pub struct AdminLogChannelLogger {
+    inner: Option<(ChatTree, EventSender)>,
+}
+
+impl AdminLogChannelLogger {
+    pub fn new(deps: &Dependencies) -> Self {
+        Self {
+            inner: Some((deps.chat_tree.clone(), deps.chat_event_sender.clone())),
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self { inner: None }
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for AdminLogChannelLogger
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        _writer: &mut dyn fmt::Write,
+        event: &tracing::Event<'_>,
+    ) -> fmt::Result {
+        use tracing::Level;
+
+        let metadata = event.metadata();
+        if Level::TRACE.eq(metadata.level()) {
+            return Ok(());
+        }
+
+        if let Some((chat_tree, chat_event_sender)) = &self.inner {
+            if let Some((guild_id, channel_id, _)) = chat_tree.get_admin_guild_keys() {
+                let color = match *metadata.level() {
+                    Level::DEBUG => Some(color::encode_rgb([0, 0, 220])),
+                    Level::INFO => Some(color::encode_rgb([0, 220, 0])),
+                    Level::WARN => Some(color::encode_rgb([220, 220, 0])),
+                    Level::ERROR => Some(color::encode_rgb([220, 0, 0])),
+                    _ => None,
+                };
+
+                let mut embed_fields = Vec::new();
+                ctx.visit_spans(|span| {
+                    let ext = span.extensions();
+                    let fields = ext.get::<FormattedFields<N>>().unwrap();
+                    if !fields.is_empty() {
+                        let split = fields.split(' ').collect::<Vec<_>>();
+                        let split_len = split.len();
+                        let fields = split.into_iter().enumerate().fold(
+                            String::new(),
+                            |mut tot, (index, item)| {
+                                tot.push_str(item);
+                                if index + 1 != split_len {
+                                    tot.push('\n');
+                                }
+                                tot
+                            },
+                        );
+                        embed_fields.push(embed::EmbedField {
+                            title: format!("{}:", span.name()),
+                            body: Some(FormattedText::new(fields, Vec::new())),
+                            ..Default::default()
+                        });
+                    }
+                    Ok(())
+                })?;
+
+                let mut body_text = String::new();
+
+                ctx.field_format().format_fields(&mut body_text, event)?;
+
+                let content = Content {
+                    content: Some(content::Content::EmbedMessage(content::EmbedContent {
+                        embed: Some(Box::new(Embed {
+                            title: format!("{} {}:", metadata.level(), metadata.target()),
+                            body: Some(FormattedText::new(body_text, Vec::new())),
+                            fields: embed_fields,
+                            color,
+                            ..Default::default()
+                        })),
+                    })),
+                };
+                let request = SendMessageRequest::default()
+                    .with_guild_id(guild_id)
+                    .with_channel_id(channel_id)
+                    .with_content(content)
+                    .with_overrides(Override {
+                        username: Some("System".to_string()),
+                        reason: Some(r#override::Reason::SystemMessage(Empty {})),
+                        avatar: None,
+                    });
+                let (message_id, message) = chat_tree.send_message_logic(0, request);
+
+                let _ = chat_event_sender.send(Arc::new(EventBroadcast::new(
+                    EventSub::Guild(guild_id),
+                    Event::Chat(stream_event::Event::SentMessage(Box::new(
+                        stream_event::MessageSent {
+                            echo_id: None,
+                            guild_id,
+                            channel_id,
+                            message_id,
+                            message: Some(message),
+                        },
+                    ))),
+                    Some(PermCheck::new(
+                        guild_id,
+                        Some(channel_id),
+                        "messages.view",
+                        false,
+                    )),
+                    EventContext::empty(),
+                )));
+            }
+        }
+
+        Ok(())
     }
 }

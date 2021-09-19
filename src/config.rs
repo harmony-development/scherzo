@@ -58,21 +58,12 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Default, Debug, Clone, Deserialize, Serialize)]
 pub struct PolicyConfig {
     #[serde(default)]
     pub disable_ratelimits: bool,
     #[serde(default)]
     pub disable_registration: bool,
-}
-
-impl Default for PolicyConfig {
-    fn default() -> Self {
-        Self {
-            disable_ratelimits: false,
-            disable_registration: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
