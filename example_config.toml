@@ -6,8 +6,15 @@ listen_on_localhost = true
 # The port to listen on.
 port = 2289
 
+[policy]
 # Whether to disable ratelimits or not (useful when testing / benching).
 disable_ratelimits = false
+# Whether to disable registration (by email / password).
+disable_registration = false
+
+[db]
+# Path to a directory to put db backups in.
+db_backup_path = "."
 # Database in-memory cache limit in bytes.
 db_cache_limit = 1073741824
 # (sled only) whether to increase throughput at the cost of more storage usage.

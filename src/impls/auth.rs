@@ -161,7 +161,7 @@ impl AuthServer {
             profile_tree: deps.profile_tree.clone(),
             keys_manager: deps.key_manager.clone(),
             federation_config: deps.config.federation.clone(),
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
     }
 

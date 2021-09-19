@@ -68,7 +68,7 @@ impl SyncServer {
             keys_manager: deps.key_manager.clone(),
             federation_config: deps.config.federation.clone(),
             host: deps.config.host.clone(),
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
         };
         let sync2 = sync.clone();
         let clients = Clients(DashMap::default());

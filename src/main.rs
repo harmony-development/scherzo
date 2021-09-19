@@ -21,6 +21,7 @@ use harmony_rust_sdk::api::{
 use hrpc::warp;
 use rustyline::{error::ReadlineError, Editor};
 use scherzo::{
+    config::DbConfig,
     db::{
         chat::{make_invite_key, INVITE_PREFIX},
         migration::{apply_migrations, get_db_version},
@@ -202,8 +203,7 @@ clear_sessions -> clears all valid sessions from memory (not from DB)
 #[cfg(feature = "sled")]
 fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
     db_path: P,
-    db_cache_limit: u64,
-    sled_throughput_at_storage_cost: bool,
+    db_config: DbConfig,
 ) -> Box<dyn Db> {
     let span = info_span!("db", path = %db_path);
     let db = span.in_scope(|| {
@@ -212,9 +212,10 @@ fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
         let db_result = sled::Config::new()
             .use_compression(true)
             .path(db_path)
-            .cache_capacity(db_cache_limit)
+            .cache_capacity(db_config.db_cache_limit)
             .mode(
-                sled_throughput_at_storage_cost
+                db_config
+                    .sled_throughput_at_storage_cost
                     .then(|| sled::Mode::HighThroughput)
                     .unwrap_or(sled::Mode::LowSpace),
             )
@@ -235,11 +236,10 @@ fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
 
 fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
     _db_path: P,
-    _db_cache_limit: u64,
-    _sled_throughput_at_storage_cost: bool,
+    _db_config: DbConfig,
 ) -> Box<dyn Db> {
     #[cfg(feature = "sled")]
-    return open_sled(_db_path, _db_cache_limit, _sled_throughput_at_storage_cost);
+    return open_sled(_db_path, _db_config);
     #[cfg(not(any(feature = "sled")))]
     return Box::new(scherzo::db::noop::NoopDb);
 }
@@ -303,21 +303,17 @@ pub async fn run(filter_level: Level, db_path: String, run_with_console: bool) {
     tokio::fs::create_dir_all(&config.media.media_root)
         .await
         .expect("could not create media root dir");
-    if config.disable_ratelimits {
+    if config.policy.disable_ratelimits {
         warn!("rate limits are disabled, please take care!");
     }
 
-    let db = open_db(
-        &db_path,
-        config.db_cache_limit,
-        config.sled_throughput_at_storage_cost,
-    );
+    let db = open_db(&db_path, config.db.clone());
     let (current_db_version, needs_migration) = get_db_version(db.as_ref())
         .expect("something went wrong while checking if the db needs migrations!!!");
     if needs_migration {
         // Backup db before attempting to apply migrations
         let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
-        let db_backup_path = config.db_backup_path.as_ref().map_or_else(
+        let db_backup_path = config.db.db_backup_path.as_ref().map_or_else(
             || Path::new(&db_backup_name).to_path_buf(),
             |path| path.join(&db_backup_name),
         );

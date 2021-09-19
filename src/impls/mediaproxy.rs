@@ -67,7 +67,7 @@ impl MediaproxyServer {
         Self {
             http: Client::new(),
             valid_sessions: deps.valid_sessions.clone(),
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
     }
 

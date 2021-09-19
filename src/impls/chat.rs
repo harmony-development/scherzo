@@ -144,7 +144,7 @@ impl ChatServer {
             profile_tree: deps.profile_tree.clone(),
             broadcast_send: deps.chat_event_sender.clone(),
             dispatch_tx: deps.fed_event_dispatcher.clone(),
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
     }
 

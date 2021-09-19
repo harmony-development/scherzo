@@ -40,7 +40,7 @@ impl EmoteServer {
             emote_tree: deps.emote_tree.clone(),
             valid_sessions: deps.valid_sessions.clone(),
             broadcast_send: deps.chat_event_sender.clone(),
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
     }
 

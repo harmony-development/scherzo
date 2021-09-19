@@ -34,7 +34,7 @@ pub struct BatchServer<R: Reply + 'static> {
 impl<R: Reply + 'static> BatchServer<R> {
     pub fn new(deps: &Dependencies, filters: BoxedFilter<(R,)>) -> Self {
         Self {
-            disable_ratelimits: deps.config.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.disable_ratelimits,
             filters: Arc::new(filters),
         }
     }

@@ -52,13 +52,13 @@ pub fn rest(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
     download(
         Arc::new(media_conf.media_root.clone()),
         deps.config.host.clone(),
-        deps.config.disable_ratelimits,
+        deps.config.policy.disable_ratelimits,
     )
     .or(upload(
         deps.valid_sessions.clone(),
         Arc::new(media_conf.media_root.clone()),
         media_conf.max_upload_length,
-        deps.config.disable_ratelimits,
+        deps.config.policy.disable_ratelimits,
     ))
     .boxed()
 }

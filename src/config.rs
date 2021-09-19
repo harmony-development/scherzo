@@ -28,16 +28,12 @@ pub struct Config {
     pub server_description: String,
     #[serde(default = "listen_on_localhost_default")]
     pub listen_on_localhost: bool,
-    #[serde(default)]
-    pub disable_ratelimits: bool,
     #[serde(default = "port_default")]
     pub port: u16,
-    #[serde(default = "db_cache_limit_default")]
-    pub db_cache_limit: u64,
     #[serde(default)]
-    pub db_backup_path: Option<PathBuf>,
+    pub policy: PolicyConfig,
     #[serde(default)]
-    pub sled_throughput_at_storage_cost: bool,
+    pub db: DbConfig,
     #[serde(default)]
     pub media: MediaConfig,
     #[serde(default)]
@@ -51,15 +47,50 @@ impl Default for Config {
         Self {
             host: String::new(),
             server_description: String::new(),
-            disable_ratelimits: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
-            db_cache_limit: db_cache_limit_default(),
-            db_backup_path: None,
-            sled_throughput_at_storage_cost: false,
+            policy: PolicyConfig::default(),
+            db: DbConfig::default(),
             media: MediaConfig::default(),
             tls: None,
             federation: federation_config_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PolicyConfig {
+    #[serde(default)]
+    pub disable_ratelimits: bool,
+    #[serde(default)]
+    pub disable_registration: bool,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            disable_ratelimits: false,
+            disable_registration: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DbConfig {
+    #[serde(default = "db_cache_limit_default")]
+    pub db_cache_limit: u64,
+    #[serde(default)]
+    pub db_backup_path: Option<PathBuf>,
+    #[serde(default)]
+    pub sled_throughput_at_storage_cost: bool,
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            db_cache_limit: db_cache_limit_default(),
+            db_backup_path: None,
+            sled_throughput_at_storage_cost: false,
         }
     }
 }
