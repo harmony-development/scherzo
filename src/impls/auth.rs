@@ -21,7 +21,7 @@ use tokio::sync::mpsc::{self, Sender};
 use triomphe::Arc;
 
 use crate::{
-    config::FederationConfig,
+    config::{FederationConfig, PolicyConfig},
     key::{self, Manager as KeyManager},
 };
 
@@ -81,6 +81,7 @@ pub struct AuthServer {
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
     federation_config: Option<FederationConfig>,
+    policy_config: PolicyConfig,
     disable_ratelimits: bool,
 }
 
@@ -161,6 +162,7 @@ impl AuthServer {
             profile_tree: deps.profile_tree.clone(),
             keys_manager: deps.key_manager.clone(),
             federation_config: deps.config.federation.clone(),
+            policy_config: deps.config.policy.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
     }
@@ -416,7 +418,7 @@ impl auth_service_server::AuthService for AuthServer {
             fallback_url: String::default(),
             step: Some(auth_step::Step::Choice(auth_step::Choice {
                 title: "initial".to_string(),
-                options: ["login", "register"]
+                options: ["login", "register", "register-with-token"]
                     .iter()
                     .map(ToString::to_string)
                     .collect(),
@@ -474,53 +476,57 @@ impl auth_service_server::AuthService for AuthServer {
                             current_step
                         {
                             if options.contains(&choice) {
-                                match choice.as_str() {
-                                    "login" => {
-                                        next_step = AuthStep {
-                                            can_go_back: true,
-                                            fallback_url: String::default(),
-                                            step: Some(auth_step::Step::Form(auth_step::Form {
-                                                title: "login".to_string(),
-                                                fields: vec![
-                                                    auth_step::form::FormField {
-                                                        name: "email".to_string(),
-                                                        r#type: "email".to_string(),
-                                                    },
-                                                    auth_step::form::FormField {
-                                                        name: "password".to_string(),
-                                                        r#type: "password".to_string(),
-                                                    },
-                                                ],
-                                            })),
-                                        };
-                                        step_stack.push(next_step.clone());
-                                    }
+                                next_step = match choice.as_str() {
+                                    "login" => AuthStep {
+                                        can_go_back: true,
+                                        fallback_url: String::default(),
+                                        step: Some(auth_step::Step::Form(auth_step::Form {
+                                            title: "login".to_string(),
+                                            fields: vec![
+                                                auth_step::form::FormField {
+                                                    name: "email".to_string(),
+                                                    r#type: "email".to_string(),
+                                                },
+                                                auth_step::form::FormField {
+                                                    name: "password".to_string(),
+                                                    r#type: "password".to_string(),
+                                                },
+                                            ],
+                                        })),
+                                    },
                                     "register" => {
-                                        next_step = AuthStep {
+                                        let mut fields = vec![
+                                            auth_step::form::FormField {
+                                                name: "username".to_string(),
+                                                r#type: "text".to_string(),
+                                            },
+                                            auth_step::form::FormField {
+                                                name: "email".to_string(),
+                                                r#type: "email".to_string(),
+                                            },
+                                            auth_step::form::FormField {
+                                                name: "password".to_string(),
+                                                r#type: "password".to_string(),
+                                            },
+                                        ];
+                                        if self.policy_config.disable_registration {
+                                            fields.push(auth_step::form::FormField {
+                                                name: "token".to_string(),
+                                                r#type: "password".to_string(),
+                                            });
+                                        }
+                                        AuthStep {
                                             can_go_back: true,
                                             fallback_url: String::default(),
                                             step: Some(auth_step::Step::Form(auth_step::Form {
                                                 title: "register".to_string(),
-                                                fields: vec![
-                                                    auth_step::form::FormField {
-                                                        name: "username".to_string(),
-                                                        r#type: "text".to_string(),
-                                                    },
-                                                    auth_step::form::FormField {
-                                                        name: "email".to_string(),
-                                                        r#type: "email".to_string(),
-                                                    },
-                                                    auth_step::form::FormField {
-                                                        name: "password".to_string(),
-                                                        r#type: "password".to_string(),
-                                                    },
-                                                ],
+                                                fields,
                                             })),
-                                        };
-                                        step_stack.push(next_step.clone());
+                                        }
                                     }
                                     _ => unreachable!(),
-                                }
+                                };
+                                step_stack.push(next_step.clone());
                             } else {
                                 return Err(ServerError::NoSuchChoice {
                                     choice: choice.into(),
@@ -670,6 +676,13 @@ impl auth_service_server::AuthService for AuthServer {
                                     self.valid_sessions.insert(session_token, user_id);
                                 }
                                 "register" => {
+                                    if self.policy_config.disable_registration {
+                                        let token_raw = try_get_token(&mut values)?;
+                                        let token_hashed = hash_password(token_raw);
+                                        if self.auth_tree.get(token_hashed.as_ref()).unwrap().is_none() {
+                                            return Err(ServerError::InvalidRegistrationToken.into());
+                                        }
+                                    }
                                     let password_raw = try_get_password(&mut values)?;
                                     let password_hashed = hash_password(password_raw);
                                     let email = try_get_email(&mut values)?;
@@ -835,6 +848,11 @@ const USERNAME_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
     expected: SmolStr::new_inline("text"),
 };
 
+const TOKEN_FIELD_ERR: ServerError = ServerError::WrongTypeForField {
+    name: SmolStr::new_inline("token"),
+    expected: SmolStr::new_inline("bytes"),
+};
+
 #[inline(always)]
 fn try_get_string(values: &mut Vec<Field>, err: ServerError) -> ServerResult<String> {
     if let Some(Field::String(value)) = values.pop() {
@@ -866,4 +884,9 @@ fn try_get_username(values: &mut Vec<Field>) -> ServerResult<String> {
 #[inline(always)]
 fn try_get_password(values: &mut Vec<Field>) -> ServerResult<Vec<u8>> {
     try_get_bytes(values, PASSWORD_FIELD_ERR)
+}
+
+#[inline(always)]
+fn try_get_token(values: &mut Vec<Field>) -> ServerResult<Vec<u8>> {
+    try_get_bytes(values, TOKEN_FIELD_ERR)
 }

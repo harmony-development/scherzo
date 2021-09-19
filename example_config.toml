@@ -9,7 +9,7 @@ port = 2289
 [policy]
 # Whether to disable ratelimits or not (useful when testing / benching).
 disable_ratelimits = false
-# Whether to disable registration (by email / password).
+# Whether to disable registration and only allow it using admin generated tokens.
 disable_registration = false
 
 [db]

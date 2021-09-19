@@ -146,6 +146,7 @@ pub enum ServerError {
     CantKickOrBanYourself,
     TooManyBatchedRequests,
     InvalidBatchEndpoint,
+    InvalidRegistrationToken,
 }
 
 impl StdError for ServerError {
@@ -306,6 +307,7 @@ impl Display for ServerError {
             ServerError::TooManyBatchedRequests => {
                 write!(f, "too many requests in one batch (cannot exceed 64)")
             }
+            ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
         }
     }
 }
@@ -360,7 +362,8 @@ impl CustomError for ServerError {
             | ServerError::InvalidAgainst(_)
             | ServerError::CantKickOrBanYourself
             | ServerError::InvalidBatchEndpoint
-            | ServerError::TooManyBatchedRequests => StatusCode::BAD_REQUEST,
+            | ServerError::TooManyBatchedRequests
+            | ServerError::InvalidRegistrationToken => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::WarpError(_)
             | ServerError::IoError(_)
@@ -447,6 +450,7 @@ impl CustomError for ServerError {
             ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
             ServerError::InvalidBatchEndpoint => "h.invalid-batch",
             ServerError::TooManyBatchedRequests => "h.too-many-batches",
+            ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
         };
         encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
             identifier: i18n_code.into(),
