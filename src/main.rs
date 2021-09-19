@@ -10,7 +10,7 @@ use std::{
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
-    chat::chat_service_server::ChatServiceServer,
+    chat::{chat_service_server::ChatServiceServer, Permission},
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{self, balanced_or_tree, warp::Filter},
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
@@ -206,6 +206,14 @@ pub async fn run(filter_level: Level, db_path: String) {
             .chat_tree
             .create_guild_logic(0, "Admin".to_string(), String::new(), None)
             .unwrap();
+        if let Some(default_role_id) = deps.chat_tree.get_default_role(guild_id) {
+            deps.chat_tree.set_permissions_logic(
+                guild_id,
+                None,
+                default_role_id,
+                vec![Permission::new("*".to_string(), true)],
+            );
+        }
         let log_id = deps
             .chat_tree
             .create_channel_logic(guild_id, "logs".to_string(), false, None, None)

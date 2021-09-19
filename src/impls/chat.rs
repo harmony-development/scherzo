@@ -2409,14 +2409,14 @@ impl ChatTree {
         Ok(roles)
     }
 
+    pub fn get_default_role(&self, guild_id: u64) -> Option<u64> {
+        // Safety: safe since we only store valid u64 [ref:default_role_store]
+        cchat_get!(make_guild_default_role_key(guild_id))
+            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+    }
+
     pub fn add_default_role_to(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
-        if let Some(raw) = self
-            .chat_tree
-            .get(&make_guild_default_role_key(guild_id))
-            .unwrap()
-        {
-            // Safety: safe since we only store valid u64 [ref:default_role_store]
-            let default_role_id = u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() });
+        if let Some(default_role_id) = self.get_default_role(guild_id) {
             self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::new())?;
         }
         Ok(())
