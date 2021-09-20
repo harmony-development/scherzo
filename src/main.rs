@@ -160,11 +160,10 @@ pub async fn run(filter_level: Level, db_path: String) {
         .expect("failed to parse config file")
     } else {
         info!("No config file found, writing default config file");
-        let def = Config::default();
-        tokio::fs::write(config_path, toml::to_vec(&def).unwrap())
+        tokio::fs::write(config_path, include_bytes!("../example_config.toml"))
             .await
             .expect("failed to write default config file");
-        def
+        toml::from_slice(include_bytes!("../example_config.toml")).unwrap()
     };
     debug!("running with {:?}", config);
     tokio::fs::create_dir_all(&config.media.media_root)
