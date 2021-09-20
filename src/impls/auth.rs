@@ -22,6 +22,7 @@ use triomphe::Arc;
 
 use crate::{
     config::{FederationConfig, PolicyConfig},
+    db::{Db, DbResult},
     key::{self, Manager as KeyManager},
 };
 
@@ -77,7 +78,7 @@ pub struct AuthServer {
     step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
     send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
     queued_steps: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
-    auth_tree: ArcTree,
+    auth_tree: AuthTree,
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
     federation_config: Option<FederationConfig>,
@@ -111,9 +112,9 @@ impl AuthServer {
 
             loop {
                 // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                let tokens = unsafe { scan_tree_for(att.as_ref(), TOKEN_PREFIX) };
+                let tokens = unsafe { scan_tree_for(att.inner.as_ref(), TOKEN_PREFIX) };
                 // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                let atimes = unsafe { scan_tree_for(att.as_ref(), ATIME_PREFIX) };
+                let atimes = unsafe { scan_tree_for(att.inner.as_ref(), ATIME_PREFIX) };
 
                 let mut batch = Batch::default();
                 for (id, raw_token) in tokens {
@@ -148,7 +149,7 @@ impl AuthServer {
                         }
                     }
                 }
-                att.apply_batch(batch).unwrap();
+                att.inner.apply_batch(batch).unwrap();
                 std::thread::sleep(Duration::from_secs(60 * 5));
             }
         });
@@ -418,7 +419,7 @@ impl auth_service_server::AuthService for AuthServer {
             fallback_url: String::default(),
             step: Some(auth_step::Step::Choice(auth_step::Choice {
                 title: "initial".to_string(),
-                options: ["login", "register", "register-with-token"]
+                options: ["login", "register"]
                     .iter()
                     .map(ToString::to_string)
                     .collect(),
@@ -618,7 +619,7 @@ impl auth_service_server::AuthService for AuthServer {
                                     let email = try_get_email(&mut values)?;
 
                                     let user_id = if let Some(user_id) =
-                                        self.auth_tree.get(email.as_bytes()).unwrap()
+                                        self.auth_tree.inner.get(email.as_bytes()).unwrap()
                                     {
                                         // Safety: this unwrap can never cause UB since we only store u64
                                         u64::from_be_bytes(unsafe {
@@ -633,6 +634,7 @@ impl auth_service_server::AuthService for AuthServer {
 
                                     if self
                                         .auth_tree
+                                        .inner
                                         .get(user_id.to_be_bytes().as_ref())
                                         .unwrap()
                                         .map_or(true, |pass| pass != password_hashed.as_ref())
@@ -656,7 +658,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         // [ref:atime_u64_value]
                                         get_time_secs().to_be_bytes().to_vec(),
                                     );
-                                    self.auth_tree.apply_batch(batch).unwrap();
+                                    self.auth_tree.inner.apply_batch(batch).unwrap();
 
                                     tracing::debug!(
                                         "user {} logged in with email {}",
@@ -681,7 +683,8 @@ impl auth_service_server::AuthService for AuthServer {
                                         let token_hashed = hash_password(token_raw);
                                         if self
                                             .auth_tree
-                                            .get(token_hashed.as_ref())
+                                            .inner
+                                            .get(&reg_token_key(token_hashed.as_ref()))
                                             .unwrap()
                                             .is_none()
                                         {
@@ -695,7 +698,13 @@ impl auth_service_server::AuthService for AuthServer {
                                     let email = try_get_email(&mut values)?;
                                     let username = try_get_username(&mut values)?;
 
-                                    if self.auth_tree.get(email.as_bytes()).unwrap().is_some() {
+                                    if self
+                                        .auth_tree
+                                        .inner
+                                        .get(email.as_bytes())
+                                        .unwrap()
+                                        .is_some()
+                                    {
                                         return Err(ServerError::UserAlreadyExists.into());
                                     }
 
@@ -721,6 +730,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         get_time_secs().to_be_bytes().to_vec(),
                                     );
                                     self.auth_tree
+                                        .inner
                                         .apply_batch(batch)
                                         .expect("failed to register into db");
 
@@ -832,6 +842,29 @@ impl auth_service_server::AuthService for AuthServer {
         Ok(StepBackResponse {
             step: Some(prev_step),
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct AuthTree {
+    pub inner: ArcTree,
+}
+
+impl AuthTree {
+    pub fn new(db: &dyn Db) -> DbResult<Self> {
+        Ok(Self {
+            inner: db.open_tree(b"auth")?,
+        })
+    }
+    pub fn put_rand_reg_token(&self) -> SmolStr {
+        // TODO: check if the token is already in tree
+        let token = gen_rand_inline_str();
+        {
+            let hashed = hash_password(token.as_bytes());
+            let key = reg_token_key(hashed.as_ref());
+            self.inner.insert(&key, &[]).unwrap();
+        }
+        token
     }
 }
 

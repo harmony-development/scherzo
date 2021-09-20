@@ -40,14 +40,18 @@ use crate::{
 };
 
 use self::{
-    auth::SessionMap, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
+    auth::{AuthTree, SessionMap},
+    chat::ChatTree,
+    emote::EmoteTree,
+    profile::ProfileTree,
+    sync::EventDispatch,
 };
 
 pub type FedEventReceiver = mpsc::UnboundedReceiver<EventDispatch>;
 pub type FedEventDispatcher = mpsc::UnboundedSender<EventDispatch>;
 
 pub struct Dependencies {
-    pub auth_tree: ArcTree,
+    pub auth_tree: AuthTree,
     pub chat_tree: ChatTree,
     pub profile_tree: ProfileTree,
     pub emote_tree: EmoteTree,
@@ -57,6 +61,7 @@ pub struct Dependencies {
     pub chat_event_sender: chat::EventSender,
     pub fed_event_dispatcher: FedEventDispatcher,
     pub key_manager: Option<Arc<key::Manager>>,
+    pub action_processor: ActionProcesser,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
@@ -66,8 +71,10 @@ impl Dependencies {
     pub fn new(db: &dyn Db, config: Config) -> DbResult<(Self, FedEventReceiver)> {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
+        let auth_tree = AuthTree::new(db)?;
+
         let this = Self {
-            auth_tree: db.open_tree(b"auth")?,
+            auth_tree: auth_tree.clone(),
             chat_tree: ChatTree::new(db)?,
             profile_tree: ProfileTree::new(db)?,
             emote_tree: EmoteTree::new(db)?,
@@ -80,6 +87,7 @@ impl Dependencies {
                 .federation
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
+            action_processor: ActionProcesser { auth_tree },
 
             config,
             runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
@@ -222,4 +230,43 @@ pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
             },
         )
         .boxed()
+}
+
+pub struct AdminActionError;
+
+#[derive(Debug, Clone, Copy)]
+pub enum AdminAction {
+    GenerateRegistrationToken,
+}
+
+impl FromStr for AdminAction {
+    type Err = AdminActionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let act = match s.trim_start_matches('/').trim() {
+            "generate registration-token" => AdminAction::GenerateRegistrationToken,
+            _ => return Err(AdminActionError),
+        };
+        Ok(act)
+    }
+}
+
+#[derive(Clone)]
+pub struct ActionProcesser {
+    auth_tree: AuthTree,
+}
+
+impl ActionProcesser {
+    pub fn run(&self, action: &str) -> String {
+        let maybe_action = AdminAction::from_str(action);
+        match maybe_action {
+            Ok(action) => match action {
+                AdminAction::GenerateRegistrationToken => {
+                    let token = self.auth_tree.put_rand_reg_token();
+                    token.into()
+                }
+            },
+            Err(_) => format!("invalid command: `{}`", action),
+        }
+    }
 }

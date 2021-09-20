@@ -53,7 +53,7 @@ use crate::{
     set_proto_name, ServerError,
 };
 
-use super::{profile::ProfileTree, Dependencies};
+use super::{profile::ProfileTree, ActionProcesser, Dependencies};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSub {
@@ -137,6 +137,7 @@ pub struct ChatServer {
     pub broadcast_send: EventSender,
     dispatch_tx: EventDispatcher,
     disable_ratelimits: bool,
+    action_processor: ActionProcesser,
 }
 
 impl ChatServer {
@@ -150,6 +151,7 @@ impl ChatServer {
             broadcast_send: deps.chat_event_sender.clone(),
             dispatch_tx: deps.fed_event_dispatcher.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            action_processor: deps.action_processor.clone(),
         }
     }
 
@@ -1181,6 +1183,26 @@ impl chat_service_server::ChatService for ChatServer {
         request.content = Some(content);
         let (message_id, message) = self.chat_tree.send_message_logic(user_id, request);
 
+        let is_cmd_channel = self
+            .chat_tree
+            .get_admin_guild_keys()
+            .map(|(g, _, c)| (g, c))
+            == Some((guild_id, channel_id));
+
+        let action_content = if is_cmd_channel {
+            if let Some(content::Content::TextMessage(content::TextContent {
+                content: Some(FormattedText { text, .. }),
+            })) = message.content.as_ref().and_then(|c| c.content.as_ref())
+            {
+                let msg = self.action_processor.run(text);
+                Some(msg)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
@@ -1198,6 +1220,34 @@ impl chat_service_server::ChatService for ChatServer {
             )),
             EventContext::empty(),
         );
+
+        if let Some(msg) = action_content {
+            let content = Content {
+                content: Some(content::Content::TextMessage(content::TextContent {
+                    content: Some(FormattedText::new(msg, Vec::new())),
+                })),
+            };
+            let (message_id, message) = self
+                .chat_tree
+                .send_with_system(guild_id, channel_id, content);
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
+                    echo_id,
+                    guild_id,
+                    channel_id,
+                    message_id,
+                    message: Some(message),
+                })),
+                Some(PermCheck::new(
+                    guild_id,
+                    Some(channel_id),
+                    "messages.view",
+                    false,
+                )),
+                EventContext::empty(),
+            );
+        }
 
         Ok(SendMessageResponse { message_id })
     }
@@ -2986,6 +3036,24 @@ impl ChatTree {
         .concat();
         cchat_insert!(ADMIN_GUILD_KEY / value);
     }
+
+    pub fn send_with_system(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        content: Content,
+    ) -> (u64, HarmonyMessage) {
+        let request = SendMessageRequest::default()
+            .with_guild_id(guild_id)
+            .with_channel_id(channel_id)
+            .with_content(content)
+            .with_overrides(Override {
+                username: Some("System".to_string()),
+                reason: Some(r#override::Reason::SystemMessage(Empty {})),
+                avatar: None,
+            });
+        self.send_message_logic(0, request)
+    }
 }
 
 use std::fmt::{self, Debug};
@@ -3078,16 +3146,8 @@ where
                         })),
                     })),
                 };
-                let request = SendMessageRequest::default()
-                    .with_guild_id(guild_id)
-                    .with_channel_id(channel_id)
-                    .with_content(content)
-                    .with_overrides(Override {
-                        username: Some("System".to_string()),
-                        reason: Some(r#override::Reason::SystemMessage(Empty {})),
-                        avatar: None,
-                    });
-                let (message_id, message) = chat_tree.send_message_logic(0, request);
+                let (message_id, message) =
+                    chat_tree.send_with_system(guild_id, channel_id, content);
 
                 let _ = chat_event_sender.send(Arc::new(EventBroadcast::new(
                     EventSub::Guild(guild_id),

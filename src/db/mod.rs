@@ -297,6 +297,7 @@ pub mod auth {
 
     pub const ATIME_PREFIX: &[u8] = b"atime_";
     pub const TOKEN_PREFIX: &[u8] = b"token_";
+    pub const REG_TOKEN_PREFIX: &[u8] = b"reg_token_";
 
     pub const fn token_key(user_id: u64) -> [u8; 14] {
         concat_static(&[TOKEN_PREFIX, &user_id.to_be_bytes()])
@@ -304,6 +305,10 @@ pub mod auth {
 
     pub const fn atime_key(user_id: u64) -> [u8; 14] {
         concat_static(&[ATIME_PREFIX, &user_id.to_be_bytes()])
+    }
+
+    pub fn reg_token_key(token_hashed: &[u8]) -> Vec<u8> {
+        [REG_TOKEN_PREFIX, token_hashed].concat()
     }
 }
 

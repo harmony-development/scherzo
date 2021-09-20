@@ -282,7 +282,7 @@ pub async fn run(filter_level: Level, db_path: String) {
             if let Err(err) = ctt
                 .chat_tree
                 .verify_integrity()
-                .and_then(|_| att.verify_integrity())
+                .and_then(|_| att.inner.verify_integrity())
             {
                 error!("database integrity check failed: {}", err);
                 break;
