@@ -274,6 +274,10 @@ pub async fn run(filter_level: Level, db_path: String) {
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
+    let ptt = deps.profile_tree.clone();
+    let ett = deps.emote_tree.clone();
+    let stt = deps.sync_tree.clone();
+
     std::thread::spawn(move || {
         let span = info_span!("db_validate");
         let _guard = span.enter();
@@ -284,6 +288,9 @@ pub async fn run(filter_level: Level, db_path: String) {
                 .chat_tree
                 .verify_integrity()
                 .and_then(|_| att.inner.verify_integrity())
+                .and_then(|_| ptt.inner.verify_integrity())
+                .and_then(|_| ett.inner.verify_integrity())
+                .and_then(|_| stt.verify_integrity())
             {
                 error!("database integrity check failed: {}", err);
                 break;
