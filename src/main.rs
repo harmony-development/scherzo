@@ -16,6 +16,7 @@ use harmony_rust_sdk::api::{
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
+    voice::voice_service_server::VoiceServiceServer,
 };
 use hrpc::warp;
 use scherzo::{
@@ -33,15 +34,13 @@ use scherzo::{
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
         sync::SyncServer,
+        voice::VoiceServer,
         Dependencies,
     },
     ServerError,
 };
 use tracing::{debug, error, info, info_span, warn, Level};
-use tracing_subscriber::{
-    fmt::{self},
-    prelude::*,
-};
+use tracing_subscriber::{fmt, prelude::*};
 
 // TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;

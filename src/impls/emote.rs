@@ -1,30 +1,17 @@
-use std::convert::TryInto;
-
-use crate::{
-    db::{
-        self,
-        emote::*,
-        profile::{make_user_profile_key, USER_PREFIX},
-        rkyv_ser, ArcTree, Batch, Db, DbResult,
-    },
-    impls::{
-        chat::{EventContext, EventSub},
-        gen_rand_u64,
-    },
-    ServerError,
-};
 use harmony_rust_sdk::api::{
     chat::Event,
     emote::{emote_service_server::EmoteService, *},
-    exports::hrpc::{server::ServerError as HrpcServerError, Request},
 };
-use scherzo_derive::*;
-use triomphe::Arc;
 
 use super::{
-    auth::SessionMap,
-    chat::{EventBroadcast, EventSender, PermCheck},
-    Dependencies,
+    chat::{EventBroadcast, EventContext, EventSender, EventSub, PermCheck},
+    gen_rand_u64,
+    prelude::*,
+};
+
+use db::{
+    emote::*,
+    profile::{make_user_profile_key, USER_PREFIX},
 };
 
 pub struct EmoteServer {
@@ -58,7 +45,7 @@ impl EmoteServer {
     }
 }
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
+#[async_trait]
 impl EmoteService for EmoteServer {
     type Error = ServerError;
 

@@ -1,8 +1,6 @@
-use crate::{
-    http,
-    impls::{auth::SessionMap, get_content_length, rate},
-    ServerError,
-};
+use crate::http;
+
+use super::{get_content_length, prelude::*, rate};
 
 use std::{
     borrow::Cow,
@@ -15,16 +13,13 @@ use std::{
     task::Poll,
 };
 
-use futures_util::StreamExt;
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             futures_util::{
-                self,
                 future::{self, Either},
-                ready, stream, FutureExt, Stream,
+                ready, stream, FutureExt, Stream, StreamExt,
             },
-            server::ServerError as HrpcError,
             warp,
         },
         prost::bytes::{Buf, Bytes, BytesMut},
@@ -33,17 +28,13 @@ use harmony_rust_sdk::api::{
 };
 use reqwest::{header::HeaderValue, StatusCode, Url};
 use sha3::Digest;
-use smol_str::SmolStr;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader},
 };
 use tokio_util::io::poll_read_buf;
 use tracing::info;
-use triomphe::Arc;
 use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter, Reply};
-
-use super::Dependencies;
 
 const SEPERATOR: u8 = b'\n';
 
@@ -271,7 +262,7 @@ pub fn upload(
 
 #[inline(always)]
 pub fn reject(err: impl Into<ServerError>) -> warp::Rejection {
-    warp::reject::custom(HrpcError::Custom(err.into()))
+    warp::reject::custom(HrpcServerError::Custom(err.into()))
 }
 
 // Safety: the `name` argument MUST ONLY contain ASCII characters.

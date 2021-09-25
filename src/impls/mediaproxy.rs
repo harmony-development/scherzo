@@ -1,23 +1,12 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
+use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
 use reqwest::{Client, StatusCode, Url};
-use scherzo_derive::*;
-use smol_str::SmolStr;
 use webpage::HTML;
 
 use std::time::Instant;
 
-use crate::{
-    impls::{auth::SessionMap, get_mimetype, http},
-    ServerError,
-};
-
-use harmony_rust_sdk::api::{
-    exports::hrpc::{server::ServerError as HrpcServerError, Request},
-    mediaproxy::{fetch_link_metadata_response::Data, *},
-};
-
-use super::Dependencies;
+use super::{get_mimetype, http, prelude::*};
 
 #[derive(Clone)]
 enum Metadata {

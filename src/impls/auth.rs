@@ -1,45 +1,33 @@
-use std::{convert::TryInto, time::Duration};
+use std::time::Duration;
 
 use ahash::RandomState;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
-    exports::{
-        hrpc::{
-            server::{ServerError as HrpcServerError, Socket},
-            warp::reply::Response,
-            Request,
-        },
-        prost::Message,
-    },
+    exports::hrpc::warp::reply::Response,
     profile::{Profile, UserStatus},
 };
-use scherzo_derive::*;
 use sha3::Digest;
-use smol_str::SmolStr;
 use tokio::sync::mpsc::{self, Sender};
-use triomphe::Arc;
 
 use crate::{
     config::{FederationConfig, PolicyConfig},
-    db::{Db, DbResult},
-    key::{self, Manager as KeyManager},
-};
-
-use crate::{
-    db::{
-        auth::*,
-        profile::{
-            make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
-        },
-        rkyv_ser, ArcTree, Batch, Tree,
-    },
     http,
-    impls::{gen_rand_inline_str, gen_rand_u64, get_time_secs},
-    set_proto_name, ServerError, ServerResult,
+    key::{self, Manager as KeyManager},
+    set_proto_name,
 };
 
-use super::{gen_rand_arr, profile::ProfileTree, Dependencies};
+use super::{
+    gen_rand_arr, gen_rand_inline_str, gen_rand_u64, get_time_secs, prelude::*,
+    profile::ProfileTree,
+};
+
+use db::{
+    auth::*,
+    profile::{
+        make_foreign_to_local_user_key, make_local_to_foreign_user_key, make_user_profile_key,
+    },
+};
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
@@ -195,7 +183,7 @@ impl AuthServer {
     }
 }
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
+#[async_trait]
 impl auth_service_server::AuthService for AuthServer {
     type Error = ServerError;
 

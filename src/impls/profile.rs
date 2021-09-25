@@ -3,6 +3,7 @@ use super::{
     prelude::*,
 };
 
+use db::profile::*;
 use harmony_rust_sdk::api::{
     chat::Event,
     profile::{profile_service_server::ProfileService, *},

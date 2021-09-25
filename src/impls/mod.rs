@@ -45,15 +45,19 @@ pub mod prelude {
     pub use std::{convert::TryInto, mem::size_of};
 
     pub use crate::{
-        db::{self, rkyv_ser, ArcTree, Db, DbResult},
-        ServerError,
+        db::{self, rkyv_arch, rkyv_ser, ArcTree, Batch, Db, DbResult, Tree},
+        ServerError, ServerResult,
     };
 
-    pub use harmony_rust_sdk::api::exports::hrpc::{
-        async_trait,
-        server::{ServerError as HrpcServerError, Socket},
-        Request,
+    pub use harmony_rust_sdk::api::exports::{
+        hrpc::{
+            async_trait,
+            server::{ServerError as HrpcServerError, Socket},
+            Request,
+        },
+        prost::Message,
     };
+    pub use rkyv::Deserialize;
     pub use scherzo_derive::*;
     pub use smol_str::SmolStr;
     pub use triomphe::Arc;
