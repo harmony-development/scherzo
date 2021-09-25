@@ -240,6 +240,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let chat_server = ChatServer::new(&deps);
     let mediaproxy_server = MediaproxyServer::new(&deps);
     let sync_server = SyncServer::new(&deps, fed_event_receiver);
+    let voice_server = VoiceServer::new(&deps);
 
     let profile = ProfileServiceServer::new(profile_server).filters();
     let emote = EmoteServiceServer::new(emote_server).filters();
@@ -248,12 +249,14 @@ pub async fn run(filter_level: Level, db_path: String) {
     let rest = scherzo::impls::rest::rest(&deps);
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
     let sync = PostboxServiceServer::new(sync_server).filters();
+    let voice = VoiceServiceServer::new(voice_server).filters();
     let about = scherzo::impls::about(&deps);
     let against = against_proxy();
 
-    let filters =
-        balanced_or_tree!(against, auth, chat, mediaproxy, rest, sync, emote, profile, about)
-            .boxed();
+    let filters = balanced_or_tree!(
+        against, auth, chat, mediaproxy, rest, sync, voice, emote, profile, about
+    )
+    .boxed();
 
     let batch_server = BatchServer::new(
         &deps,

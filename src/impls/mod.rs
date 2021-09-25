@@ -6,6 +6,9 @@ pub mod mediaproxy;
 pub mod profile;
 pub mod rest;
 pub mod sync;
+pub mod voice;
+
+use prelude::*;
 
 use std::{
     future,
@@ -28,24 +31,35 @@ use harmony_rust_sdk::api::{
 use parking_lot::Mutex;
 use rand::Rng;
 use reqwest::Response;
-use smol_str::SmolStr;
 use tokio::sync::{broadcast, mpsc};
-use triomphe::Arc;
 
 use crate::{
-    config::Config,
-    db::{ArcTree, Db, DbResult},
-    impls::rest::reject,
-    key, ServerError, SharedConfig, SharedConfigData, SCHERZO_VERSION,
+    config::Config, impls::rest::reject, key, SharedConfig, SharedConfigData, SCHERZO_VERSION,
 };
 
 use self::{
-    auth::{AuthTree, SessionMap},
-    chat::ChatTree,
-    emote::EmoteTree,
-    profile::ProfileTree,
-    sync::EventDispatch,
+    auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
 };
+
+pub mod prelude {
+    pub use std::{convert::TryInto, mem::size_of};
+
+    pub use crate::{
+        db::{self, rkyv_ser, ArcTree, Db, DbResult},
+        ServerError,
+    };
+
+    pub use harmony_rust_sdk::api::exports::hrpc::{
+        async_trait,
+        server::{ServerError as HrpcServerError, Socket},
+        Request,
+    };
+    pub use scherzo_derive::*;
+    pub use smol_str::SmolStr;
+    pub use triomphe::Arc;
+
+    pub use super::{auth::SessionMap, Dependencies};
+}
 
 pub type FedEventReceiver = mpsc::UnboundedReceiver<EventDispatch>;
 pub type FedEventDispatcher = mpsc::UnboundedSender<EventDispatch>;

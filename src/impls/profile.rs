@@ -1,23 +1,11 @@
-use std::{convert::TryInto, mem::size_of};
-
-use crate::{
-    db::{self, profile::*, rkyv_ser, ArcTree, Db, DbResult},
-    impls::chat::{EventContext, EventSub},
-    ServerError,
+use super::{
+    chat::{ChatTree, EventBroadcast, EventContext, EventSender, EventSub, PermCheck},
+    prelude::*,
 };
+
 use harmony_rust_sdk::api::{
     chat::Event,
-    exports::hrpc::{server::ServerError as HrpcServerError, Request},
     profile::{profile_service_server::ProfileService, *},
-};
-use scherzo_derive::*;
-use smol_str::SmolStr;
-use triomphe::Arc;
-
-use super::{
-    auth::SessionMap,
-    chat::{ChatTree, EventBroadcast, EventSender, PermCheck},
-    Dependencies,
 };
 
 pub struct ProfileServer {
@@ -53,7 +41,7 @@ impl ProfileServer {
     }
 }
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
+#[async_trait]
 impl ProfileService for ProfileServer {
     type Error = ServerError;
 
