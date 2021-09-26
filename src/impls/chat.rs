@@ -11,7 +11,7 @@ use std::{
 use harmony_rust_sdk::api::{
     chat::{
         get_channel_messages_request::Direction, permission::has_permission, stream_event,
-        Message as HarmonyMessage, *,
+        FormattedText, Message as HarmonyMessage, *,
     },
     exports::hrpc::{
         return_print,
@@ -19,7 +19,7 @@ use harmony_rust_sdk::api::{
         warp::reply::Response,
         Request,
     },
-    harmonytypes::{Empty, FormattedText, ItemPosition, Metadata},
+    harmonytypes::{Empty, ItemPosition, Metadata},
     rest::FileId,
     sync::{
         event::{
@@ -377,7 +377,7 @@ impl chat_service_server::ChatService for ChatServer {
         let CreateChannelRequest {
             guild_id,
             channel_name,
-            is_category,
+            kind,
             position,
             metadata,
         } = request.into_parts().0.into_message().await??;
@@ -389,7 +389,7 @@ impl chat_service_server::ChatService for ChatServer {
         let channel_id = self.chat_tree.create_channel_logic(
             guild_id,
             channel_name.clone(),
-            is_category,
+            ChannelKind::from_i32(kind).unwrap_or_default(),
             metadata.clone(),
             position.clone(),
         )?;
@@ -401,7 +401,7 @@ impl chat_service_server::ChatService for ChatServer {
                 channel_id,
                 name: channel_name,
                 position,
-                is_category,
+                kind,
                 metadata,
             }),
             Some(PermCheck::new(
@@ -2221,42 +2221,40 @@ impl ChatTree {
         };
 
         let place = position.into();
-        let previous_id = place.after().unwrap_or(0);
-        let next_id = place.before().unwrap_or(0);
-
-        if previous_id != 0 {
-            check_exists(previous_id)?;
-        } else if next_id != 0 {
-            check_exists(next_id)?;
-        } else {
-            let mut ordering = self.get_list_u64_logic(key);
-            ordering.push(id);
-            ser_ord_put(ordering);
-            return Ok(());
-        }
 
         let mut ordering = self.get_list_u64_logic(key);
-
-        let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
-        let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
-            ordering.insert(index, 0);
-            if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
-                ordering.remove(channel_index);
+        match place {
+            Place::Bottom => {
+                ordering.push(id);
             }
-            unsafe {
-                *ordering
-                    .iter_mut()
-                    .find(|oid| 0.eq(*oid))
-                    .unwrap_unchecked() = id;
+            Place::Top => {
+                ordering.insert(0, id);
             }
-        };
+            Place::Between { after, before } => {
+                check_exists(after)?;
+                check_exists(before)?;
 
-        if let Some(index) = maybe_ord_index(previous_id) {
-            maybe_replace_with(&mut ordering, index.saturating_add(1));
-        } else if let Some(index) = maybe_ord_index(next_id) {
-            maybe_replace_with(&mut ordering, index);
+                let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
+                let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
+                    ordering.insert(index, 0);
+                    if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
+                        ordering.remove(channel_index);
+                    }
+                    unsafe {
+                        *ordering
+                            .iter_mut()
+                            .find(|oid| 0.eq(*oid))
+                            .unwrap_unchecked() = id;
+                    }
+                };
+
+                if let Some(index) = maybe_ord_index(after) {
+                    maybe_replace_with(&mut ordering, index.saturating_add(1));
+                } else if let Some(index) = maybe_ord_index(before) {
+                    maybe_replace_with(&mut ordering, index);
+                }
+            }
         }
-
         ser_ord_put(ordering);
 
         Ok(())
@@ -2512,7 +2510,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_name: String,
-        is_category: bool,
+        kind: ChannelKind,
         metadata: Option<Metadata>,
         position: Option<ItemPosition>,
     ) -> Result<u64, ServerError> {
@@ -2531,7 +2529,7 @@ impl ChatTree {
         let channel = Channel {
             metadata,
             channel_name,
-            is_category,
+            kind: kind.into(),
         };
         let buf = rkyv_ser(&channel);
         cchat_insert!(key / buf);
@@ -2606,8 +2604,13 @@ impl ChatTree {
         })
         .collect::<Vec<_>>();
         self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone());
-        let channel_id =
-            self.create_channel_logic(guild_id, "general".to_string(), false, None, None)?;
+        let channel_id = self.create_channel_logic(
+            guild_id,
+            "general".to_string(),
+            ChannelKind::TextUnspecified,
+            None,
+            None,
+        )?;
 
         self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms);
 
@@ -3047,9 +3050,9 @@ impl ChatTree {
             .with_guild_id(guild_id)
             .with_channel_id(channel_id)
             .with_content(content)
-            .with_overrides(Override {
+            .with_overrides(Overrides {
                 username: Some("System".to_string()),
-                reason: Some(r#override::Reason::SystemMessage(Empty {})),
+                reason: Some(overrides::Reason::SystemMessage(Empty {})),
                 avatar: None,
             });
         self.send_message_logic(0, request)

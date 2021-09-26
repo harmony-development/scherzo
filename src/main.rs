@@ -10,7 +10,7 @@ use std::{
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
-    chat::{chat_service_server::ChatServiceServer, Permission},
+    chat::{chat_service_server::ChatServiceServer, ChannelKind, Permission},
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{self, balanced_or_tree, warp::Filter},
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
@@ -214,11 +214,23 @@ pub async fn run(filter_level: Level, db_path: String) {
         }
         let log_id = deps
             .chat_tree
-            .create_channel_logic(guild_id, "logs".to_string(), false, None, None)
+            .create_channel_logic(
+                guild_id,
+                "logs".to_string(),
+                ChannelKind::TextUnspecified,
+                None,
+                None,
+            )
             .unwrap();
         let cmd_id = deps
             .chat_tree
-            .create_channel_logic(guild_id, "command".to_string(), false, None, None)
+            .create_channel_logic(
+                guild_id,
+                "command".to_string(),
+                ChannelKind::TextUnspecified,
+                None,
+                None,
+            )
             .unwrap();
         let invite_id = format!("{}", guild_id);
         deps.chat_tree
