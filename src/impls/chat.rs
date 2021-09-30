@@ -19,7 +19,7 @@ use harmony_rust_sdk::api::{
         warp::reply::Response,
         Request,
     },
-    harmonytypes::{Empty, ItemPosition, Metadata},
+    harmonytypes::{item_position, Empty, ItemPosition, Metadata},
     rest::FileId,
     sync::{
         event::{
@@ -2183,7 +2183,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         role_id: u64,
-        position: impl Into<Place>,
+        position: ItemPosition,
     ) -> Result<(), ServerError> {
         self.update_order_logic(
             role_id,
@@ -2197,7 +2197,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        position: impl Into<Place>,
+        position: ItemPosition,
     ) -> Result<(), ServerError> {
         self.update_order_logic(
             channel_id,
@@ -2211,7 +2211,7 @@ impl ChatTree {
     pub fn update_order_logic(
         &self,
         id: u64,
-        position: impl Into<Place>,
+        position: ItemPosition,
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
     ) -> Result<(), ServerError> {
@@ -2220,37 +2220,32 @@ impl ChatTree {
             cchat_insert!(key / serialized_ordering);
         };
 
-        let place = position.into();
-
         let mut ordering = self.get_list_u64_logic(key);
-        match place {
-            Place::Bottom => {
-                ordering.push(id);
-            }
-            Place::Top => {
-                ordering.insert(0, id);
-            }
-            Place::Between { after, before } => {
-                check_exists(after)?;
-                check_exists(before)?;
 
-                let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
-                let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
-                    ordering.insert(index, 0);
-                    if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
-                        ordering.remove(channel_index);
-                    }
-                    unsafe {
-                        *ordering
-                            .iter_mut()
-                            .find(|oid| 0.eq(*oid))
-                            .unwrap_unchecked() = id;
-                    }
-                };
+        let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
+        let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
+            ordering.insert(index, 0);
+            if let Some(channel_index) = ordering.iter().position(|oid| id.eq(oid)) {
+                ordering.remove(channel_index);
+            }
+            unsafe {
+                *ordering
+                    .iter_mut()
+                    .find(|oid| 0.eq(*oid))
+                    .unwrap_unchecked() = id;
+            }
+        };
 
-                if let Some(index) = maybe_ord_index(after) {
+        let item_id = position.item_id;
+        check_exists(item_id)?;
+        match position.position() {
+            item_position::Position::After => {
+                if let Some(index) = maybe_ord_index(item_id) {
                     maybe_replace_with(&mut ordering, index.saturating_add(1));
-                } else if let Some(index) = maybe_ord_index(before) {
+                }
+            }
+            item_position::Position::BeforeUnspecified => {
+                if let Some(index) = maybe_ord_index(item_id) {
                     maybe_replace_with(&mut ordering, index);
                 }
             }
@@ -2483,7 +2478,7 @@ impl ChatTree {
         };
         let ser_role = rkyv_ser(&role);
         cchat_insert!(key / ser_role);
-        self.move_role_logic(guild_id, role_id, Place::between(0, 0))?;
+        self.move_role_logic(guild_id, role_id, ItemPosition::new_after(0))?;
         Ok(role_id)
     }
 
@@ -2538,7 +2533,7 @@ impl ChatTree {
         self.update_channel_order_logic(
             guild_id,
             channel_id,
-            position.map_or_else(|| Place::between(0, 0), Place::from),
+            position.unwrap_or_else(|| ItemPosition::new_after(0)),
         )?;
 
         Ok(channel_id)

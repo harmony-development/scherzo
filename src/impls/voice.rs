@@ -161,9 +161,9 @@ impl VoiceService for VoiceServer {
             let consumer = &guard.consumer;
             Some(TransportOptions {
                 id: into_json(&consumer.id()),
-                dtls_paramaters: into_json(&consumer.dtls_parameters()),
-                ice_candidates: into_json(consumer.ice_candidates()),
-                ice_paramaters: into_json(consumer.ice_parameters()),
+                dtls_parameters: into_json(&consumer.dtls_parameters()),
+                ice_candidates: consumer.ice_candidates().iter().map(into_json).collect(),
+                ice_parameters: into_json(consumer.ice_parameters()),
             })
         };
 
@@ -172,9 +172,9 @@ impl VoiceService for VoiceServer {
             let producer = &guard.producer;
             Some(TransportOptions {
                 id: into_json(&producer.id()),
-                dtls_paramaters: into_json(&producer.dtls_parameters()),
-                ice_candidates: into_json(producer.ice_candidates()),
-                ice_paramaters: into_json(producer.ice_parameters()),
+                dtls_parameters: into_json(&producer.dtls_parameters()),
+                ice_candidates: producer.ice_candidates().iter().map(into_json).collect(),
+                ice_parameters: into_json(producer.ice_parameters()),
             })
         };
 
@@ -291,10 +291,10 @@ impl VoiceService for VoiceServer {
 
                 match user.create_consumer(consumer_options).await {
                     Ok(consumer) => {
-                        other_users.push(UserData {
+                        other_users.push(UserConsumerOptions {
                             producer_id: into_json(&user_producer_id),
                             consumer_id: into_json(&consumer.id()),
-                            rtp_paramaters: into_json(consumer.rtp_parameters()),
+                            rtp_parameters: into_json(consumer.rtp_parameters()),
                             user_id: other_user_id,
                         });
                         user.inner.consumers.insert(consumer.id(), consumer);
@@ -449,10 +449,10 @@ impl Channel {
                     .create_consumer(consumer_options)
                     .await
                     .map_err(|err| (other_user_id, err))?;
-                joined_datas.push(UserData {
+                joined_datas.push(UserConsumerOptions {
                     producer_id: into_json(&user_producer_id),
                     consumer_id: into_json(&consumer.id()),
-                    rtp_paramaters: into_json(consumer.rtp_parameters()),
+                    rtp_parameters: into_json(consumer.rtp_parameters()),
                     user_id,
                 });
                 other_user.inner.consumers.insert(consumer.id(), consumer);
