@@ -15,6 +15,11 @@
     root = ./.;
     buildPlatform = "crate2nix";
     overrides = {
+      crateOverrides = common: _: {
+        mediasoup-sys = prev: {
+          nativeBuildInputs = (prev.nativeBuildInputs or [ ]) ++ (with common.pkgs; [ python3 gnumake nodejs ]);
+        };
+      };
       shell = common: prev: {
         packages = prev.packages ++ [ common.pkgs.musl.dev ];
         commands = prev.commands ++ [

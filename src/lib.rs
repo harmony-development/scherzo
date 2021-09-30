@@ -147,6 +147,7 @@ pub enum ServerError {
     TooManyBatchedRequests,
     InvalidBatchEndpoint,
     InvalidRegistrationToken,
+    WebRTCError(anyhow::Error),
 }
 
 impl StdError for ServerError {
@@ -157,6 +158,7 @@ impl StdError for ServerError {
             ServerError::IoError(err) => Some(err),
             ServerError::ReqwestError(err) => Some(err),
             ServerError::WarpError(err) => Some(err),
+            ServerError::WebRTCError(err) => err.source(),
             _ => None,
         }
     }
@@ -308,6 +310,7 @@ impl Display for ServerError {
                 write!(f, "too many requests in one batch (cannot exceed 64)")
             }
             ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
+            ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
         }
     }
 }
@@ -371,7 +374,8 @@ impl CustomError for ServerError {
             | ServerError::ReqwestError(_)
             | ServerError::Unexpected(_)
             | ServerError::CantGetKey
-            | ServerError::CantGetHostKey(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::CantGetHostKey(_)
+            | ServerError::WebRTCError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -386,7 +390,8 @@ impl CustomError for ServerError {
             | ServerError::ReqwestError(_)
             | ServerError::Unexpected(_)
             | ServerError::CantGetKey
-            | ServerError::CantGetHostKey(_) => "h.internal-server-error",
+            | ServerError::CantGetHostKey(_)
+            | ServerError::WebRTCError(_) => "h.internal-server-error",
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
