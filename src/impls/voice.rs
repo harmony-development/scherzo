@@ -96,6 +96,16 @@ impl VoiceService for VoiceServer {
                             channel_id,
                         })),
                 }) => Ok((guild_id, channel_id)),
+                Err(err) => {
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                        },
+                        "socket error while initializing: {}",
+                        err,
+                    );
+                    Err(())
+                }
                 _ => Err(()),
             }
         };
@@ -103,8 +113,22 @@ impl VoiceService for VoiceServer {
         let (guild_id, channel_id) =
             match timeout(Duration::from_secs(5), wait_for_initialize).await {
                 Ok(Ok(id)) => id,
+                Err(_) => {
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                        },
+                        "timeouted while waiting for initialization message"
+                    );
+                    return;
+                }
                 _ => {
-                    tracing::error!("stream message initialize timeout");
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                        },
+                        "error occured while waiting for initialization message"
+                    );
                     return;
                 }
             };
@@ -120,8 +144,16 @@ impl VoiceService for VoiceServer {
 
         let mut channel = match self.channels.get(&self.worker_pool, chan_id).await {
             Ok(channel) => channel,
-            _ => {
-                tracing::error!("channel create error");
+            Err(err) => {
+                tracing::error!(
+                    {
+                        participant = %user_id,
+                        guild = %guild_id,
+                        channel = %channel_id,
+                    },
+                    "error while creating voice channel: {}",
+                    err,
+                );
                 return;
             }
         };
@@ -147,8 +179,26 @@ impl VoiceService for VoiceServer {
 
         let client_capabilities = match timeout(Duration::from_secs(5), wait_for_prepare).await {
             Ok(Ok(rtp_cap)) => rtp_cap,
+            Err(_) => {
+                tracing::error!(
+                    {
+                        participant = %user_id,
+                        guild = %guild_id,
+                        channel = %channel_id,
+                    },
+                    "timeouted while waiting for prepare message"
+                );
+                return;
+            }
             _ => {
-                tracing::error!("client capability error");
+                tracing::error!(
+                    {
+                        participant = %user_id,
+                        guild = %guild_id,
+                        channel = %channel_id,
+                    },
+                    "error occured while waiting for prepare message"
+                );
                 return;
             }
         };
@@ -207,6 +257,18 @@ impl VoiceService for VoiceServer {
                         rtp_parameters,
                     ))
                 }
+                Err(err) => {
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                            guild = %guild_id,
+                            channel = %channel_id,
+                        },
+                        "socket error while waiting for join channel: {}",
+                        err,
+                    );
+                    Err(())
+                }
                 _ => Err(()),
             }
         };
@@ -214,8 +276,26 @@ impl VoiceService for VoiceServer {
         let (consumer_dtls_paramaters, producer_dtls_paramaters, rtp_parameters) =
             match timeout(Duration::from_secs(8), wait_for_join).await {
                 Ok(Ok(val)) => val,
+                Err(_) => {
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                            guild = %guild_id,
+                            channel = %channel_id,
+                        },
+                        "timeouted while waiting for join channel message"
+                    );
+                    return;
+                }
                 _ => {
-                    tracing::error!("no join message");
+                    tracing::error!(
+                        {
+                            participant = %user_id,
+                            guild = %guild_id,
+                            channel = %channel_id,
+                        },
+                        "error occured while waiting for join channel message"
+                    );
                     return;
                 }
             };
@@ -232,13 +312,24 @@ impl VoiceService for VoiceServer {
             .await
         {
             tracing::error!(
-                "could not connect user {} producer transport for voice channel ({}, {}): {}",
-                user_id,
-                guild_id,
-                channel_id,
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "could not connect producer transport: {}",
                 err,
             );
             return;
+        } else {
+            tracing::info!(
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "connected producer transport",
+            );
         }
         if let Err(err) = user
             .inner
@@ -252,27 +343,49 @@ impl VoiceService for VoiceServer {
             .await
         {
             tracing::error!(
-                "could not connect user {} consumer transport for voice channel ({}, {}): {}",
-                user_id,
-                guild_id,
-                channel_id,
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "could not connect consumer transport: {}",
                 err,
             );
             return;
+        } else {
+            tracing::info!(
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "connected consumer transport",
+            );
         }
 
         let producer_options = ProducerOptions::new(MediaKind::Audio, rtp_parameters);
 
         match user.create_producer(producer_options).await {
             Ok(producer) => {
+                tracing::info!(
+                    {
+                        participant = %user_id,
+                        guild = %guild_id,
+                        channel = %channel_id,
+                        producer_id = %producer.id(),
+                    },
+                    "created producer",
+                );
                 *user.inner.producer.lock().await = Some(producer);
             }
             Err(err) => {
                 tracing::error!(
-                    "could not create producer for user {} for voice channel ({}, {}): {}",
-                    user_id,
-                    guild_id,
-                    channel_id,
+                    {
+                        participant = %user_id,
+                        guild = %guild_id,
+                        channel = %channel_id,
+                    },
+                    "could not create producer: {}",
                     err,
                 );
                 return;
@@ -291,6 +404,15 @@ impl VoiceService for VoiceServer {
 
                 match user.create_consumer(consumer_options).await {
                     Ok(consumer) => {
+                        tracing::info!(
+                            {
+                                participant = %user_id,
+                                guild = %guild_id,
+                                channel = %channel_id,
+                                for_producer = %user_producer_id,
+                            },
+                            "created consumer",
+                        );
                         other_users.push(UserConsumerOptions {
                             producer_id: into_json(&user_producer_id),
                             consumer_id: into_json(&consumer.id()),
@@ -301,10 +423,12 @@ impl VoiceService for VoiceServer {
                     }
                     Err(err) => {
                         tracing::error!(
-                            "could not create consumer for user {} for voice channel ({}, {}): {}",
-                            user_id,
-                            guild_id,
-                            channel_id,
+                            {
+                                participant = %user_id,
+                                guild = %guild_id,
+                                channel = %channel_id,
+                            },
+                            "could not create consumer: {}",
                             err,
                         );
                         return;
@@ -315,13 +439,24 @@ impl VoiceService for VoiceServer {
 
         if let Err((user_id, err)) = channel.add_user(user_id, user.clone()).await {
             tracing::error!(
-                "could not create consumer for user {} for voice channel ({}, {}): {}",
-                user_id,
-                guild_id,
-                channel_id,
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "could not create consumer: {}",
                 err,
             );
             return;
+        } else {
+            tracing::info!(
+                {
+                    participant = %user_id,
+                    guild = %guild_id,
+                    channel = %channel_id,
+                },
+                "user added to voice channel successfully"
+            );
         }
 
         return_print!(
@@ -359,7 +494,26 @@ impl VoiceService for VoiceServer {
                 {
                     if let Ok(consumer_id) = from_json(resume.consumer_id) {
                         if let Err(err) = user.resume_consumer(consumer_id).await {
-                            tracing::error!("could not resume consumer: {}", err);
+                            tracing::error!(
+                                {
+                                    participant = %user_id,
+                                    guild = %guild_id,
+                                    channel = %channel_id,
+                                    consumer_id = %consumer_id,
+                                },
+                                "could not resume consumer: {}",
+                                err,
+                            );
+                        } else {
+                            tracing::info!(
+                                {
+                                    participant = %user_id,
+                                    guild = %guild_id,
+                                    channel = %channel_id,
+                                    consumer_id = %consumer_id,
+                                },
+                                "resumed consumer",
+                            );
                         }
                     }
                 }
@@ -403,10 +557,11 @@ struct Channel {
     inner: Arc<ChannelInner>,
     event_sender: Sender<Event>,
     event_recv: Receiver<Event>,
+    id: ChannelId,
 }
 
 impl Channel {
-    pub async fn new(worker_pool: &WorkerPool) -> ServerResult<Self> {
+    pub async fn new(id: ChannelId, worker_pool: &WorkerPool) -> ServerResult<Self> {
         let worker = worker_pool.get().await?;
         let router = worker
             .create_router(RouterOptions::new(media_codecs()))
@@ -422,6 +577,7 @@ impl Channel {
             }),
             event_sender: tx,
             event_recv: rx,
+            id,
         })
     }
 
@@ -449,6 +605,15 @@ impl Channel {
                     .create_consumer(consumer_options)
                     .await
                     .map_err(|err| (other_user_id, err))?;
+                tracing::info!(
+                    {
+                        participant = %user_id,
+                        guild = %self.id.0,
+                        channel = %self.id.1,
+                        for_producer = %user_producer_id,
+                    },
+                    "created consumer",
+                );
                 joined_datas.push(UserConsumerOptions {
                     producer_id: into_json(&user_producer_id),
                     consumer_id: into_json(&consumer.id()),
@@ -490,6 +655,7 @@ impl Clone for Channel {
             inner: self.inner.clone(),
             event_sender: self.event_sender.clone(),
             event_recv: self.event_sender.subscribe(),
+            id: self.id,
         }
     }
 }
@@ -509,7 +675,7 @@ impl Channels {
         match self.inner.entry(channel_id) {
             dashmap::mapref::entry::Entry::Occupied(entry) => Ok(entry.get().clone()),
             dashmap::mapref::entry::Entry::Vacant(entry) => {
-                let channel = Channel::new(worker_pool).await?;
+                let channel = Channel::new(channel_id, worker_pool).await?;
                 entry.insert(channel.clone());
                 Ok(channel)
             }
