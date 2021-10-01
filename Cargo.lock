@@ -437,7 +437,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#e0c47897d73424e9138f342d5c006d737c8b81f5"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#3d80c4b68b97db9c20cb496a2e3df0ccc1336b38"
 dependencies = [
  "prost",
  "prost-types",
@@ -449,7 +449,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#e0c47897d73424e9138f342d5c006d737c8b81f5"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#3d80c4b68b97db9c20cb496a2e3df0ccc1336b38"
 dependencies = [
  "console-api",
  "futures",
