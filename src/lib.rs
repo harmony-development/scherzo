@@ -116,11 +116,12 @@ pub enum ServerError {
     NoPermissionsSpecified,
     MissingFiles,
     TooManyFiles,
+    DbError(db::DbError),
     WarpError(warp::Error),
     IoError(IoError),
     InvalidFileId,
     ReqwestError(reqwest::Error),
-    Unexpected(SmolStr),
+    FileExtractUnexpected(SmolStr),
     NotAnImage,
     TooFast(Duration),
     MediaNotFound,
@@ -159,6 +160,7 @@ impl StdError for ServerError {
             ServerError::ReqwestError(err) => Some(err),
             ServerError::WarpError(err) => Some(err),
             ServerError::WebRTCError(err) => err.source(),
+            ServerError::DbError(err) => Some(err),
             _ => None,
         }
     }
@@ -275,7 +277,7 @@ impl Display for ServerError {
                 travel_error(f, err);
                 write!(f, "error occured in reqwest: {}", err)
             }
-            ServerError::Unexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
+            ServerError::FileExtractUnexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
             ServerError::InvalidFileId => write!(f, "invalid file id"),
             ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
             ServerError::MediaNotFound => write!(f, "requested media is not found"),
@@ -311,6 +313,7 @@ impl Display for ServerError {
             }
             ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
             ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
+            ServerError::DbError(err) => write!(f, "database error: {}", err),
         }
     }
 }
@@ -372,10 +375,11 @@ impl CustomError for ServerError {
             | ServerError::IoError(_)
             | ServerError::InternalServerError
             | ServerError::ReqwestError(_)
-            | ServerError::Unexpected(_)
+            | ServerError::FileExtractUnexpected(_)
             | ServerError::CantGetKey
             | ServerError::CantGetHostKey(_)
-            | ServerError::WebRTCError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::WebRTCError(_)
+            | ServerError::DbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -388,10 +392,11 @@ impl CustomError for ServerError {
             | ServerError::WarpError(_)
             | ServerError::IoError(_)
             | ServerError::ReqwestError(_)
-            | ServerError::Unexpected(_)
+            | ServerError::FileExtractUnexpected(_)
             | ServerError::CantGetKey
             | ServerError::CantGetHostKey(_)
-            | ServerError::WebRTCError(_) => "h.internal-server-error",
+            | ServerError::WebRTCError(_)
+            | ServerError::DbError(_) => "h.internal-server-error",
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
@@ -481,6 +486,12 @@ impl From<warp::Error> for ServerError {
 impl From<reqwest::Error> for ServerError {
     fn from(err: reqwest::Error) -> Self {
         ServerError::ReqwestError(err)
+    }
+}
+
+impl From<db::DbError> for ServerError {
+    fn from(err: db::DbError) -> Self {
+        ServerError::DbError(err)
     }
 }
 

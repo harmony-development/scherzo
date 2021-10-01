@@ -275,16 +275,16 @@ pub struct ActionProcesser {
 }
 
 impl ActionProcesser {
-    pub fn run(&self, action: &str) -> String {
+    pub fn run(&self, action: &str) -> ServerResult<String> {
         let maybe_action = AdminAction::from_str(action);
         match maybe_action {
             Ok(action) => match action {
                 AdminAction::GenerateRegistrationToken => {
-                    let token = self.auth_tree.put_rand_reg_token();
-                    token.into()
+                    let token = self.auth_tree.put_rand_reg_token()?;
+                    Ok(token.into())
                 }
             },
-            Err(_) => format!("invalid command: `{}`", action),
+            Err(_) => Ok(format!("invalid command: `{}`", action)),
         }
     }
 }

@@ -108,7 +108,7 @@ impl ProfileService for ProfileServer {
             new_user_avatar.clone(),
             new_user_status,
             new_is_bot,
-        );
+        )?;
 
         self.send_event_through_chan(
             EventSub::Homeserver,
@@ -145,7 +145,7 @@ impl ProfileTree {
         new_user_avatar: Option<String>,
         new_user_status: Option<i32>,
         new_is_bot: Option<bool>,
-    ) {
+    ) -> ServerResult<()> {
         let key = make_user_profile_key(user_id);
 
         let mut profile = pprofile_get!(key).map_or_else(Profile::default, db::deser_profile);
@@ -165,6 +165,8 @@ impl ProfileTree {
 
         let buf = rkyv_ser(&profile);
         pprofile_insert!(key / buf);
+
+        Ok(())
     }
 
     pub fn get_profile_logic(&self, user_id: u64) -> Result<Profile, ServerError> {
@@ -181,32 +183,31 @@ impl ProfileTree {
 
     pub fn does_user_exist(&self, user_id: u64) -> Result<(), ServerError> {
         self.inner
-            .contains_key(&make_user_profile_key(user_id))
-            .unwrap()
+            .contains_key(&make_user_profile_key(user_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchUser(user_id)))
     }
 
     /// Converts a local user ID to the corresponding foreign user ID and the host
-    pub fn local_to_foreign_id(&self, local_id: u64) -> Option<(u64, SmolStr)> {
+    pub fn local_to_foreign_id(&self, local_id: u64) -> ServerResult<Option<(u64, SmolStr)>> {
         let key = make_local_to_foreign_user_key(local_id);
 
-        pprofile_get!(key).map(|raw| {
+        Ok(pprofile_get!(key).map(|raw| {
             let (raw_id, raw_host) = raw.split_at(size_of::<u64>());
             // Safety: safe since we split at u64 boundary.
             let foreign_id = u64::from_be_bytes(unsafe { raw_id.try_into().unwrap_unchecked() });
             // Safety: all stored hosts are valid UTF-8
             let host = (unsafe { std::str::from_utf8_unchecked(raw_host) }).into();
             (foreign_id, host)
-        })
+        }))
     }
 
     /// Convert a foreign user ID to a local user ID
-    pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> Option<u64> {
+    pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> ServerResult<Option<u64>> {
         let key = make_foreign_to_local_user_key(foreign_id, host);
 
-        pprofile_get!(key)
+        Ok(pprofile_get!(key)
             // Safety: we store u64's only for these keys
-            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })))
     }
 }

@@ -17,7 +17,7 @@ fn tree_insert(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
     let key: proc_macro2::TokenStream = split.next().unwrap().parse().unwrap();
     let value: proc_macro2::TokenStream = split.next().unwrap().parse().unwrap();
     (quote! {
-        self. #chat .insert(#key .as_ref(), #value .as_ref()).unwrap();
+        self. #chat .insert(#key .as_ref(), #value .as_ref()).map_err(ServerError::DbError)?;
     })
     .into()
 }
@@ -25,7 +25,7 @@ fn tree_insert(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
 fn tree_remove(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
     let input: proc_macro2::TokenStream = input.into();
     (quote! {
-        self. #chat .remove(#input .as_ref()).unwrap()
+        self. #chat .remove(#input .as_ref()).map_err(ServerError::DbError)?
     })
     .into()
 }
@@ -33,7 +33,7 @@ fn tree_remove(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
 fn tree_get(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
     let input: proc_macro2::TokenStream = input.into();
     (quote! {
-        self. #chat .get(#input .as_ref()).unwrap()
+        self. #chat .get(#input .as_ref()).map_err(ServerError::DbError)?
     })
     .into()
 }

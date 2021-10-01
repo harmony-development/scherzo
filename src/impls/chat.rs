@@ -270,8 +270,8 @@ impl ChatServer {
         drop(self.dispatch_tx.send(dispatch));
     }
 
-    fn dispatch_guild_leave(&self, guild_id: u64, user_id: u64) {
-        match self.profile_tree.local_to_foreign_id(user_id) {
+    fn dispatch_guild_leave(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+        match self.profile_tree.local_to_foreign_id(user_id)? {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -281,7 +281,7 @@ impl ChatServer {
             ),
             None => {
                 self.chat_tree
-                    .remove_guild_from_guild_list(user_id, guild_id, "");
+                    .remove_guild_from_guild_list(user_id, guild_id, "")?;
                 self.send_event_through_chan(
                     EventSub::Homeserver,
                     stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
@@ -293,10 +293,11 @@ impl ChatServer {
                 );
             }
         }
+        Ok(())
     }
 
-    fn dispatch_guild_join(&self, guild_id: u64, user_id: u64) {
-        match self.profile_tree.local_to_foreign_id(user_id) {
+    fn dispatch_guild_join(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+        match self.profile_tree.local_to_foreign_id(user_id)? {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
@@ -306,7 +307,7 @@ impl ChatServer {
             ),
             None => {
                 self.chat_tree
-                    .add_guild_to_guild_list(user_id, guild_id, "");
+                    .add_guild_to_guild_list(user_id, guild_id, "")?;
                 self.send_event_through_chan(
                     EventSub::Homeserver,
                     stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
@@ -318,6 +319,7 @@ impl ChatServer {
                 );
             }
         }
+        Ok(())
     }
 
     fn send_reaction_event(
@@ -367,7 +369,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .create_guild_logic(user_id, name, picture, metadata)?;
 
-        self.dispatch_guild_join(guild_id, user_id);
+        self.dispatch_guild_join(guild_id, user_id)?;
 
         Ok(CreateGuildResponse { guild_id })
     }
@@ -612,7 +614,7 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0.into_message().await??;
 
         let key = guild_id.to_be_bytes();
-        let mut guild_info = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
+        let mut guild_info = if let Some(raw) = chat_get!(key) {
             db::deser_guild(raw)
         } else {
             return Err(ServerError::NoSuchGuild(guild_id).into());
@@ -680,7 +682,7 @@ impl chat_service_server::ChatService for ChatServer {
         )?;
 
         let key = make_chan_key(guild_id, channel_id);
-        let mut chan_info = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
+        let mut chan_info = if let Some(raw) = chat_get!(key) {
             db::deser_chan(raw)
         } else {
             return Err(ServerError::NoSuchChannel {
@@ -913,7 +915,10 @@ impl chat_service_server::ChatService for ChatServer {
         for key in guild_data {
             batch.remove(key);
         }
-        self.chat_tree.chat_tree.apply_batch(batch).unwrap();
+        self.chat_tree
+            .chat_tree
+            .apply_batch(batch)
+            .map_err(ServerError::DbError)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -924,7 +929,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let mut local_ids = Vec::new();
         for member_id in guild_members {
-            match self.profile_tree.local_to_foreign_id(member_id) {
+            match self.profile_tree.local_to_foreign_id(member_id)? {
                 Some((foreign_id, target)) => self.dispatch_event(
                     target,
                     DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -934,7 +939,7 @@ impl chat_service_server::ChatService for ChatServer {
                 ),
                 None => {
                     self.chat_tree
-                        .remove_guild_from_guild_list(user_id, guild_id, "");
+                        .remove_guild_from_guild_list(user_id, guild_id, "")?;
                     local_ids.push(member_id);
                 }
             }
@@ -1019,7 +1024,10 @@ impl chat_service_server::ChatService for ChatServer {
             batch.remove(key);
         }
         batch.insert(key, serialized_ordering);
-        self.chat_tree.chat_tree.apply_batch(batch).unwrap();
+        self.chat_tree
+            .chat_tree
+            .apply_batch(batch)
+            .map_err(ServerError::DbError)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1099,8 +1107,7 @@ impl chat_service_server::ChatService for ChatServer {
         let JoinGuildRequest { invite_id } = request.into_parts().0.into_message().await??;
         let key = make_invite_key(invite_id.as_str());
 
-        let (guild_id, mut invite) = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap()
-        {
+        let (guild_id, mut invite) = if let Some(raw) = chat_get!(key) {
             db::deser_invite_entry(raw)
         } else {
             return Err(ServerError::NoSuchInvite(invite_id.into()).into());
@@ -1135,7 +1142,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        self.dispatch_guild_join(guild_id, user_id);
+        self.dispatch_guild_join(guild_id, user_id)?;
 
         let buf = rkyv_ser(&invite);
         chat_insert!(key / [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat());
@@ -1170,7 +1177,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        self.dispatch_guild_leave(guild_id, user_id);
+        self.dispatch_guild_leave(guild_id, user_id)?;
 
         Ok(LeaveGuildResponse {})
     }
@@ -1209,11 +1216,11 @@ impl chat_service_server::ChatService for ChatServer {
             )
             .await?;
         request.content = Some(content);
-        let (message_id, message) = self.chat_tree.send_message_logic(user_id, request);
+        let (message_id, message) = self.chat_tree.send_message_logic(user_id, request)?;
 
         let is_cmd_channel = self
             .chat_tree
-            .get_admin_guild_keys()
+            .get_admin_guild_keys()?
             .map(|(g, _, c)| (g, c))
             == Some((guild_id, channel_id));
 
@@ -1222,8 +1229,7 @@ impl chat_service_server::ChatService for ChatServer {
                 content: Some(FormattedText { text, .. }),
             })) = message.content.as_ref().and_then(|c| c.content.as_ref())
             {
-                let msg = self.action_processor.run(text);
-                Some(msg)
+                self.action_processor.run(text).ok()
             } else {
                 None
             }
@@ -1257,7 +1263,7 @@ impl chat_service_server::ChatService for ChatServer {
             };
             let (message_id, message) = self
                 .chat_tree
-                .send_with_system(guild_id, channel_id, content);
+                .send_with_system(guild_id, channel_id, content)?;
             self.send_event_through_chan(
                 EventSub::Guild(guild_id),
                 stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
@@ -1322,7 +1328,7 @@ impl chat_service_server::ChatService for ChatServer {
                 channel_id,
                 role_id,
                 perms_to_give.clone(),
-            );
+            )?;
             let members = self.chat_tree.get_guild_members_logic(guild_id).members;
             let guild_owner = self.chat_tree.get_guild_owner(guild_id)?;
             let for_users = members
@@ -1527,7 +1533,7 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
         let key = make_guild_role_key(guild_id, role_id);
-        let mut role = if let Some(raw) = self.chat_tree.chat_tree.get(&key).unwrap() {
+        let mut role = if let Some(raw) = chat_get!(key) {
             db::deser_role(raw)
         } else {
             return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
@@ -1797,7 +1803,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        self.dispatch_guild_leave(guild_id, user_to_ban);
+        self.dispatch_guild_leave(guild_id, user_to_ban)?;
 
         Ok(BanUserResponse {})
     }
@@ -1836,7 +1842,7 @@ impl chat_service_server::ChatService for ChatServer {
             EventContext::empty(),
         );
 
-        self.dispatch_guild_leave(guild_id, user_to_kick);
+        self.dispatch_guild_leave(guild_id, user_to_kick)?;
 
         Ok(KickUserResponse {})
     }
@@ -2277,11 +2283,6 @@ impl ChatTree {
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
     ) -> Result<(), ServerError> {
-        let ser_ord_put = |ordering| {
-            let serialized_ordering = self.serialize_list_u64_logic(ordering);
-            cchat_insert!(key / serialized_ordering);
-        };
-
         let mut ordering = self.get_list_u64_logic(key);
 
         let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
@@ -2312,7 +2313,9 @@ impl ChatTree {
                 }
             }
         }
-        ser_ord_put(ordering);
+
+        let serialized_ordering = self.serialize_list_u64_logic(ordering);
+        cchat_insert!(key / serialized_ordering);
 
         Ok(())
     }
@@ -2531,7 +2534,7 @@ impl ChatTree {
             let mut rng = rand::thread_rng();
             let mut role_id = rng.gen_range(1..u64::MAX);
             let mut key = make_guild_role_key(guild_id, role_id);
-            while self.chat_tree.contains_key(&key).unwrap() {
+            while self.chat_tree.contains_key(&key)? {
                 role_id = rng.gen_range(1..u64::MAX);
                 key = make_guild_role_key(guild_id, role_id);
             }
@@ -2549,7 +2552,7 @@ impl ChatTree {
         channel_id: Option<u64>,
         role_id: u64,
         perms_to_give: Vec<Permission>,
-    ) {
+    ) -> ServerResult<()> {
         let mut batch = Batch::default();
         for perm in perms_to_give {
             let value = perm.ok.then(|| [1]).unwrap_or([0]);
@@ -2559,7 +2562,8 @@ impl ChatTree {
             );
             batch.insert(key, value);
         }
-        self.chat_tree.apply_batch(batch).unwrap();
+        self.chat_tree.apply_batch(batch)?;
+        Ok(())
     }
 
     pub fn create_channel_logic(
@@ -2574,7 +2578,7 @@ impl ChatTree {
             let mut rng = rand::thread_rng();
             let mut channel_id = rng.gen_range(1..=u64::MAX);
             let mut key = make_chan_key(guild_id, channel_id);
-            while self.chat_tree.contains_key(&key).unwrap() {
+            while self.chat_tree.contains_key(&key)? {
                 channel_id = rng.gen_range(1..=u64::MAX);
                 key = make_chan_key(guild_id, channel_id);
             }
@@ -2659,7 +2663,7 @@ impl ChatTree {
             ok: true,
         })
         .collect::<Vec<_>>();
-        self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone());
+        self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone())?;
         let channel_id = self.create_channel_logic(
             guild_id,
             "general".to_string(),
@@ -2668,7 +2672,7 @@ impl ChatTree {
             None,
         )?;
 
-        self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms);
+        self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms)?;
 
         Ok(guild_id)
     }
@@ -2718,7 +2722,12 @@ impl ChatTree {
     }
 
     /// Adds a guild to a user's guild list
-    pub fn add_guild_to_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
+    pub fn add_guild_to_guild_list(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        homeserver: &str,
+    ) -> ServerResult<()> {
         cchat_insert!(
             [
                 make_guild_list_key_prefix(user_id).as_ref(),
@@ -2728,13 +2737,20 @@ impl ChatTree {
             .concat()
                 / []
         );
+        Ok(())
     }
 
     /// Removes a guild from a user's guild list
-    pub fn remove_guild_from_guild_list(&self, user_id: u64, guild_id: u64, homeserver: &str) {
+    pub fn remove_guild_from_guild_list(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        homeserver: &str,
+    ) -> ServerResult<()> {
         self.chat_tree
             .remove(&make_guild_list_key(user_id, guild_id, homeserver))
-            .unwrap();
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     pub fn get_guild_roles_logic(&self, guild_id: u64) -> Vec<RoleWithId> {
@@ -2839,7 +2855,7 @@ impl ChatTree {
         &self,
         user_id: u64,
         request: SendMessageRequest,
-    ) -> (u64, HarmonyMessage) {
+    ) -> ServerResult<(u64, HarmonyMessage)> {
         let SendMessageRequest {
             guild_id,
             channel_id,
@@ -2870,7 +2886,7 @@ impl ChatTree {
         let value = db::rkyv_ser(&message);
         cchat_insert!(key / value);
 
-        (message_id, message)
+        Ok((message_id, message))
     }
 
     pub async fn process_message_content(
@@ -3075,18 +3091,23 @@ impl ChatTree {
         Ok(content)
     }
 
-    pub fn get_admin_guild_keys(&self) -> Option<(u64, u64, u64)> {
-        cchat_get!(ADMIN_GUILD_KEY).map(|raw| {
+    pub fn get_admin_guild_keys(&self) -> ServerResult<Option<(u64, u64, u64)>> {
+        Ok(cchat_get!(ADMIN_GUILD_KEY).map(|raw| {
             let (gid_raw, rest) = raw.split_at(size_of::<u64>());
             let guild_id = unsafe { u64::from_be_bytes(gid_raw.try_into().unwrap_unchecked()) };
             let (log_raw, cmd_raw) = rest.split_at(size_of::<u64>());
             let log_id = unsafe { u64::from_be_bytes(log_raw.try_into().unwrap_unchecked()) };
             let cmd_id = unsafe { u64::from_be_bytes(cmd_raw.try_into().unwrap_unchecked()) };
             (guild_id, log_id, cmd_id)
-        })
+        }))
     }
 
-    pub fn set_admin_guild_keys(&self, guild_id: u64, log_id: u64, cmd_id: u64) {
+    pub fn set_admin_guild_keys(
+        &self,
+        guild_id: u64,
+        log_id: u64,
+        cmd_id: u64,
+    ) -> ServerResult<()> {
         let value = [
             guild_id.to_be_bytes(),
             log_id.to_be_bytes(),
@@ -3094,6 +3115,7 @@ impl ChatTree {
         ]
         .concat();
         cchat_insert!(ADMIN_GUILD_KEY / value);
+        Ok(())
     }
 
     pub fn send_with_system(
@@ -3101,7 +3123,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: u64,
         content: Content,
-    ) -> (u64, HarmonyMessage) {
+    ) -> ServerResult<(u64, HarmonyMessage)> {
         let request = SendMessageRequest::default()
             .with_guild_id(guild_id)
             .with_channel_id(channel_id)
@@ -3125,7 +3147,7 @@ impl ChatTree {
     ) -> ServerResult<Option<Reaction>> {
         let react_key =
             make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &emote.image_id);
-        let reacted = self.chat_tree.contains_key(&react_key).unwrap();
+        let reacted = self.chat_tree.contains_key(&react_key)?;
         if matches!((add, reacted), (true, true) | (false, false)) {
             return Ok(None);
         }
@@ -3163,7 +3185,7 @@ impl ChatTree {
 
         batch.insert(message_key, rkyv_ser(&message));
 
-        self.chat_tree.apply_batch(batch).unwrap();
+        self.chat_tree.apply_batch(batch)?;
 
         Ok(reaction)
     }
@@ -3209,7 +3231,7 @@ where
         }
 
         if let Some((chat_tree, chat_event_sender)) = &self.inner {
-            if let Some((guild_id, channel_id, _)) = chat_tree.get_admin_guild_keys() {
+            if let Some((guild_id, channel_id, _)) = chat_tree.get_admin_guild_keys().unwrap() {
                 let color = match *metadata.level() {
                     Level::DEBUG => Some(color::encode_rgb([0, 0, 220])),
                     Level::INFO => Some(color::encode_rgb([0, 220, 0])),
@@ -3259,8 +3281,9 @@ where
                         })),
                     })),
                 };
-                let (message_id, message) =
-                    chat_tree.send_with_system(guild_id, channel_id, content);
+                let (message_id, message) = chat_tree
+                    .send_with_system(guild_id, channel_id, content)
+                    .unwrap();
 
                 let _ = chat_event_sender.send(Arc::new(EventBroadcast::new(
                     EventSub::Guild(guild_id),

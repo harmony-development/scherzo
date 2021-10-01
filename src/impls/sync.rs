@@ -85,7 +85,9 @@ impl SyncServer {
                                     .await
                                 {
                                     for event in queue.event_queue {
-                                        sync2.push_logic(&host, event);
+                                        if let Err(err) = sync2.push_logic(&host, event) {
+                                            tracing::error!("error while executing sync event: {}", err);
+                                        }
                                     }
                                 }
                             }
@@ -96,34 +98,42 @@ impl SyncServer {
                     _ = async {
                         while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
                             if sync2.is_host_allowed(&host).is_ok() {
-                                let queue = sync2.get_event_queue(&host);
-                                if !queue.event_queue.is_empty() {
-                                    sync2.push_to_event_queue(&host, queue, event);
-                                    continue;
-                                }
+                                match sync2.get_event_queue(&host) {
+                                    Ok(queue) => {
+                                        if !queue.event_queue.is_empty() {
+                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
+                                                tracing::error!("error while pushing to event queue: {}", err);
+                                            }
+                                            continue;
+                                        }
 
-                                let mut client = clients.get_client(host.clone());
-                                let mut push_result = sync2
-                                    .generate_request(PushRequest { event: Some(event.clone()) })
-                                    .map_err(|_| ())
-                                    .and_then(|req| {
-                                        client.push(req).map_err(|_| ())
-                                    })
-                                    .await;
-                                let mut try_count = 0;
-                                while try_count < 5 && push_result.is_err() {
-                                    push_result = sync2
-                                        .generate_request(PushRequest { event: Some(event.clone()) })
-                                        .map_err(|_| ())
-                                        .and_then(|req| {
-                                            client.push(req).map_err(|_| ())
-                                        })
-                                        .await;
-                                    try_count += 1;
-                                }
+                                        let mut client = clients.get_client(host.clone());
+                                        let mut push_result = sync2
+                                            .generate_request(PushRequest { event: Some(event.clone()) })
+                                            .map_err(|_| ())
+                                            .and_then(|req| {
+                                                client.push(req).map_err(|_| ())
+                                            })
+                                            .await;
+                                        let mut try_count = 0;
+                                        while try_count < 5 && push_result.is_err() {
+                                            push_result = sync2
+                                                .generate_request(PushRequest { event: Some(event.clone()) })
+                                                .map_err(|_| ())
+                                                .and_then(|req| {
+                                                    client.push(req).map_err(|_| ())
+                                                })
+                                                .await;
+                                            try_count += 1;
+                                        }
 
-                                if push_result.is_err() {
-                                    sync2.push_to_event_queue(&host, queue, event);
+                                        if push_result.is_err() {
+                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
+                                                tracing::error!("error while pushing to event queue: {}", err);
+                                            }
+                                        }
+                                    }
+                                    Err(err) => tracing::error!("error occured while getting event queue: {}", err),
                                 }
                             }
                         }
@@ -199,43 +209,47 @@ impl SyncServer {
         Err(ServerError::FailedToAuthSync)
     }
 
-    fn push_logic(&self, host: &str, event: Event) {
+    fn push_logic(&self, host: &str, event: Event) -> ServerResult<()> {
         if let Some(kind) = event.kind {
             match kind {
                 Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
                     self.chat_tree
-                        .remove_guild_from_guild_list(user_id, guild_id, host);
+                        .remove_guild_from_guild_list(user_id, guild_id, host)?;
                 }
                 Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
                     self.chat_tree
-                        .add_guild_to_guild_list(user_id, guild_id, host);
+                        .add_guild_to_guild_list(user_id, guild_id, host)?;
                 }
             }
         }
+        Ok(())
     }
 
-    fn get_event_queue(&self, host: &str) -> PullResponse {
+    fn get_event_queue(&self, host: &str) -> ServerResult<PullResponse> {
         let key = make_host_key(host);
         let queue = self
             .sync_tree
-            .get(&key)
-            .unwrap()
+            .get(&key)?
             .map_or_else(PullResponse::default, |val| {
                 rkyv_arch::<PullResponse>(&val)
                     .deserialize(&mut rkyv::Infallible)
                     .unwrap()
             });
-        self.sync_tree.remove(&key).unwrap();
-        queue
+        self.sync_tree.remove(&key)?;
+        Ok(queue)
     }
 
-    fn push_to_event_queue(&self, host: &str, mut queue: PullResponse, event: Event) {
+    fn push_to_event_queue(
+        &self,
+        host: &str,
+        mut queue: PullResponse,
+        event: Event,
+    ) -> ServerResult<()> {
         // TODO: this is a waste, find a way to optimize this
         queue.event_queue.push(event);
         let buf = rkyv_ser(&queue);
-        self.sync_tree
-            .insert(&make_host_key(host), buf.as_ref())
-            .unwrap();
+        self.sync_tree.insert(&make_host_key(host), buf.as_ref())?;
+        Ok(())
     }
 }
 
@@ -248,7 +262,7 @@ impl postbox_service_server::PostboxService for SyncServer {
         request: Request<PullRequest>,
     ) -> Result<PullResponse, HrpcServerError<Self::Error>> {
         let host = self.auth(&request).await?;
-        let queue = self.get_event_queue(&host);
+        let queue = self.get_event_queue(&host)?;
         Ok(queue)
     }
 
@@ -258,11 +272,17 @@ impl postbox_service_server::PostboxService for SyncServer {
     ) -> Result<PushResponse, HrpcServerError<Self::Error>> {
         let host = self.auth(&request).await?;
         let key = make_host_key(&host);
-        if !self.sync_tree.contains_key(&key).unwrap() {
-            self.sync_tree.insert(&key, &[]).unwrap();
+        if !self
+            .sync_tree
+            .contains_key(&key)
+            .map_err(ServerError::DbError)?
+        {
+            self.sync_tree
+                .insert(&key, &[])
+                .map_err(ServerError::DbError)?;
         }
         if let Some(event) = request.into_parts().0.into_message().await??.event {
-            self.push_logic(&host, event);
+            self.push_logic(&host, event)?;
         }
         Ok(PushResponse {})
     }

@@ -38,7 +38,7 @@ impl Batch {
 
 #[derive(Debug)]
 pub struct DbError {
-    pub inner: Box<dyn StdError>,
+    pub inner: Box<dyn StdError + Sync + Send>,
 }
 
 impl Display for DbError {

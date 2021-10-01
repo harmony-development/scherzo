@@ -161,7 +161,9 @@ pub fn download(
                                     .map(|(name, mimetype, _)| {
                                         (unsafe { disposition_header(name) }, mimetype.clone())
                                     })
-                                    .map_err(|e| reject(ServerError::Unexpected(e.into())))?;
+                                    .map_err(|e| {
+                                        reject(ServerError::FileExtractUnexpected(e.into()))
+                                    })?;
                             let len = get_content_length(&resp);
                             let data_stream = resp.bytes_stream();
                             Ok((

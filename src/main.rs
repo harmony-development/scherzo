@@ -204,12 +204,14 @@ pub async fn run(filter_level: Level, db_path: String) {
             .chat_tree
             .create_guild_logic(0, "Admin".to_string(), String::new(), None)
             .unwrap();
-        deps.chat_tree.set_permissions_logic(
-            guild_id,
-            None,
-            DEFAULT_ROLE_ID,
-            vec![Permission::new("*".to_string(), true)],
-        );
+        deps.chat_tree
+            .set_permissions_logic(
+                guild_id,
+                None,
+                DEFAULT_ROLE_ID,
+                vec![Permission::new("*".to_string(), true)],
+            )
+            .unwrap();
         let log_id = deps
             .chat_tree
             .create_channel_logic(
@@ -235,7 +237,8 @@ pub async fn run(filter_level: Level, db_path: String) {
             .create_invite_logic(guild_id, &invite_id, 1)
             .unwrap();
         deps.chat_tree
-            .set_admin_guild_keys(guild_id, log_id, cmd_id);
+            .set_admin_guild_keys(guild_id, log_id, cmd_id)
+            .unwrap();
         warn!("admin guild created! use the invite {} to join", invite_id);
     }
 

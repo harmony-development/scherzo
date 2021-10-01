@@ -137,7 +137,9 @@ impl AuthServer {
                         }
                     }
                 }
-                att.inner.apply_batch(batch).unwrap();
+                if let Err(err) = att.inner.apply_batch(batch).map_err(ServerError::DbError) {
+                    tracing::error!("error applying auth token batch: {}", err);
+                }
                 std::thread::sleep(Duration::from_secs(60 * 5));
             }
         });
@@ -246,36 +248,41 @@ impl auth_service_server::AuthService for AuthServer {
             } = TokenData::decode(token.data.as_slice())
                 .map_err(|_| ServerError::InvalidTokenData)?;
 
-            let local_user_id = self
+            let local_user_id = if let Some(id) = self
                 .profile_tree
-                .foreign_to_local_id(foreign_id, &server_id)
-                .unwrap_or_else(|| {
-                    let local_id = gen_rand_u64();
+                .foreign_to_local_id(foreign_id, &server_id)?
+            {
+                id
+            } else {
+                let local_id = gen_rand_u64();
 
-                    let mut batch = Batch::default();
-                    // Add the local to foreign user key entry
-                    batch.insert(
-                        make_local_to_foreign_user_key(local_id).to_vec(),
-                        [&foreign_id.to_be_bytes(), server_id.as_bytes()].concat(),
-                    );
-                    // Add the foreign to local user key entry
-                    batch.insert(
-                        make_foreign_to_local_user_key(foreign_id, &server_id),
-                        local_id.to_be_bytes().to_vec(),
-                    );
-                    // Add the profile entry
-                    let profile = Profile {
-                        is_bot: false,
-                        user_status: UserStatus::OfflineUnspecified.into(),
-                        user_avatar: avatar,
-                        user_name: username,
-                    };
-                    let buf = rkyv_ser(&profile);
-                    batch.insert(make_user_profile_key(local_id).to_vec(), buf);
-                    self.profile_tree.inner.apply_batch(batch).unwrap();
+                let mut batch = Batch::default();
+                // Add the local to foreign user key entry
+                batch.insert(
+                    make_local_to_foreign_user_key(local_id).to_vec(),
+                    [&foreign_id.to_be_bytes(), server_id.as_bytes()].concat(),
+                );
+                // Add the foreign to local user key entry
+                batch.insert(
+                    make_foreign_to_local_user_key(foreign_id, &server_id),
+                    local_id.to_be_bytes().to_vec(),
+                );
+                // Add the profile entry
+                let profile = Profile {
+                    is_bot: false,
+                    user_status: UserStatus::OfflineUnspecified.into(),
+                    user_avatar: avatar,
+                    user_name: username,
+                };
+                let buf = rkyv_ser(&profile);
+                batch.insert(make_user_profile_key(local_id).to_vec(), buf);
+                self.profile_tree
+                    .inner
+                    .apply_batch(batch)
+                    .map_err(ServerError::DbError)?;
 
-                    local_id
-                });
+                local_id
+            };
 
             let session_token = self.gen_auth_token();
             let session = Session {
@@ -646,7 +653,10 @@ impl auth_service_server::AuthService for AuthServer {
                                         // [ref:atime_u64_value]
                                         get_time_secs().to_be_bytes().to_vec(),
                                     );
-                                    self.auth_tree.inner.apply_batch(batch).unwrap();
+                                    self.auth_tree
+                                        .inner
+                                        .apply_batch(batch)
+                                        .map_err(ServerError::DbError)?;
 
                                     tracing::debug!(
                                         "user {} logged in with email {}",
@@ -844,15 +854,15 @@ impl AuthTree {
             inner: db.open_tree(b"auth")?,
         })
     }
-    pub fn put_rand_reg_token(&self) -> SmolStr {
+    pub fn put_rand_reg_token(&self) -> ServerResult<SmolStr> {
         // TODO: check if the token is already in tree
         let token = gen_rand_inline_str();
         {
             let hashed = hash_password(token.as_bytes());
             let key = reg_token_key(hashed.as_ref());
-            self.inner.insert(&key, &[]).unwrap();
+            self.inner.insert(&key, &[])?;
         }
-        token
+        Ok(token)
     }
 }
 

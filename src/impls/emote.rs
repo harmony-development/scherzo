@@ -101,9 +101,12 @@ impl EmoteService for EmoteServer {
             let (key, _) = res.unwrap();
             batch.remove(key);
         }
-        self.emote_tree.inner.apply_batch(batch).unwrap();
+        self.emote_tree
+            .inner
+            .apply_batch(batch)
+            .map_err(ServerError::DbError)?;
 
-        self.emote_tree.dequip_emote_pack_logic(user_id, pack_id);
+        self.emote_tree.dequip_emote_pack_logic(user_id, pack_id)?;
 
         let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id);
         self.send_event_through_chan(
@@ -125,7 +128,7 @@ impl EmoteService for EmoteServer {
 
         let DequipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
 
-        self.emote_tree.dequip_emote_pack_logic(user_id, pack_id);
+        self.emote_tree.dequip_emote_pack_logic(user_id, pack_id)?;
 
         self.send_event_through_chan(
             EventSub::Homeserver,
@@ -149,7 +152,7 @@ impl EmoteService for EmoteServer {
         let key = make_emote_pack_key(pack_id);
         if let Some(data) = emote_get!(key) {
             let pack = db::deser_emote_pack(data);
-            self.emote_tree.equip_emote_pack_logic(user_id, pack_id);
+            self.emote_tree.equip_emote_pack_logic(user_id, pack_id)?;
             self.send_event_through_chan(
                 EventSub::Homeserver,
                 stream_event::Event::EmotePackAdded(EmotePackAdded { pack: Some(pack) }),
@@ -294,7 +297,7 @@ impl EmoteService for EmoteServer {
 
         emote_insert!(key / data);
 
-        self.emote_tree.equip_emote_pack_logic(user_id, pack_id);
+        self.emote_tree.equip_emote_pack_logic(user_id, pack_id)?;
         self.send_event_through_chan(
             EventSub::Homeserver,
             stream_event::Event::EmotePackAdded(EmotePackAdded {
@@ -341,14 +344,16 @@ impl EmoteTree {
         Ok(pack)
     }
 
-    pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
+    pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
         eemote_remove!(key);
+        Ok(())
     }
 
-    pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) {
+    pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
         eemote_insert!(key / &[]);
+        Ok(())
     }
 
     pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> Vec<u64> {
