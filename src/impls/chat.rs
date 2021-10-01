@@ -13,6 +13,7 @@ use harmony_rust_sdk::api::{
         get_channel_messages_request::Direction, permission::has_permission, stream_event,
         FormattedText, Message as HarmonyMessage, *,
     },
+    emote::Emote,
     exports::hrpc::{
         return_print,
         server::{ServerError as HrpcServerError, Socket, SocketError},
@@ -50,10 +51,10 @@ use crate::{
         rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
-    set_proto_name, ServerError,
+    set_proto_name,
 };
 
-use super::{profile::ProfileTree, ActionProcesser, Dependencies};
+use super::{prelude::*, profile::ProfileTree, ActionProcesser};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSub {
@@ -315,6 +316,31 @@ impl ChatServer {
                 );
             }
         }
+    }
+
+    fn send_reaction_event(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        reaction: Option<Reaction>,
+    ) {
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            stream_event::Event::ReactionUpdated(stream_event::ReactionUpdated {
+                guild_id,
+                channel_id,
+                message_id,
+                reaction,
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id: Some(channel_id),
+                check_for: all_permissions::MESSAGES_VIEW,
+                must_be_guild_owner: false,
+            }),
+            EventContext::empty(),
+        );
     }
 }
 
@@ -1922,16 +1948,50 @@ impl chat_service_server::ChatService for ChatServer {
 
     async fn add_reaction(
         &self,
-        _request: Request<AddReactionRequest>,
+        request: Request<AddReactionRequest>,
     ) -> Result<AddReactionResponse, HrpcServerError<Self::Error>> {
-        Err(ServerError::NotImplemented.into())
+        auth!();
+
+        let AddReactionRequest {
+            guild_id,
+            channel_id,
+            message_id,
+            emote,
+        } = request.into_parts().0.into_message().await??;
+
+        if let Some(emote) = emote {
+            let reaction = self
+                .chat_tree
+                .update_reaction(user_id, guild_id, channel_id, message_id, emote, true)?;
+            self.send_reaction_event(guild_id, channel_id, message_id, reaction);
+        }
+
+        Ok(AddReactionResponse {})
     }
 
     async fn remove_reaction(
         &self,
-        _request: Request<RemoveReactionRequest>,
+        request: Request<RemoveReactionRequest>,
     ) -> Result<RemoveReactionResponse, HrpcServerError<Self::Error>> {
-        Err(ServerError::NotImplemented.into())
+        auth!();
+
+        let RemoveReactionRequest {
+            guild_id,
+            channel_id,
+            message_id,
+            emote,
+        } = request.into_parts().0.into_message().await??;
+
+        if let Some(emote) = emote {
+            let reaction = self
+                .chat_tree
+                .update_reaction(user_id, guild_id, channel_id, message_id, emote, false)?;
+            if reaction.is_some() {
+                self.send_reaction_event(guild_id, channel_id, message_id, reaction);
+            }
+        }
+
+        Ok(RemoveReactionResponse {})
     }
 }
 
@@ -3051,6 +3111,60 @@ impl ChatTree {
                 avatar: None,
             });
         self.send_message_logic(0, request)
+    }
+
+    pub fn update_reaction(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        emote: Emote,
+        add: bool,
+    ) -> ServerResult<Option<Reaction>> {
+        let react_key =
+            make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &emote.image_id);
+        let reacted = self.chat_tree.contains_key(&react_key).unwrap();
+        if matches!((add, reacted), (true, true) | (false, false)) {
+            return Ok(None);
+        }
+
+        // TODO: validate the emote image_id is below a certain size
+        self.check_guild_user_channel(guild_id, user_id, channel_id)?;
+
+        let (mut message, message_key) =
+            self.get_message_logic(guild_id, channel_id, message_id)?;
+
+        let mut batch = Batch::default();
+        let reaction = if let Some(reaction) = message.reactions.iter_mut().find(|r| {
+            r.emote
+                .as_ref()
+                .map_or(false, |e| e.image_id == emote.image_id)
+        }) {
+            reaction.count = add
+                .then(|| reaction.count.saturating_add(1))
+                .unwrap_or_else(|| reaction.count.saturating_sub(1));
+            if reaction.count == 0 {
+                batch.remove(react_key);
+            }
+            Some(reaction.clone())
+        } else if add {
+            let reaction = Reaction {
+                count: 1,
+                emote: Some(emote),
+            };
+            batch.insert(react_key, Vec::new());
+            message.reactions.push(reaction.clone());
+            Some(reaction)
+        } else {
+            None
+        };
+
+        batch.insert(message_key, rkyv_ser(&message));
+
+        self.chat_tree.apply_batch(batch).unwrap();
+
+        Ok(reaction)
     }
 }
 

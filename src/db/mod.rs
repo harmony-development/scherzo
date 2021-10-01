@@ -217,6 +217,22 @@ pub mod chat {
         ])
     }
 
+    pub fn make_user_reacted_msg_key(
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        user_id: u64,
+        image_id: &str,
+    ) -> Vec<u8> {
+        [
+            make_msg_key(guild_id, channel_id, message_id).as_ref(),
+            &[0],
+            user_id.to_be_bytes().as_ref(),
+            image_id.as_bytes(),
+        ]
+        .concat()
+    }
+
     // message
 
     // member
