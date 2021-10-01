@@ -29,7 +29,7 @@ use scherzo::{
         against_proxy,
         auth::AuthServer,
         batch::BatchServer,
-        chat::{AdminLogChannelLogger, ChatServer},
+        chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
@@ -204,14 +204,12 @@ pub async fn run(filter_level: Level, db_path: String) {
             .chat_tree
             .create_guild_logic(0, "Admin".to_string(), String::new(), None)
             .unwrap();
-        if let Some(default_role_id) = deps.chat_tree.get_default_role(guild_id) {
-            deps.chat_tree.set_permissions_logic(
-                guild_id,
-                None,
-                default_role_id,
-                vec![Permission::new("*".to_string(), true)],
-            );
-        }
+        deps.chat_tree.set_permissions_logic(
+            guild_id,
+            None,
+            DEFAULT_ROLE_ID,
+            vec![Permission::new("*".to_string(), true)],
+        );
         let log_id = deps
             .chat_tree
             .create_channel_logic(

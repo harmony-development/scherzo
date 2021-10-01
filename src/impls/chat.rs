@@ -56,6 +56,8 @@ use crate::{
 
 use super::{prelude::*, profile::ProfileTree, ActionProcesser};
 
+pub const DEFAULT_ROLE_ID: u64 = 0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSub {
     Guild(u64),
@@ -1486,7 +1488,7 @@ impl chat_service_server::ChatService for ChatServer {
             hoist,
             pingable,
         };
-        let role_id = self.chat_tree.add_guild_role_logic(guild_id, role)?;
+        let role_id = self.chat_tree.add_guild_role_logic(guild_id, None, role)?;
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
             stream_event::Event::RoleCreated(stream_event::RoleCreated {
@@ -2512,21 +2514,20 @@ impl ChatTree {
         Ok(roles)
     }
 
-    pub fn get_default_role(&self, guild_id: u64) -> Option<u64> {
-        // Safety: safe since we only store valid u64 [ref:default_role_store]
-        cchat_get!(make_guild_default_role_key(guild_id))
-            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
-    }
-
     pub fn add_default_role_to(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
-        if let Some(default_role_id) = self.get_default_role(guild_id) {
-            self.manage_user_roles_logic(guild_id, user_id, vec![default_role_id], Vec::new())?;
-        }
-        Ok(())
+        self.manage_user_roles_logic(guild_id, user_id, vec![DEFAULT_ROLE_ID], Vec::new())
+            .map(|_| ())
     }
 
-    pub fn add_guild_role_logic(&self, guild_id: u64, role: Role) -> Result<u64, ServerError> {
-        let (role_id, key) = {
+    pub fn add_guild_role_logic(
+        &self,
+        guild_id: u64,
+        role_id: Option<u64>,
+        role: Role,
+    ) -> Result<u64, ServerError> {
+        let (role_id, key) = if let Some(id) = role_id {
+            (id, make_guild_role_key(guild_id, id))
+        } else {
             let mut rng = rand::thread_rng();
             let mut role_id = rng.gen_range(1..u64::MAX);
             let mut key = make_guild_role_key(guild_id, role_id);
@@ -2635,14 +2636,14 @@ impl ChatTree {
         // Some basic default setup
         let everyone_role_id = self.add_guild_role_logic(
             guild_id,
+            // "everyone" role must have id 0 according to protocol
+            Some(DEFAULT_ROLE_ID),
             Role {
                 name: "everyone".to_string(),
                 pingable: false,
                 ..Default::default()
             },
         )?;
-        // [tag:default_role_store]
-        cchat_insert!(make_guild_default_role_key(guild_id) / everyone_role_id.to_be_bytes());
         if user_id != 0 {
             self.add_default_role_to(guild_id, user_id)?;
         }

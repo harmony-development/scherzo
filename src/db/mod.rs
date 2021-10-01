@@ -272,10 +272,6 @@ pub mod chat {
         concat_static(&[&guild_id.to_be_bytes(), &[4]])
     }
 
-    pub const fn make_guild_default_role_key(guild_id: u64) -> [u8; 10] {
-        concat_static(&[&guild_id.to_be_bytes(), &[1, 4]])
-    }
-
     pub const fn make_guild_role_ordering_key(guild_id: u64) -> [u8; 10] {
         concat_static(&[&guild_id.to_be_bytes(), &[1, 3]])
     }
