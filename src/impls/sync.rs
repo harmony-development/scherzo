@@ -66,11 +66,18 @@ impl SyncServer {
             loop {
                 tokio::select! {
                     _ = async {
-                        let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).map(|res| {
-                            let (key, _) = res.unwrap();
+                        let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).flat_map(|res| {
+                            let key = match res {
+                                Ok((key, _)) => key,
+                                Err(err) => {
+                                    let err = ServerError::DbError(err);
+                                    tracing::error!("error occured while getting hosts for sync: {}", err);
+                                    return None;
+                                }
+                            };
                             let (_, host_raw) = key.split_at(HOST_PREFIX.len());
                             let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-                            SmolStr::new(host)
+                            Some(SmolStr::new(host))
                         });
 
                         for host in hosts {

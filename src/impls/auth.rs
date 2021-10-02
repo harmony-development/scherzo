@@ -85,17 +85,20 @@ impl AuthServer {
             tracing::info!("starting auth session expiration check thread");
 
             // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-            unsafe fn scan_tree_for(att: &dyn Tree, prefix: &[u8]) -> Vec<(u64, Vec<u8>)> {
+            unsafe fn scan_tree_for(
+                att: &dyn Tree,
+                prefix: &[u8],
+            ) -> ServerResult<Vec<(u64, Vec<u8>)>> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
-                    .map(move |res| {
-                        let (key, val) = res.unwrap();
-                        (
+                    .try_fold(Vec::new(), move |mut all, res| {
+                        let (key, val) = res?;
+                        all.push((
                             u64::from_be_bytes(key.split_at(len).1.try_into().unwrap_unchecked()),
                             val,
-                        )
+                        ));
+                        ServerResult::Ok(all)
                     })
-                    .collect()
             }
 
             loop {
@@ -104,42 +107,53 @@ impl AuthServer {
                 // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
                 let atimes = unsafe { scan_tree_for(att.inner.as_ref(), ATIME_PREFIX) };
 
-                let mut batch = Batch::default();
-                for (id, raw_token) in tokens {
-                    if let Ok(profile) = ptt.get_profile_logic(id) {
-                        for (oid, raw_atime) in &atimes {
-                            if id.eq(oid) {
-                                // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
-                                let secs = u64::from_be_bytes(unsafe {
-                                    raw_atime.as_slice().try_into().unwrap_unchecked()
-                                });
-                                let auth_how_old = get_time_secs() - secs;
-                                // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
-                                let token =
-                                    unsafe { std::str::from_utf8_unchecked(raw_token.as_ref()) };
+                match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
+                    Ok((tokens, atimes)) => {
+                        let mut batch = Batch::default();
+                        for (id, raw_token) in tokens {
+                            if let Ok(profile) = ptt.get_profile_logic(id) {
+                                for (oid, raw_atime) in &atimes {
+                                    if id.eq(oid) {
+                                        // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
+                                        let secs = u64::from_be_bytes(unsafe {
+                                            raw_atime.as_slice().try_into().unwrap_unchecked()
+                                        });
+                                        let auth_how_old = get_time_secs() - secs;
+                                        // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
+                                        let token = unsafe {
+                                            std::str::from_utf8_unchecked(raw_token.as_ref())
+                                        };
 
-                                if vs.contains_key(token) {
-                                    // [ref:atime_u64_key] [ref:atime_u64_value]
-                                    batch.insert(
-                                        atime_key(id).to_vec(),
-                                        get_time_secs().to_be_bytes().to_vec(),
-                                    );
-                                } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE {
-                                    tracing::debug!("user {} session has expired", id);
-                                    batch.remove(token_key(id).to_vec());
-                                    batch.remove(atime_key(id).to_vec());
-                                    vs.remove(token);
-                                } else {
-                                    // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
-                                    vs.insert(SmolStr::new_inline(token), id);
+                                        if vs.contains_key(token) {
+                                            // [ref:atime_u64_key] [ref:atime_u64_value]
+                                            batch.insert(
+                                                atime_key(id).to_vec(),
+                                                get_time_secs().to_be_bytes().to_vec(),
+                                            );
+                                        } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE
+                                        {
+                                            tracing::debug!("user {} session has expired", id);
+                                            batch.remove(token_key(id).to_vec());
+                                            batch.remove(atime_key(id).to_vec());
+                                            vs.remove(token);
+                                        } else {
+                                            // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
+                                            vs.insert(SmolStr::new_inline(token), id);
+                                        }
+                                    }
                                 }
                             }
                         }
+                        if let Err(err) = att.inner.apply_batch(batch).map_err(ServerError::DbError)
+                        {
+                            tracing::error!("error applying auth token batch: {}", err);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!("error scanning tree for tokens: {}", err);
                     }
                 }
-                if let Err(err) = att.inner.apply_batch(batch).map_err(ServerError::DbError) {
-                    tracing::error!("error applying auth token batch: {}", err);
-                }
+
                 std::thread::sleep(Duration::from_secs(60 * 5));
             }
         });
@@ -613,8 +627,11 @@ impl auth_service_server::AuthService for AuthServer {
                                     let password_hashed = hash_password(password_raw);
                                     let email = try_get_email(&mut values)?;
 
-                                    let user_id = if let Some(user_id) =
-                                        self.auth_tree.inner.get(email.as_bytes()).unwrap()
+                                    let user_id = if let Some(user_id) = self
+                                        .auth_tree
+                                        .inner
+                                        .get(email.as_bytes())
+                                        .map_err(ServerError::DbError)?
                                     {
                                         // Safety: this unwrap can never cause UB since we only store u64
                                         u64::from_be_bytes(unsafe {
@@ -631,7 +648,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         .auth_tree
                                         .inner
                                         .get(user_id.to_be_bytes().as_ref())
-                                        .unwrap()
+                                        .map_err(ServerError::DbError)?
                                         .map_or(true, |pass| pass != password_hashed.as_ref())
                                     {
                                         return Err(ServerError::WrongUserOrPassword {
@@ -683,7 +700,7 @@ impl auth_service_server::AuthService for AuthServer {
                                             .auth_tree
                                             .inner
                                             .get(&reg_token_key(token_hashed.as_ref()))
-                                            .unwrap()
+                                            .map_err(ServerError::DbError)?
                                             .is_none()
                                         {
                                             return Err(
@@ -700,7 +717,7 @@ impl auth_service_server::AuthService for AuthServer {
                                         .auth_tree
                                         .inner
                                         .get(email.as_bytes())
-                                        .unwrap()
+                                        .map_err(ServerError::DbError)?
                                         .is_some()
                                     {
                                         return Err(ServerError::UserAlreadyExists.into());

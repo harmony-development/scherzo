@@ -66,7 +66,7 @@ impl EmoteService for EmoteServer {
 
         emote_remove!(key);
 
-        let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id);
+        let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id)?;
         self.send_event_through_chan(
             EventSub::Homeserver,
             stream_event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
@@ -98,7 +98,7 @@ impl EmoteService for EmoteServer {
         let mut batch = Batch::default();
         batch.remove(key);
         for res in self.emote_tree.inner.scan_prefix(&key) {
-            let (key, _) = res.unwrap();
+            let (key, _) = res.map_err(ServerError::DbError)?;
             batch.remove(key);
         }
         self.emote_tree
@@ -108,7 +108,7 @@ impl EmoteService for EmoteServer {
 
         self.emote_tree.dequip_emote_pack_logic(user_id, pack_id)?;
 
-        let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id);
+        let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id)?;
         self.send_event_through_chan(
             EventSub::Homeserver,
             stream_event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),
@@ -185,7 +185,7 @@ impl EmoteService for EmoteServer {
 
             emote_insert!(emote_key / data);
 
-            let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id);
+            let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id)?;
             self.send_event_through_chan(
                 EventSub::Homeserver,
                 stream_event::Event::EmotePackEmotesUpdated(EmotePackEmotesUpdated {
@@ -209,41 +209,44 @@ impl EmoteService for EmoteServer {
         auth!();
 
         let prefix = make_equipped_emote_prefix(user_id);
-        let equipped_packs = self
-            .emote_tree
-            .inner
-            .scan_prefix(&prefix)
-            .filter_map(|res| {
-                let (key, _) = res.unwrap();
-                (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
+        let equipped_packs =
+            self.emote_tree
+                .inner
+                .scan_prefix(&prefix)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, _) = res?;
+                    if key.len() == make_equipped_emote_key(user_id, 0).len() {
+                        let pack_id =
+                        // Safety: since it will always be 8 bytes left afterwards
+                        u64::from_be_bytes(unsafe {
+                            key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                        });
+                        all.push(pack_id);
+                    }
+                    ServerResult::Ok(all)
+                })?;
 
         let packs = self
             .emote_tree
             .inner
             .scan_prefix(EMOTEPACK_PREFIX)
-            .filter_map(|res| {
-                let (key, val) = res.unwrap();
-                let pack_id = (key.len() == make_emote_pack_key(0).len()).then(|| {
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(EMOTEPACK_PREFIX.len())
-                            .1
-                            .try_into()
-                            .unwrap_unchecked()
-                    })
-                })?;
-                equipped_packs
-                    .contains(&pack_id)
-                    .then(|| db::deser_emote_pack(val))
-            })
-            .collect();
+            .try_fold(Vec::new(), |mut all, res| {
+                let (key, val) = res?;
+                if key.len() == make_emote_pack_key(0).len() {
+                    let pack_id =
+                        // Safety: since it will always be 8 bytes left afterwards
+                        u64::from_be_bytes(unsafe {
+                            key.split_at(EMOTEPACK_PREFIX.len())
+                                .1
+                                .try_into()
+                                .unwrap_unchecked()
+                        });
+                    if equipped_packs.contains(&pack_id) {
+                        all.push(db::deser_emote_pack(val));
+                    }
+                }
+                ServerResult::Ok(all)
+            })?;
 
         Ok(GetEmotePacksResponse { packs })
     }
@@ -263,15 +266,17 @@ impl EmoteService for EmoteServer {
             return Err(ServerError::EmotePackNotFound.into());
         }
 
-        let emotes = self
-            .emote_tree
-            .inner
-            .scan_prefix(&pack_key)
-            .flat_map(|res| {
-                let (key, value) = res.unwrap();
-                (key.len() > pack_key.len()).then(|| db::deser_emote(value))
-            })
-            .collect();
+        let emotes =
+            self.emote_tree
+                .inner
+                .scan_prefix(&pack_key)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, value) = res?;
+                    if key.len() > pack_key.len() {
+                        all.push(db::deser_emote(value));
+                    }
+                    ServerResult::Ok(all)
+                })?;
 
         Ok(GetEmotePackEmotesResponse { emotes })
     }
@@ -356,36 +361,42 @@ impl EmoteTree {
         Ok(())
     }
 
-    pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> Vec<u64> {
+    pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> ServerResult<Vec<u64>> {
         let mut result = Vec::new();
-        for user_id in self.inner.scan_prefix(USER_PREFIX).filter_map(|res| {
-            let (key, _) = res.unwrap();
-            (key.len() == make_user_profile_key(0).len()).then(|| {
-                u64::from_be_bytes(unsafe {
-                    key.split_at(USER_PREFIX.len())
-                        .1
-                        .try_into()
-                        .unwrap_unchecked()
-                })
-            })
-        }) {
+        for user_id in
+            self.inner
+                .scan_prefix(USER_PREFIX)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, _) = res?;
+                    if key.len() == make_user_profile_key(0).len() {
+                        all.push(u64::from_be_bytes(unsafe {
+                            key.split_at(USER_PREFIX.len())
+                                .1
+                                .try_into()
+                                .unwrap_unchecked()
+                        }));
+                    }
+                    ServerResult::Ok(all)
+                })?
+        {
             let prefix = make_equipped_emote_prefix(user_id);
-            if self
-                .inner
-                .scan_prefix(&prefix)
-                .filter_map(|res| {
-                    let (key, _) = res.unwrap();
-                    (key.len() == make_equipped_emote_key(user_id, 0).len()).then(|| {
-                        u64::from_be_bytes(unsafe {
-                            key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                        })
-                    })
-                })
-                .any(|id| id == pack_id)
-            {
+            let mut has = false;
+            for res in self.inner.scan_prefix(&prefix) {
+                let (key, _) = res?;
+                if key.len() == make_equipped_emote_key(user_id, 0).len() {
+                    let id = u64::from_be_bytes(unsafe {
+                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                    });
+                    if id == pack_id {
+                        has = true;
+                        break;
+                    }
+                }
+            }
+            if has {
                 result.push(user_id);
             }
         }
-        result
+        Ok(result)
     }
 }

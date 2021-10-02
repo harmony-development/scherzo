@@ -120,7 +120,7 @@ impl ProfileService for ProfileServer {
                 new_is_bot,
             }),
             None,
-            EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)),
+            EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)?),
         );
 
         Ok(UpdateProfileResponse {})

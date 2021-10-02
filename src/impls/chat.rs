@@ -454,12 +454,10 @@ impl chat_service_server::ChatService for ChatServer {
         auth!();
 
         let prefix = make_guild_list_key_prefix(user_id);
-        let guilds = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .map(|res| {
-                let (guild_id_raw, _) = res.unwrap();
+        let guilds = self.chat_tree.chat_tree.scan_prefix(&prefix).try_fold(
+            Vec::new(),
+            |mut all, res| {
+                let (guild_id_raw, _) = res?;
                 let (id_raw, host_raw) = guild_id_raw
                     .split_at(prefix.len())
                     .1
@@ -470,12 +468,14 @@ impl chat_service_server::ChatService for ChatServer {
                 // Safety: we never store non UTF-8 hosts, so this can't cause UB
                 let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
 
-                GuildListEntry {
+                all.push(GuildListEntry {
                     guild_id,
                     server_id: host.to_string(),
-                }
-            })
-            .collect();
+                });
+
+                ServerResult::Ok(all)
+            },
+        )?;
 
         Ok(GetGuildListResponse { guilds })
     }
@@ -510,7 +510,9 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "invites.view", false)?;
 
-        Ok(self.chat_tree.get_guild_invites_logic(guild_id))
+        self.chat_tree
+            .get_guild_invites_logic(guild_id)
+            .map_err(Into::into)
     }
 
     #[rate(15, 5)]
@@ -524,7 +526,9 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
-        Ok(self.chat_tree.get_guild_members_logic(guild_id))
+        self.chat_tree
+            .get_guild_members_logic(guild_id)
+            .map_err(Into::into)
     }
 
     #[rate(15, 5)]
@@ -538,7 +542,9 @@ impl chat_service_server::ChatService for ChatServer {
 
         self.chat_tree.check_guild_user(guild_id, user_id)?;
 
-        Ok(self.chat_tree.get_guild_channels_logic(guild_id, user_id))
+        self.chat_tree
+            .get_guild_channels_logic(guild_id, user_id)
+            .map_err(Into::into)
     }
 
     #[rate(10, 5)]
@@ -561,13 +567,15 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
 
-        Ok(self.chat_tree.get_channel_messages_logic(
-            guild_id,
-            channel_id,
-            message_id,
-            direction.map(|val| Direction::from_i32(val).unwrap_or_default()),
-            count,
-        ))
+        self.chat_tree
+            .get_channel_messages_logic(
+                guild_id,
+                channel_id,
+                message_id,
+                direction.map(|val| Direction::from_i32(val).unwrap_or_default()),
+                count,
+            )
+            .map_err(Into::into)
     }
 
     #[rate(10, 5)]
@@ -790,16 +798,16 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         let prefix = make_guild_chan_prefix(guild_id);
-        let channels = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, _) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>())
-                    .then(|| unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) })
-            })
-            .collect::<Vec<_>>();
+        let channels = self.chat_tree.chat_tree.scan_prefix(&prefix).try_fold(
+            Vec::new(),
+            |mut all, res| {
+                let (key, _) = res?;
+                if key.len() == prefix.len() + size_of::<u64>() {
+                    all.push(unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) });
+                }
+                ServerResult::Ok(all)
+            },
+        )?;
 
         for channel_id in channels {
             if !channel_ids.contains(&channel_id) {
@@ -903,13 +911,16 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "guild.manage.delete", false)?;
 
-        let guild_members = self.chat_tree.get_guild_members_logic(guild_id).members;
+        let guild_members = self.chat_tree.get_guild_members_logic(guild_id)?.members;
 
         let guild_data = self
             .chat_tree
             .chat_tree
             .scan_prefix(&guild_id.to_be_bytes())
-            .map(|res| res.unwrap().0);
+            .try_fold(Vec::new(), |mut all, res| {
+                all.push(res?.0);
+                ServerResult::Ok(all)
+            })?;
 
         let mut batch = Batch::default();
         for key in guild_data {
@@ -976,7 +987,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .chat_tree
             .remove(&make_invite_key(invite_id.as_str()))
-            .unwrap();
+            .map_err(ServerError::DbError)?;
 
         Ok(DeleteInviteResponse {})
     }
@@ -1007,11 +1018,14 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .chat_tree
             .scan_prefix(&make_chan_key(guild_id, channel_id))
-            .map(|res| res.unwrap().0);
+            .try_fold(Vec::new(), |mut all, res| {
+                all.push(res?.0);
+                ServerResult::Ok(all)
+            })?;
 
         // Remove from ordering list
         let key = make_guild_chan_ordering_key(guild_id);
-        let mut ordering = self.chat_tree.get_list_u64_logic(&key);
+        let mut ordering = self.chat_tree.get_list_u64_logic(&key)?;
         if let Some(index) = ordering.iter().position(|oid| channel_id.eq(oid)) {
             ordering.remove(index);
         } else {
@@ -1076,7 +1090,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .chat_tree
             .remove(&make_msg_key(guild_id, channel_id, message_id))
-            .unwrap();
+            .map_err(ServerError::DbError)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1113,7 +1127,7 @@ impl chat_service_server::ChatService for ChatServer {
             return Err(ServerError::NoSuchInvite(invite_id.into()).into());
         };
 
-        if self.chat_tree.is_user_banned_in_guild(guild_id, user_id) {
+        if self.chat_tree.is_user_banned_in_guild(guild_id, user_id)? {
             return Err(ServerError::UserBanned.into());
         }
 
@@ -1164,7 +1178,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .chat_tree
             .remove(&make_member_key(guild_id, user_id))
-            .unwrap();
+            .map_err(ServerError::DbError)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1329,22 +1343,24 @@ impl chat_service_server::ChatService for ChatServer {
                 role_id,
                 perms_to_give.clone(),
             )?;
-            let members = self.chat_tree.get_guild_members_logic(guild_id).members;
+            let members = self.chat_tree.get_guild_members_logic(guild_id)?.members;
             let guild_owner = self.chat_tree.get_guild_owner(guild_id)?;
-            let for_users = members
-                .iter()
-                .filter_map(|user_id| {
-                    guild_owner
-                        .ne(user_id)
-                        .then(|| {
-                            self.chat_tree
-                                .get_user_roles_logic(guild_id, *user_id)
-                                .contains(&role_id)
-                                .then(|| *user_id)
-                        })
-                        .flatten()
-                })
-                .collect::<Vec<_>>();
+            let for_users = members.iter().try_fold(
+                Vec::with_capacity(members.len()),
+                |mut all, user_id| {
+                    if guild_owner.ne(user_id) {
+                        let maybe_user = self
+                            .chat_tree
+                            .get_user_roles_logic(guild_id, *user_id)?
+                            .contains(&role_id)
+                            .then(|| *user_id);
+                        if let Some(user_id) = maybe_user {
+                            all.push(user_id);
+                        }
+                    }
+                    ServerResult::Ok(all)
+                },
+            )?;
             for perm in &perms_to_give {
                 self.send_event_through_chan(
                     EventSub::Guild(guild_id),
@@ -1404,7 +1420,7 @@ impl chat_service_server::ChatService for ChatServer {
 
         let perms = self
             .chat_tree
-            .get_permissions_logic(guild_id, channel_id, role_id)
+            .get_permissions_logic(guild_id, channel_id, role_id)?
             .into_iter()
             .map(|(m, ok)| Permission {
                 matches: m.into(),
@@ -1464,7 +1480,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "roles.get", false)?;
 
-        let roles = self.chat_tree.get_guild_roles_logic(guild_id);
+        let roles = self.chat_tree.get_guild_roles_logic(guild_id)?;
 
         Ok(GetGuildRolesResponse { roles })
     }
@@ -1589,7 +1605,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .chat_tree
             .remove(&make_guild_role_key(guild_id, role_id))
-            .unwrap()
+            .map_err(ServerError::DbError)?
             .ok_or(ServerError::NoSuchRole { guild_id, role_id })?;
 
         self.send_event_through_chan(
@@ -1669,7 +1685,7 @@ impl chat_service_server::ChatService for ChatServer {
                 .check_perms(guild_id, None, user_id, "roles.user.get", false)?;
         }
 
-        let roles = self.chat_tree.get_user_roles_logic(guild_id, fetch_user);
+        let roles = self.chat_tree.get_user_roles_logic(guild_id, fetch_user)?;
 
         Ok(GetUserRolesResponse { roles })
     }
@@ -1724,7 +1740,7 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .chat_tree
             .get(&key)
-            .unwrap()
+            .map_err(ServerError::DbError)?
             .ok_or_else(|| ServerError::NoSuchInvite(invite_id.into()))
             .map(|raw| db::deser_invite_entry_guild_id(&raw))?;
         let guild = self.chat_tree.get_guild_logic(guild_id)?;
@@ -1732,12 +1748,17 @@ impl chat_service_server::ChatService for ChatServer {
             .chat_tree
             .chat_tree
             .scan_prefix(&make_guild_mem_prefix(guild_id))
-            .count();
+            .try_fold(0, |all, res| {
+                if let Err(err) = res {
+                    return Err(ServerError::DbError(err));
+                }
+                ServerResult::Ok(all + 1)
+            })?;
 
         Ok(PreviewGuildResponse {
             name: guild.name,
             picture: guild.picture,
-            member_count: member_count as u64,
+            member_count,
         })
     }
 
@@ -1750,19 +1771,18 @@ impl chat_service_server::ChatService for ChatServer {
         let GetBannedUsersRequest { guild_id } = request.into_parts().0.into_message().await??;
 
         let prefix = make_guild_banned_mem_prefix(guild_id);
-        let banned_users = self
-            .chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, _) = res.unwrap();
-                (key.len() == make_banned_member_key(0, 0).len()).then(|| {
-                    u64::from_be_bytes(unsafe {
+        let banned_users = self.chat_tree.chat_tree.scan_prefix(&prefix).try_fold(
+            Vec::new(),
+            |mut all, res| {
+                let (key, _) = res?;
+                if key.len() == make_banned_member_key(0, 0).len() {
+                    all.push(u64::from_be_bytes(unsafe {
                         key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                    })
-                })
-            })
-            .collect();
+                    }));
+                }
+                ServerResult::Ok(all)
+            },
+        )?;
 
         Ok(GetBannedUsersResponse { banned_users })
     }
@@ -1788,7 +1808,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "user.manage.ban", false)?;
 
-        self.chat_tree.kick_user_logic(guild_id, user_to_ban);
+        self.chat_tree.kick_user_logic(guild_id, user_to_ban)?;
 
         chat_insert!(make_banned_member_key(guild_id, user_to_ban) / get_time_secs().to_be_bytes());
 
@@ -1829,7 +1849,7 @@ impl chat_service_server::ChatService for ChatServer {
         self.chat_tree
             .check_perms(guild_id, None, user_id, "user.manage.kick", false)?;
 
-        self.chat_tree.kick_user_logic(guild_id, user_to_kick);
+        self.chat_tree.kick_user_logic(guild_id, user_to_kick)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -2030,26 +2050,23 @@ impl ChatTree {
         Ok(Self { chat_tree })
     }
 
-    pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> Result<(), ServerError> {
+    pub fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
         self.chat_tree
-            .contains_key(&make_member_key(guild_id, user_id))
-            .unwrap()
+            .contains_key(&make_member_key(guild_id, user_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::UserNotInGuild { guild_id, user_id }))
     }
 
-    pub fn does_guild_exist(&self, guild_id: u64) -> Result<(), ServerError> {
+    pub fn does_guild_exist(&self, guild_id: u64) -> ServerResult<()> {
         self.chat_tree
-            .contains_key(&guild_id.to_be_bytes())
-            .unwrap()
+            .contains_key(&guild_id.to_be_bytes())?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchGuild(guild_id)))
     }
 
-    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> Result<(), ServerError> {
+    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> ServerResult<()> {
         self.chat_tree
-            .contains_key(&make_chan_key(guild_id, channel_id))
-            .unwrap()
+            .contains_key(&make_chan_key(guild_id, channel_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchChannel {
                 guild_id,
@@ -2057,24 +2074,22 @@ impl ChatTree {
             }))
     }
 
-    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> Result<(), ServerError> {
+    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> ServerResult<()> {
         self.chat_tree
-            .contains_key(&make_guild_role_key(guild_id, role_id))
-            .unwrap()
+            .contains_key(&make_guild_role_key(guild_id, role_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchRole { guild_id, role_id }))
     }
 
-    pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> bool {
-        self.chat_tree
-            .contains_key(&make_banned_member_key(guild_id, user_id))
-            .unwrap()
+    pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
+        Ok(self
+            .chat_tree
+            .contains_key(&make_banned_member_key(guild_id, user_id))?)
     }
 
-    pub fn get_guild_owner(&self, guild_id: u64) -> Result<u64, ServerError> {
+    pub fn get_guild_owner(&self, guild_id: u64) -> ServerResult<u64> {
         self.chat_tree
-            .get(guild_id.to_be_bytes().as_ref())
-            .unwrap()
+            .get(guild_id.to_be_bytes().as_ref())?
             .map_or_else(
                 || Err(ServerError::NoSuchGuild(guild_id)),
                 |raw| Ok(db::deser_guild(raw).owner_id),
@@ -2113,7 +2128,7 @@ impl ChatTree {
     ) -> Result<(HarmonyMessage, [u8; 26]), ServerError> {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
-        let message = if let Some(msg) = self.chat_tree.get(&key).unwrap() {
+        let message = if let Some(msg) = self.chat_tree.get(&key)? {
             db::deser_message(msg)
         } else {
             return Err(ServerError::NoSuchMessage {
@@ -2127,111 +2142,105 @@ impl ChatTree {
     }
 
     pub fn get_guild_logic(&self, guild_id: u64) -> Result<Guild, ServerError> {
-        let guild =
-            if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref()).unwrap() {
-                db::deser_guild(guild_raw)
-            } else {
-                return Err(ServerError::NoSuchGuild(guild_id));
-            };
+        let guild = if let Some(guild_raw) = self.chat_tree.get(guild_id.to_be_bytes().as_ref())? {
+            db::deser_guild(guild_raw)
+        } else {
+            return Err(ServerError::NoSuchGuild(guild_id));
+        };
 
         Ok(guild)
     }
 
-    pub fn get_guild_invites_logic(&self, guild_id: u64) -> GetGuildInvitesResponse {
-        let invites = self
-            .chat_tree
-            .scan_prefix(INVITE_PREFIX)
-            .map(|res| {
-                let (key, value) = res.unwrap();
-                let (inv_guild_id_raw, invite_raw) = value.split_at(size_of::<u64>());
-                // Safety: this unwrap cannot fail since we split at u64 boundary
-                let inv_guild_id =
-                    u64::from_be_bytes(unsafe { inv_guild_id_raw.try_into().unwrap_unchecked() });
-                let invite_id =
-                    unsafe { std::str::from_utf8_unchecked(key.split_at(INVITE_PREFIX.len()).1) };
-                let invite = db::deser_invite(invite_raw.into());
-                (inv_guild_id, invite_id.to_string(), invite)
-            })
-            .filter_map(|(inv_guild_id, invite_id, invite)| {
-                if guild_id == inv_guild_id {
-                    Some(InviteWithId {
-                        invite_id,
-                        invite: Some(invite),
-                    })
-                } else {
-                    None
-                }
-            })
-            .collect();
+    pub fn get_guild_invites_logic(&self, guild_id: u64) -> ServerResult<GetGuildInvitesResponse> {
+        let invites =
+            self.chat_tree
+                .scan_prefix(INVITE_PREFIX)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, value) = res?;
+                    let (inv_guild_id_raw, invite_raw) = value.split_at(size_of::<u64>());
+                    // Safety: this unwrap cannot fail since we split at u64 boundary
+                    let inv_guild_id = u64::from_be_bytes(unsafe {
+                        inv_guild_id_raw.try_into().unwrap_unchecked()
+                    });
+                    if guild_id == inv_guild_id {
+                        let invite_id = unsafe {
+                            std::str::from_utf8_unchecked(key.split_at(INVITE_PREFIX.len()).1)
+                        };
+                        let invite = db::deser_invite(invite_raw.into());
+                        all.push(InviteWithId {
+                            invite_id: invite_id.to_string(),
+                            invite: Some(invite),
+                        });
+                    }
+                    ServerResult::Ok(all)
+                })?;
 
-        GetGuildInvitesResponse { invites }
+        Ok(GetGuildInvitesResponse { invites })
     }
 
-    pub fn get_guild_members_logic(&self, guild_id: u64) -> GetGuildMembersResponse {
+    pub fn get_guild_members_logic(&self, guild_id: u64) -> ServerResult<GetGuildMembersResponse> {
         let prefix = make_guild_mem_prefix(guild_id);
-        let members = self
-            .chat_tree
-            .scan_prefix(&prefix)
-            .map(|res| {
-                let (id, _) = res.unwrap();
-                // Safety: this unwrap cannot fail since after we split at prefix length, the remainder is a valid u64
-                u64::from_be_bytes(unsafe {
-                    id.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                })
-            })
-            .collect();
+        let members =
+            self.chat_tree
+                .scan_prefix(&prefix)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (id, _) = res?;
+                    // Safety: this unwrap cannot fail since after we split at prefix length, the remainder is a valid u64
+                    all.push(u64::from_be_bytes(unsafe {
+                        id.split_at(prefix.len()).1.try_into().unwrap_unchecked()
+                    }));
+                    ServerResult::Ok(all)
+                })?;
 
-        GetGuildMembersResponse { members }
+        Ok(GetGuildMembersResponse { members })
     }
 
     pub fn get_guild_channels_logic(
         &self,
         guild_id: u64,
         user_id: u64,
-    ) -> GetGuildChannelsResponse {
+    ) -> ServerResult<GetGuildChannelsResponse> {
         let prefix = make_guild_chan_prefix(guild_id);
-        let mut channels = self
-            .chat_tree
-            .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, value) = res.unwrap();
-                (key.len() == prefix.len() + size_of::<u64>())
-                    .then(|| {
+        let mut channels =
+            self.chat_tree
+                .scan_prefix(&prefix)
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, value) = res?;
+                    if key.len() == prefix.len() + size_of::<u64>() {
                         let channel_id = u64::from_be_bytes(
                             // Safety: this unwrap is safe since we check if it's a valid u64 beforehand
                             unsafe { key.split_at(prefix.len()).1.try_into().unwrap_unchecked() },
                         );
-                        self.check_perms(
-                            guild_id,
-                            Some(channel_id),
-                            user_id,
-                            "messages.view",
-                            false,
-                        )
-                        .is_ok()
-                        // Safety: this unwrap is safe since we only store valid Channel message
-                        .then(|| {
+                        let allowed = self
+                            .check_perms(
+                                guild_id,
+                                Some(channel_id),
+                                user_id,
+                                "messages.view",
+                                false,
+                            )
+                            .is_ok();
+                        if allowed {
+                            // Safety: this unwrap is safe since we only store valid Channel message
                             let channel = db::deser_chan(value);
-                            ChannelWithId {
+                            all.push(ChannelWithId {
                                 channel_id,
                                 channel: Some(channel),
-                            }
-                        })
-                    })
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
+                            });
+                        }
+                    }
+                    ServerResult::Ok(all)
+                })?;
 
         if channels.is_empty() {
-            return GetGuildChannelsResponse {
+            return Ok(GetGuildChannelsResponse {
                 channels: Vec::new(),
-            };
+            });
         }
 
         let ordering_raw = self
             .chat_tree
-            .get(&make_guild_chan_ordering_key(guild_id))
-            .unwrap()
+            .get(&make_guild_chan_ordering_key(guild_id))?
             .unwrap_or_default();
         for (order_index, order_id) in db::make_u64_iter_logic(ordering_raw.as_ref()).enumerate() {
             if let Some(index) = channels.iter().position(|chan| chan.channel_id == order_id) {
@@ -2239,19 +2248,15 @@ impl ChatTree {
             }
         }
 
-        GetGuildChannelsResponse { channels }
+        Ok(GetGuildChannelsResponse { channels })
     }
 
     #[inline(always)]
-    pub fn get_list_u64_logic(&self, key: &[u8]) -> Vec<u64> {
-        db::make_u64_iter_logic(
-            self.chat_tree
-                .get(key)
-                .unwrap()
-                .unwrap_or_default()
-                .as_ref(),
+    pub fn get_list_u64_logic(&self, key: &[u8]) -> ServerResult<Vec<u64>> {
+        Ok(
+            db::make_u64_iter_logic(self.chat_tree.get(key)?.unwrap_or_default().as_ref())
+                .collect(),
         )
-        .collect()
     }
 
     #[inline(always)]
@@ -2268,7 +2273,7 @@ impl ChatTree {
         guild_id: u64,
         role_id: u64,
         position: ItemPosition,
-    ) -> Result<(), ServerError> {
+    ) -> ServerResult<()> {
         self.update_order_logic(
             role_id,
             position,
@@ -2282,7 +2287,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: u64,
         position: ItemPosition,
-    ) -> Result<(), ServerError> {
+    ) -> ServerResult<()> {
         self.update_order_logic(
             channel_id,
             position,
@@ -2299,7 +2304,7 @@ impl ChatTree {
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
     ) -> Result<(), ServerError> {
-        let mut ordering = self.get_list_u64_logic(key);
+        let mut ordering = self.get_list_u64_logic(key)?;
 
         let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
         let maybe_replace_with = |ordering: &mut Vec<u64>, index| {
@@ -2343,24 +2348,30 @@ impl ChatTree {
         message_id: u64,
         direction: Option<Direction>,
         count: Option<u32>,
-    ) -> GetChannelMessagesResponse {
+    ) -> ServerResult<GetChannelMessagesResponse> {
         let direction = direction.unwrap_or_default();
 
         let prefix = make_msg_prefix(guild_id, channel_id);
         let get_last_message_id = || {
-            self.chat_tree.scan_prefix(&prefix).last().map(|last| {
-                u64::from_be_bytes(
-                    // Safety: cannot fail since the remainder after we split is a valid u64
-                    unsafe {
-                        last.unwrap()
-                            .0
-                            .split_at(prefix.len())
-                            .1
-                            .try_into()
-                            .unwrap_unchecked()
-                    },
-                )
-            })
+            self.chat_tree
+                .scan_prefix(&prefix)
+                .last()
+                .map(|last| {
+                    last.map(|last| {
+                        u64::from_be_bytes(
+                            // Safety: cannot fail since the remainder after we split is a valid u64
+                            unsafe {
+                                last.0
+                                    .split_at(prefix.len())
+                                    .1
+                                    .try_into()
+                                    .unwrap_unchecked()
+                            },
+                        )
+                    })
+                })
+                .transpose()
+                .map_err(ServerError::DbError)
         };
 
         let get_messages = |to: u64| {
@@ -2372,7 +2383,7 @@ impl ChatTree {
                 },
                 |c| c as u64,
             );
-            let last_message_id = get_last_message_id().unwrap_or(1);
+            let last_message_id = get_last_message_id()?.unwrap_or(1);
 
             let to = (to > 1).then(|| to - 1).unwrap_or(1);
             let to_before = || (to > count).then(|| to - count).unwrap_or(1);
@@ -2390,8 +2401,8 @@ impl ChatTree {
                 .chat_tree
                 .range((&from_key)..=(&to_key))
                 .rev()
-                .map(|res| {
-                    let (key, value) = res.unwrap();
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, value) = res?;
                     // Safety: this is safe since the only keys we get are message keys, which after stripping prefix are message IDs
                     let message_id = u64::from_be_bytes(unsafe {
                         key.split_at(make_msg_prefix(guild_id, channel_id).len())
@@ -2400,27 +2411,29 @@ impl ChatTree {
                             .unwrap_unchecked()
                     });
                     let message = db::deser_message(value);
-                    MessageWithId {
+                    all.push(MessageWithId {
                         message_id,
                         message: Some(message),
-                    }
-                })
-                .collect();
+                    });
+                    ServerResult::Ok(all)
+                })?;
 
-            GetChannelMessagesResponse {
+            ServerResult::Ok(GetChannelMessagesResponse {
                 reached_top: from == 1,
                 reached_bottom: to == last_message_id,
                 messages,
-            }
+            })
         };
 
         (message_id == 0)
             .then(|| {
-                get_last_message_id().map_or_else(
-                    || GetChannelMessagesResponse {
-                        reached_top: true,
-                        reached_bottom: true,
-                        messages: Vec::new(),
+                get_last_message_id()?.map_or_else(
+                    || {
+                        Ok(GetChannelMessagesResponse {
+                            reached_top: true,
+                            reached_bottom: true,
+                            messages: Vec::new(),
+                        })
                     },
                     |last| get_messages(last + 1),
                 )
@@ -2428,17 +2441,14 @@ impl ChatTree {
             .unwrap_or_else(|| get_messages(message_id))
     }
 
-    pub fn get_user_roles_logic(&self, guild_id: u64, user_id: u64) -> Vec<u64> {
+    pub fn get_user_roles_logic(&self, guild_id: u64, user_id: u64) -> ServerResult<Vec<u64>> {
         let key = make_guild_user_roles_key(guild_id, user_id);
-        self.chat_tree
-            .get(&key)
-            .unwrap()
-            .map_or_else(Vec::default, |raw| {
-                raw.chunks_exact(size_of::<u64>())
-                    // Safety: this is safe since we split at u64 boundary
-                    .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
-                    .collect()
-            })
+        Ok(self.chat_tree.get(&key)?.map_or_else(Vec::default, |raw| {
+            raw.chunks_exact(size_of::<u64>())
+                // Safety: this is safe since we split at u64 boundary
+                .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+                .collect()
+        }))
     }
 
     pub fn query_has_permission_logic(
@@ -2447,31 +2457,31 @@ impl ChatTree {
         channel_id: Option<u64>,
         user_id: u64,
         check_for: &str,
-    ) -> bool {
+    ) -> ServerResult<bool> {
         let key = make_guild_user_roles_key(guild_id, user_id);
-        let user_roles = self.get_list_u64_logic(&key);
+        let user_roles = self.get_list_u64_logic(&key)?;
 
         if let Some(channel_id) = channel_id {
             for role_id in &user_roles {
-                let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id);
+                let perms = self.get_permissions_logic(guild_id, Some(channel_id), *role_id)?;
                 let is_allowed =
                     has_permission(perms.iter().map(|(m, ok)| (m.as_str(), *ok)), check_for);
                 if let Some(true) = is_allowed {
-                    return true;
+                    return Ok(true);
                 }
             }
         }
 
         for role_id in user_roles {
-            let perms = self.get_permissions_logic(guild_id, None, role_id);
+            let perms = self.get_permissions_logic(guild_id, None, role_id)?;
             let is_allowed =
                 has_permission(perms.iter().map(|(m, ok)| (m.as_str(), *ok)), check_for);
             if let Some(true) = is_allowed {
-                return true;
+                return Ok(true);
             }
         }
 
-        false
+        Ok(false)
     }
 
     pub fn check_perms(
@@ -2488,7 +2498,7 @@ impl ChatTree {
                 return Ok(());
             }
         } else if is_owner
-            || self.query_has_permission_logic(guild_id, channel_id, user_id, check_for)
+            || self.query_has_permission_logic(guild_id, channel_id, user_id, check_for)?
         {
             return Ok(());
         }
@@ -2498,13 +2508,13 @@ impl ChatTree {
         })
     }
 
-    pub fn kick_user_logic(&self, guild_id: u64, user_id: u64) {
+    pub fn kick_user_logic(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+        let mut batch = Batch::default();
+        batch.remove(make_member_key(guild_id, user_id));
+        batch.remove(make_guild_user_roles_key(guild_id, user_id));
         self.chat_tree
-            .remove(&make_member_key(guild_id, user_id))
-            .unwrap();
-        self.chat_tree
-            .remove(&make_guild_user_roles_key(guild_id, user_id))
-            .unwrap();
+            .apply_batch(batch)
+            .map_err(ServerError::DbError)
     }
 
     pub fn manage_user_roles_logic(
@@ -2513,8 +2523,8 @@ impl ChatTree {
         user_id: u64,
         give_role_ids: Vec<u64>,
         take_role_ids: Vec<u64>,
-    ) -> Result<Vec<u64>, ServerError> {
-        let mut roles = self.get_user_roles_logic(guild_id, user_id);
+    ) -> ServerResult<Vec<u64>> {
+        let mut roles = self.get_user_roles_logic(guild_id, user_id)?;
         for role_id in give_role_ids {
             self.does_role_exist(guild_id, role_id)?;
             roles.push(role_id);
@@ -2630,11 +2640,7 @@ impl ChatTree {
         let guild_id = {
             let mut rng = rand::thread_rng();
             let mut guild_id = rng.gen_range(1..u64::MAX);
-            while self
-                .chat_tree
-                .contains_key(&guild_id.to_be_bytes())
-                .unwrap()
-            {
+            while self.chat_tree.contains_key(&guild_id.to_be_bytes())? {
                 guild_id = rng.gen_range(1..u64::MAX);
             }
             guild_id
@@ -2698,7 +2704,7 @@ impl ChatTree {
         guild_id: u64,
         name: &str,
         possible_uses: u32,
-    ) -> Result<(), ServerError> {
+    ) -> ServerResult<()> {
         let key = make_invite_key(name);
 
         if name.is_empty() {
@@ -2721,20 +2727,20 @@ impl ChatTree {
     }
 
     /// Calculates all users which can "see" the given user
-    pub fn calculate_users_seeing_user(&self, user_id: u64) -> Vec<u64> {
+    pub fn calculate_users_seeing_user(&self, user_id: u64) -> ServerResult<Vec<u64>> {
         let prefix = make_guild_list_key_prefix(user_id);
         self.chat_tree
             .scan_prefix(&prefix)
-            .map(|res| {
-                let (key, _) = res.unwrap();
+            .try_fold(Vec::new(), |mut all, res| {
+                let (key, _) = res?;
                 let (_, guild_id_raw) = key.split_at(prefix.len());
                 let (id_raw, _) = guild_id_raw.split_at(size_of::<u64>());
                 // Safety: safe since we split at u64 boundary
                 let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
-                self.get_guild_members_logic(guild_id).members
+                let mut members = self.get_guild_members_logic(guild_id)?.members;
+                all.append(&mut members);
+                Ok(all)
             })
-            .flatten()
-            .collect()
     }
 
     /// Adds a guild to a user's guild list
@@ -2769,13 +2775,13 @@ impl ChatTree {
             .map_err(Into::into)
     }
 
-    pub fn get_guild_roles_logic(&self, guild_id: u64) -> Vec<RoleWithId> {
+    pub fn get_guild_roles_logic(&self, guild_id: u64) -> ServerResult<Vec<RoleWithId>> {
         let prefix = make_guild_role_prefix(guild_id);
         self.chat_tree
             .scan_prefix(&prefix)
-            .flat_map(|res| {
-                let (key, val) = res.unwrap();
-                (key.len() == make_guild_role_key(guild_id, 0).len()).then(|| {
+            .try_fold(Vec::new(), |mut all, res| {
+                let (key, val) = res?;
+                let maybe_role = (key.len() == make_guild_role_key(guild_id, 0).len()).then(|| {
                     let role = db::deser_role(val);
                     let role_id = u64::from_be_bytes(unsafe {
                         key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
@@ -2784,9 +2790,12 @@ impl ChatTree {
                         role_id,
                         role: Some(role),
                     }
-                })
+                });
+                if let Some(role) = maybe_role {
+                    all.push(role);
+                }
+                Ok(all)
             })
-            .collect()
     }
 
     pub fn get_permissions_logic(
@@ -2794,18 +2803,18 @@ impl ChatTree {
         guild_id: u64,
         channel_id: Option<u64>,
         role_id: u64,
-    ) -> Vec<(SmolStr, bool)> {
+    ) -> ServerResult<Vec<(SmolStr, bool)>> {
         let get = |prefix: &[u8]| {
             self.chat_tree
                 .scan_prefix(prefix)
-                .map(|res| {
-                    let (key, value) = res.unwrap();
+                .try_fold(Vec::new(), |mut all, res| {
+                    let (key, value) = res?;
                     let matches_raw = key.split_at(prefix.len()).1;
                     let matches = unsafe { std::str::from_utf8_unchecked(matches_raw) };
                     let ok = value[0] != 0;
-                    (matches.into(), ok)
+                    all.push((matches.into(), ok));
+                    Ok(all)
                 })
-                .collect()
         };
 
         if let Some(channel_id) = channel_id {
@@ -2848,22 +2857,24 @@ impl ChatTree {
         })
     }
 
-    pub fn get_next_message_id(&self, guild_id: u64, channel_id: u64) -> u64 {
+    pub fn get_next_message_id(&self, guild_id: u64, channel_id: u64) -> ServerResult<u64> {
         let msg_prefix = make_msg_prefix(guild_id, channel_id);
         self.chat_tree
             .scan_prefix(&msg_prefix)
             .last()
             // Ensure that the first message ID is always 1!
-            .map_or(1, |res| {
+            .map_or(Ok(1), |res| {
                 // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
-                u64::from_be_bytes(unsafe {
-                    res.unwrap()
-                        .0
-                        .split_at(msg_prefix.len())
-                        .1
-                        .try_into()
-                        .unwrap_unchecked()
-                }) + 1
+                res.map(|res| {
+                    u64::from_be_bytes(unsafe {
+                        res.0
+                            .split_at(msg_prefix.len())
+                            .1
+                            .try_into()
+                            .unwrap_unchecked()
+                    }) + 1
+                })
+                .map_err(ServerError::DbError)
             })
     }
 
@@ -2882,7 +2893,7 @@ impl ChatTree {
             metadata,
         } = request;
 
-        let message_id = self.get_next_message_id(guild_id, channel_id);
+        let message_id = self.get_next_message_id(guild_id, channel_id)?;
         let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
         let created_at = get_time_secs();
