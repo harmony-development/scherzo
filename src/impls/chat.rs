@@ -1968,6 +1968,14 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0.into_message().await??;
 
         if let Some(emote) = emote {
+            self.chat_tree.check_perms(
+                guild_id,
+                Some(channel_id),
+                user_id,
+                all_permissions::MESSAGES_REACTIONS_ADD,
+                false,
+            )?;
+
             let reaction = self
                 .chat_tree
                 .update_reaction(user_id, guild_id, channel_id, message_id, emote, true)?;
@@ -1991,6 +1999,14 @@ impl chat_service_server::ChatService for ChatServer {
         } = request.into_parts().0.into_message().await??;
 
         if let Some(emote) = emote {
+            self.chat_tree.check_perms(
+                guild_id,
+                Some(channel_id),
+                user_id,
+                all_permissions::MESSAGES_REACTIONS_REMOVE,
+                false,
+            )?;
+
             let reaction = self
                 .chat_tree
                 .update_reaction(user_id, guild_id, channel_id, message_id, emote, false)?;
