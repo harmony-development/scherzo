@@ -753,26 +753,29 @@ impl chat_service_server::ChatService for ChatServer {
             false,
         )?;
 
-        if let Some(position) = new_position.clone() {
-            self.chat_tree
-                .update_channel_order_logic(guild_id, channel_id, position)?
-        }
-
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            stream_event::Event::EditedChannelPosition(stream_event::ChannelPositionUpdated {
+        if let Some(position) = new_position {
+            self.chat_tree.update_channel_order_logic(
                 guild_id,
                 channel_id,
-                new_position,
-            }),
-            Some(PermCheck::new(
-                guild_id,
-                Some(channel_id),
-                "messages.view",
-                false,
-            )),
-            EventContext::empty(),
-        );
+                Some(position.clone()),
+            )?;
+
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                stream_event::Event::EditedChannelPosition(stream_event::ChannelPositionUpdated {
+                    guild_id,
+                    channel_id,
+                    new_position: Some(position),
+                }),
+                Some(PermCheck::new(
+                    guild_id,
+                    Some(channel_id),
+                    "messages.view",
+                    false,
+                )),
+                EventContext::empty(),
+            );
+        }
 
         Ok(UpdateChannelOrderResponse {})
     }
@@ -1449,20 +1452,20 @@ impl chat_service_server::ChatService for ChatServer {
             .check_perms(guild_id, None, user_id, "roles.manage", false)?;
         self.chat_tree.does_role_exist(guild_id, role_id)?;
 
-        if let Some(pos) = new_position.clone() {
-            self.chat_tree.move_role_logic(guild_id, role_id, pos)?;
+        if let Some(pos) = new_position {
+            self.chat_tree
+                .move_role_logic(guild_id, role_id, Some(pos.clone()))?;
+            self.send_event_through_chan(
+                EventSub::Guild(guild_id),
+                stream_event::Event::RoleMoved(stream_event::RoleMoved {
+                    guild_id,
+                    role_id,
+                    new_position: Some(pos),
+                }),
+                None,
+                EventContext::empty(),
+            );
         }
-
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            stream_event::Event::RoleMoved(stream_event::RoleMoved {
-                guild_id,
-                role_id,
-                new_position,
-            }),
-            None,
-            EventContext::empty(),
-        );
 
         Ok(MoveRoleResponse {})
     }
@@ -2272,7 +2275,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         role_id: u64,
-        position: ItemPosition,
+        position: Option<ItemPosition>,
     ) -> ServerResult<()> {
         self.update_order_logic(
             role_id,
@@ -2286,7 +2289,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        position: ItemPosition,
+        position: Option<ItemPosition>,
     ) -> ServerResult<()> {
         self.update_order_logic(
             channel_id,
@@ -2300,7 +2303,7 @@ impl ChatTree {
     pub fn update_order_logic(
         &self,
         id: u64,
-        position: ItemPosition,
+        position: Option<ItemPosition>,
         check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
     ) -> Result<(), ServerError> {
@@ -2320,19 +2323,23 @@ impl ChatTree {
             }
         };
 
-        let item_id = position.item_id;
-        check_exists(item_id)?;
-        match position.position() {
-            item_position::Position::After => {
-                if let Some(index) = maybe_ord_index(item_id) {
-                    maybe_replace_with(&mut ordering, index.saturating_add(1));
+        if let Some(position) = position {
+            let item_id = position.item_id;
+            check_exists(item_id)?;
+            match position.position() {
+                item_position::Position::After => {
+                    if let Some(index) = maybe_ord_index(item_id) {
+                        maybe_replace_with(&mut ordering, index.saturating_add(1));
+                    }
+                }
+                item_position::Position::BeforeUnspecified => {
+                    if let Some(index) = maybe_ord_index(item_id) {
+                        maybe_replace_with(&mut ordering, index);
+                    }
                 }
             }
-            item_position::Position::BeforeUnspecified => {
-                if let Some(index) = maybe_ord_index(item_id) {
-                    maybe_replace_with(&mut ordering, index);
-                }
-            }
+        } else {
+            ordering.push(id);
         }
 
         let serialized_ordering = self.serialize_list_u64_logic(ordering);
@@ -2568,7 +2575,7 @@ impl ChatTree {
         };
         let ser_role = rkyv_ser(&role);
         cchat_insert!(key / ser_role);
-        self.move_role_logic(guild_id, role_id, ItemPosition::new_after(0))?;
+        self.move_role_logic(guild_id, role_id, None)?;
         Ok(role_id)
     }
 
@@ -2621,11 +2628,7 @@ impl ChatTree {
         cchat_insert!(key / buf);
 
         // Add from ordering list
-        self.update_channel_order_logic(
-            guild_id,
-            channel_id,
-            position.unwrap_or_else(|| ItemPosition::new_after(0)),
-        )?;
+        self.update_channel_order_logic(guild_id, channel_id, position)?;
 
         Ok(channel_id)
     }
@@ -2686,6 +2689,7 @@ impl ChatTree {
         })
         .collect::<Vec<_>>();
         self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone())?;
+        tracing::info!("aaa");
         let channel_id = self.create_channel_logic(
             guild_id,
             "general".to_string(),
@@ -2693,6 +2697,7 @@ impl ChatTree {
             None,
             None,
         )?;
+        tracing::info!("bbb");
 
         self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms)?;
 
