@@ -2118,9 +2118,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f371763528cb5a45ff01879d08355c39d49b849e2e6e665989abe3262997bde0"
+checksum = "d1dc21ea9c98042443aaf7a19c341d98d814cd106582d2dd9fbe5da8e14774dd"
 dependencies = [
  "bytecheck",
  "hashbrown",
@@ -2132,9 +2132,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.7.18"
+version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97fc962ad6ffbcc218212c465318c7c151221474350b281b4912f4890ea590b5"
+checksum = "c73b640a4016b265097672e8200cb8bc876beb3a0cdb7b76efd515f1cfbf15b3"
 dependencies = [
  "proc-macro2",
  "quote",
