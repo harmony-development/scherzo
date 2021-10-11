@@ -8,7 +8,7 @@ use harmony_rust_sdk::api::{
     exports::{hrpc::encode_protobuf_message, prost::Message},
     harmonytypes::Token,
 };
-use reqwest::Url;
+use hyper::Uri;
 use smol_str::SmolStr;
 
 use crate::ServerError;
@@ -100,10 +100,9 @@ impl Manager {
 
     fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, AuthServiceClient, RandomState> {
         self.clients.entry(host.clone()).or_insert_with(|| {
-            let http = reqwest::Client::new(); // each server gets its own http client
-            let host_url: Url = host.parse().unwrap();
+            let host_url: Uri = host.parse().unwrap();
 
-            AuthServiceClient::new(http, host_url).unwrap()
+            AuthServiceClient::new(host_url).unwrap()
         })
     }
 }

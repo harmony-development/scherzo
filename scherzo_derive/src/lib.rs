@@ -156,12 +156,12 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
     let func_name = quote::format_ident!("{}_middleware", func.sig.ident);
 
     (quote! {
-        fn #func_name (&self, _: &'static str) -> harmony_rust_sdk::api::exports::hrpc::warp::filters::BoxedFilter<()> {
-            use harmony_rust_sdk::api::exports::hrpc::warp::Filter;
+        fn #func_name (&self, _: &'static str) -> harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer {
+            use harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer;
 
             self.disable_ratelimits
-                .then(|| harmony_rust_sdk::api::exports::hrpc::warp::any().boxed())
-                .unwrap_or_else(|| crate::impls::rate(#num, #dur))
+                .then(|| HrpcLayer::new(tower::layer::util::Identity::new()))
+                .unwrap_or_else(|| HrpcLayer::new(tower::limit::RateLimitLayer::new(#num, std::time::Duration::from_secs(#dur))))
         }
 
         #func

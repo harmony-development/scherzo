@@ -8,7 +8,7 @@ use super::{chat::ChatTree, prelude::*};
 use ahash::RandomState;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
-    exports::hrpc::return_print,
+    exports::hrpc::return_error,
     voice::{
         stream_message_request::{Initialize, Message as RequestMessage},
         stream_message_response::{
@@ -70,23 +70,13 @@ impl VoiceServer {
 
 #[async_trait]
 impl VoiceService for VoiceServer {
-    type Error = ServerError;
-
-    type StreamMessageValidationType = u64;
-
-    async fn stream_message_validation(
-        &self,
-        request: Request<Option<StreamMessageRequest>>,
-    ) -> Result<Self::StreamMessageValidationType, HrpcServerError<Self::Error>> {
-        auth!();
-        Ok(user_id)
-    }
-
     async fn stream_message(
         &self,
-        user_id: Self::StreamMessageValidationType,
+        request: Request<()>,
         socket: Socket<StreamMessageRequest, StreamMessageResponse>,
-    ) {
+    ) -> Result<(), HrpcServerError> {
+        auth!();
+
         let wait_for_initialize = async {
             match socket.receive_message().await {
                 Ok(StreamMessageRequest {
@@ -120,7 +110,7 @@ impl VoiceService for VoiceServer {
                         },
                         "timeouted while waiting for initialization message"
                     );
-                    return;
+                    return Ok(());
                 }
                 _ => {
                     tracing::error!(
@@ -129,7 +119,7 @@ impl VoiceService for VoiceServer {
                         },
                         "error occured while waiting for initialization message"
                     );
-                    return;
+                    return Ok(());
                 }
             };
         let chan_id = (guild_id, channel_id);
@@ -139,7 +129,7 @@ impl VoiceService for VoiceServer {
             .check_guild_user_channel(guild_id, user_id, channel_id)
         {
             tracing::error!("{}", err);
-            return;
+            return Ok(());
         }
 
         let mut channel = match self.channels.get(&self.worker_pool, chan_id).await {
@@ -154,19 +144,17 @@ impl VoiceService for VoiceServer {
                     "error while creating voice channel: {}",
                     err,
                 );
-                return;
+                return Ok(());
             }
         };
 
-        return_print!(
-            socket
-                .send_message(StreamMessageResponse {
-                    message: Some(ResponseMessage::Initialized(Initialized {
-                        rtp_capabilities: into_json(channel.router().rtp_capabilities()),
-                    }))
-                })
-                .await
-        );
+        socket
+            .send_message(StreamMessageResponse {
+                message: Some(ResponseMessage::Initialized(Initialized {
+                    rtp_capabilities: into_json(channel.router().rtp_capabilities()),
+                })),
+            })
+            .await?;
 
         let wait_for_prepare = async {
             match socket.receive_message().await {
@@ -188,7 +176,7 @@ impl VoiceService for VoiceServer {
                     },
                     "timeouted while waiting for prepare message"
                 );
-                return;
+                return Ok(());
             }
             _ => {
                 tracing::error!(
@@ -199,7 +187,7 @@ impl VoiceService for VoiceServer {
                     },
                     "error occured while waiting for prepare message"
                 );
-                return;
+                return Ok(());
             }
         };
 
@@ -228,18 +216,16 @@ impl VoiceService for VoiceServer {
             })
         };
 
-        return_print!(
-            socket
-                .send_message(StreamMessageResponse {
-                    message: Some(ResponseMessage::PreparedForJoinChannel(
-                        PreparedForJoinChannel {
-                            consumer_transport_options,
-                            producer_transport_options,
-                        }
-                    ))
-                })
-                .await
-        );
+        socket
+            .send_message(StreamMessageResponse {
+                message: Some(ResponseMessage::PreparedForJoinChannel(
+                    PreparedForJoinChannel {
+                        consumer_transport_options,
+                        producer_transport_options,
+                    },
+                )),
+            })
+            .await?;
 
         let wait_for_join = async {
             match socket.receive_message().await {
@@ -285,7 +271,7 @@ impl VoiceService for VoiceServer {
                         },
                         "timeouted while waiting for join channel message"
                     );
-                    return;
+                    return Ok(());
                 }
                 _ => {
                     tracing::error!(
@@ -296,7 +282,7 @@ impl VoiceService for VoiceServer {
                         },
                         "error occured while waiting for join channel message"
                     );
-                    return;
+                    return Ok(());
                 }
             };
 
@@ -320,7 +306,7 @@ impl VoiceService for VoiceServer {
                 "could not connect producer transport: {}",
                 err,
             );
-            return;
+            return Ok(());
         } else {
             tracing::info!(
                 {
@@ -351,7 +337,7 @@ impl VoiceService for VoiceServer {
                 "could not connect consumer transport: {}",
                 err,
             );
-            return;
+            return Ok(());
         } else {
             tracing::info!(
                 {
@@ -388,7 +374,7 @@ impl VoiceService for VoiceServer {
                     "could not create producer: {}",
                     err,
                 );
-                return;
+                return Ok(());
             }
         }
 
@@ -431,7 +417,7 @@ impl VoiceService for VoiceServer {
                             "could not create consumer: {}",
                             err,
                         );
-                        return;
+                        return Ok(());
                     }
                 }
             }
@@ -447,7 +433,7 @@ impl VoiceService for VoiceServer {
                 "could not create consumer: {}",
                 err,
             );
-            return;
+            return Ok(());
         } else {
             tracing::info!(
                 {
@@ -459,15 +445,13 @@ impl VoiceService for VoiceServer {
             );
         }
 
-        return_print!(
-            socket
-                .send_message(StreamMessageResponse {
-                    message: Some(ResponseMessage::JoinedChannel(JoinedChannel {
-                        other_users,
-                    }))
-                })
-                .await
-        );
+        socket
+            .send_message(StreamMessageResponse {
+                message: Some(ResponseMessage::JoinedChannel(JoinedChannel {
+                    other_users,
+                })),
+            })
+            .await?;
 
         let process_server_events = async {
             while let Some(event) = channel.get_event().await {
@@ -476,7 +460,7 @@ impl VoiceService for VoiceServer {
                     Event::UserLeft(user_left) => ResponseMessage::UserLeft(user_left),
                 };
 
-                return_print!(
+                return_error!(
                     socket
                         .send_message(StreamMessageResponse {
                             message: Some(message)
@@ -484,10 +468,12 @@ impl VoiceService for VoiceServer {
                         .await
                 );
             }
+            Ok(())
         };
 
         let process_client_messages = async {
-            while let Ok(message) = socket.receive_message().await {
+            loop {
+                let message = return_error!(socket.receive_message().await);
                 if let StreamMessageRequest {
                     message: Some(RequestMessage::ResumeConsumer(resume)),
                 } = message
@@ -521,11 +507,17 @@ impl VoiceService for VoiceServer {
         };
 
         tokio::select! {
-            _ = process_server_events => {},
-            _ = process_client_messages => {},
+            res = process_server_events => {
+                channel.remove_user(user_id);
+                res?
+            },
+            res = process_client_messages => {
+                channel.remove_user(user_id);
+                res?
+            },
         }
 
-        channel.remove_user(user_id);
+        Ok(())
     }
 }
 
@@ -544,7 +536,7 @@ impl WorkerPool {
         self.manager
             .create_worker(Default::default())
             .await
-            .map_err(Into::into)
+            .map_err(|err| ServerError::from(err).into())
     }
 }
 

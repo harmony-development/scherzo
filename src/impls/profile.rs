@@ -44,20 +44,19 @@ impl ProfileServer {
 
 #[async_trait]
 impl ProfileService for ProfileServer {
-    type Error = ServerError;
-
     #[rate(32, 10)]
     async fn get_profile(
         &self,
         request: Request<GetProfileRequest>,
-    ) -> Result<GetProfileResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<GetProfileResponse>> {
         auth!();
 
-        let GetProfileRequest { user_id } = request.into_parts().0.into_message().await??;
+        let GetProfileRequest { user_id } = request.into_message().await?;
 
         self.profile_tree
             .get_profile_logic(user_id)
             .map(|p| GetProfileResponse { profile: Some(p) })
+            .map(Response::new)
             .map_err(Into::into)
     }
 
@@ -65,34 +64,33 @@ impl ProfileService for ProfileServer {
     async fn get_app_data(
         &self,
         request: Request<GetAppDataRequest>,
-    ) -> Result<GetAppDataResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<GetAppDataResponse>> {
         auth!();
 
-        let GetAppDataRequest { app_id } = request.into_parts().0.into_message().await??;
+        let GetAppDataRequest { app_id } = request.into_message().await?;
         let app_data = profile_get!(make_user_metadata_key(user_id, &app_id)).unwrap_or_default();
 
-        Ok(GetAppDataResponse { app_data })
+        Ok((GetAppDataResponse { app_data }).into_response())
     }
 
     #[rate(2, 5)]
     async fn set_app_data(
         &self,
         request: Request<SetAppDataRequest>,
-    ) -> Result<SetAppDataResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<SetAppDataResponse>> {
         auth!();
 
-        let SetAppDataRequest { app_id, app_data } =
-            request.into_parts().0.into_message().await??;
+        let SetAppDataRequest { app_id, app_data } = request.into_message().await?;
         profile_insert!(make_user_metadata_key(user_id, &app_id) / app_data);
 
-        Ok(SetAppDataResponse {})
+        Ok((SetAppDataResponse {}).into_response())
     }
 
     #[rate(4, 5)]
     async fn update_profile(
         &self,
         request: Request<UpdateProfileRequest>,
-    ) -> Result<UpdateProfileResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<UpdateProfileResponse>> {
         auth!();
 
         let UpdateProfileRequest {
@@ -100,7 +98,7 @@ impl ProfileService for ProfileServer {
             new_user_avatar,
             new_user_status,
             new_is_bot,
-        } = request.into_parts().0.into_message().await??;
+        } = request.into_message().await?;
 
         self.profile_tree.update_profile_logic(
             user_id,
@@ -123,7 +121,7 @@ impl ProfileService for ProfileServer {
             EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)?),
         );
 
-        Ok(UpdateProfileResponse {})
+        Ok((UpdateProfileResponse {}).into_response())
     }
 }
 

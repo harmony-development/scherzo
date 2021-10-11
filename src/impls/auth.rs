@@ -4,7 +4,7 @@ use ahash::RandomState;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
-    exports::hrpc::warp::reply::Response,
+    exports::hrpc::body::BoxBody,
     profile::{Profile, UserStatus},
 };
 use sha3::Digest;
@@ -12,7 +12,6 @@ use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
     config::{FederationConfig, PolicyConfig},
-    http,
     key::{self, Manager as KeyManager},
     set_proto_name,
 };
@@ -37,13 +36,14 @@ pub fn check_auth<T>(
     valid_sessions: &SessionMap,
     request: &Request<T>,
 ) -> Result<u64, ServerError> {
-    let auth_id = request
-        .get_header(&http::header::AUTHORIZATION)
+    let headers = request.header_map();
+    let auth_id = headers
+        .get(&http::header::AUTHORIZATION)
         .map_or_else(
             || {
                 // Specific handling for web clients
-                request
-                    .get_header(&http::header::SEC_WEBSOCKET_PROTOCOL)
+                headers
+                    .get(&http::header::SEC_WEBSOCKET_PROTOCOL)
                     .and_then(|val| {
                         val.to_str()
                             .ok()
@@ -92,7 +92,7 @@ impl AuthServer {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .try_fold(Vec::new(), move |mut all, res| {
-                        let (key, val) = res?;
+                        let (key, val) = res.map_err(ServerError::from)?;
                         all.push((
                             u64::from_be_bytes(key.split_at(len).1.try_into().unwrap_unchecked()),
                             val,
@@ -201,28 +201,26 @@ impl AuthServer {
 
 #[async_trait]
 impl auth_service_server::AuthService for AuthServer {
-    type Error = ServerError;
-
     #[rate(20, 5)]
     async fn check_logged_in(
         &self,
         request: Request<CheckLoggedInRequest>,
-    ) -> Result<CheckLoggedInResponse, HrpcServerError<Self::Error>> {
+    ) -> Result<Response<CheckLoggedInResponse>, HrpcServerError> {
         auth!();
-        Ok(CheckLoggedInResponse {})
+        Ok(((CheckLoggedInResponse {}).into_response()).into_response())
     }
 
     #[rate(3, 1)]
     async fn federate(
         &self,
         request: Request<FederateRequest>,
-    ) -> Result<FederateResponse, HrpcServerError<Self::Error>> {
+    ) -> Result<Response<FederateResponse>, HrpcServerError> {
         auth!();
 
         let keys_manager = self.keys_manager()?;
 
         let profile = self.profile_tree.get_profile_logic(user_id)?;
-        let server_id = request.into_parts().0.into_message().await??.server_id;
+        let server_id = request.into_message().await?.server_id;
 
         self.is_host_allowed(&server_id)?;
 
@@ -235,18 +233,18 @@ impl auth_service_server::AuthService for AuthServer {
 
         let token = keys_manager.generate_token(data).await?;
 
-        Ok(FederateResponse { token: Some(token) })
+        Ok((FederateResponse { token: Some(token) }).into_response())
     }
 
     #[rate(1, 5)]
     async fn login_federated(
         &self,
         request: Request<LoginFederatedRequest>,
-    ) -> Result<LoginFederatedResponse, HrpcServerError<Self::Error>> {
+    ) -> Result<Response<LoginFederatedResponse>, HrpcServerError> {
         let LoginFederatedRequest {
             auth_token,
             server_id,
-        } = request.into_parts().0.into_message().await??;
+        } = request.into_message().await?;
 
         self.is_host_allowed(&server_id)?;
 
@@ -305,58 +303,49 @@ impl auth_service_server::AuthService for AuthServer {
             };
             self.valid_sessions.insert(session_token, local_user_id);
 
-            return Ok(LoginFederatedResponse {
+            return Ok((LoginFederatedResponse {
                 session: Some(session),
-            });
+            })
+            .into_response());
         }
 
         Err(ServerError::InvalidToken.into())
     }
 
     #[rate(1, 5)]
-    async fn key(
-        &self,
-        _: Request<KeyRequest>,
-    ) -> Result<KeyResponse, HrpcServerError<Self::Error>> {
+    async fn key(&self, _: Request<KeyRequest>) -> ServerResult<Response<KeyResponse>> {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
 
-        Ok(KeyResponse {
+        Ok((KeyResponse {
             key: key.pk.to_vec(),
-        })
+        }).into_response())
     }
 
-    fn stream_steps_on_upgrade(&self, response: Response) -> Response {
-        set_proto_name(response)
-    }
-
-    type StreamStepsValidationType = SmolStr;
-
-    async fn stream_steps_validation(
+    fn stream_steps_on_upgrade(
         &self,
-        request: Request<Option<StreamStepsRequest>>,
-    ) -> Result<SmolStr, HrpcServerError<Self::Error>> {
-        if let Some(msg) = request.into_parts().0.into_optional_message().await?? {
-            let auth_id = msg.auth_id;
-
-            if self.step_map.contains_key(auth_id.as_str()) {
-                tracing::debug!("auth id {} validated", auth_id);
-                Ok(auth_id.into())
-            } else {
-                tracing::error!("auth id {} is not valid", auth_id);
-                Err(ServerError::InvalidAuthId.into())
-            }
-        } else {
-            Ok(SmolStr::new_inline(""))
-        }
+        response: http::Response<BoxBody>,
+    ) -> http::Response<BoxBody> {
+        set_proto_name(response)
     }
 
     #[rate(2, 5)]
     async fn stream_steps(
         &self,
-        auth_id: SmolStr,
+        _request: Request<()>,
         socket: Socket<StreamStepsRequest, StreamStepsResponse>,
-    ) {
+    ) -> Result<(), HrpcServerError> {
+        let msg = socket.receive_message().await?;
+
+        let auth_id: SmolStr = msg.auth_id.into();
+
+        if self.step_map.contains_key(auth_id.as_str()) {
+            tracing::debug!("auth id {} validated", auth_id);
+        } else {
+            tracing::error!("auth id {} is not valid", auth_id);
+            return Err(ServerError::InvalidAuthId.into());
+        }
+
         tracing::debug!("creating stream for id {}", auth_id);
 
         if let Some(mut queued_steps) = self.queued_steps.get_mut(auth_id.as_str()) {
@@ -372,7 +361,7 @@ impl auth_service_server::AuthService for AuthServer {
                     );
 
                     // Return from func since we errored
-                    return;
+                    return Err(err);
                 }
             }
         }
@@ -416,13 +405,15 @@ impl auth_service_server::AuthService for AuthServer {
 
         self.send_step.remove(&auth_id);
         tracing::debug!("removing stream for id {}", auth_id);
+
+        Ok(())
     }
 
     #[rate(2, 5)]
     async fn begin_auth(
         &self,
         _: Request<BeginAuthRequest>,
-    ) -> Result<BeginAuthResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<BeginAuthResponse>> {
         let initial_step = AuthStep {
             can_go_back: false,
             fallback_url: String::default(),
@@ -445,20 +436,20 @@ impl auth_service_server::AuthService for AuthServer {
 
         tracing::debug!("new auth session {}", auth_id);
 
-        Ok(BeginAuthResponse {
+        Ok((BeginAuthResponse {
             auth_id: auth_id.into(),
-        })
+        }).into_response())
     }
 
     #[rate(10, 5)]
     async fn next_step(
         &self,
         req: Request<NextStepRequest>,
-    ) -> Result<NextStepResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<NextStepResponse>> {
         let NextStepRequest {
             auth_id,
             step: maybe_step,
-        } = req.into_parts().0.into_message().await??;
+        } = req.into_message().await?;
 
         let auth_id: SmolStr = auth_id.into();
 
@@ -810,17 +801,17 @@ impl auth_service_server::AuthService for AuthServer {
             self.queued_steps.remove(auth_id.as_str());
         }
 
-        Ok(NextStepResponse {
+        Ok((NextStepResponse {
             step: Some(next_step),
-        })
+        }).into_response())
     }
 
     #[rate(10, 5)]
     async fn step_back(
         &self,
         req: Request<StepBackRequest>,
-    ) -> Result<StepBackResponse, HrpcServerError<Self::Error>> {
-        let req = req.into_parts().0.into_message().await??;
+    ) -> ServerResult<Response<StepBackResponse>> {
+        let req = req.into_message().await?;
         let auth_id = req.auth_id;
 
         let prev_step;
@@ -854,9 +845,9 @@ impl auth_service_server::AuthService for AuthServer {
             return Err(ServerError::InvalidAuthId.into());
         }
 
-        Ok(StepBackResponse {
+        Ok((StepBackResponse {
             step: Some(prev_step),
-        })
+        }).into_response())
     }
 }
 
@@ -877,7 +868,7 @@ impl AuthTree {
         {
             let hashed = hash_password(token.as_bytes());
             let key = reg_token_key(hashed.as_ref());
-            self.inner.insert(&key, &[])?;
+            self.inner.insert(&key, &[]).map_err(ServerError::from)?;
         }
         Ok(token)
     }
@@ -913,7 +904,7 @@ fn try_get_string(values: &mut Vec<Field>, err: ServerError) -> ServerResult<Str
     if let Some(Field::String(value)) = values.pop() {
         Ok(value)
     } else {
-        Err(err)
+        Err(err.into())
     }
 }
 
@@ -922,7 +913,7 @@ fn try_get_bytes(values: &mut Vec<Field>, err: ServerError) -> ServerResult<Vec<
     if let Some(Field::Bytes(value)) = values.pop() {
         Ok(value)
     } else {
-        Err(err)
+        Err(err.into())
     }
 }
 

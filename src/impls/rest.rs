@@ -1,12 +1,13 @@
 use crate::http;
 
-use super::{get_content_length, prelude::*, rate};
+use super::{get_content_length, prelude::*};
 
 use std::{
     borrow::Cow,
     cmp,
     collections::HashMap,
     fs::Metadata,
+    ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
@@ -16,17 +17,18 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            futures_util::{
+            client::{http_client, HttpClient},
+            exports::futures_util::{
                 future::{self, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
-            warp,
         },
         prost::bytes::{Buf, Bytes, BytesMut},
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use reqwest::{header::HeaderValue, StatusCode, Url};
+use http::{HeaderValue, StatusCode, Uri};
+use hyper::Body;
 use sha3::Digest;
 use tokio::{
     fs::File,
@@ -38,57 +40,44 @@ use warp::{filters::multipart::*, filters::BoxedFilter, reply::Response, Filter,
 
 const SEPERATOR: u8 = b'\n';
 
-pub fn rest(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
+pub fn rest(deps: &Dependencies) -> (BoxedFilter<(impl Reply,)>, BoxedFilter<(impl Reply,)>) {
     let media_conf = &deps.config.media;
-    download(
-        Arc::new(media_conf.media_root.clone()),
-        deps.config.host.clone(),
-        deps.config.policy.disable_ratelimits,
+    (
+        download(
+            Arc::new(media_conf.media_root.clone()),
+            deps.config.host.clone(),
+        ),
+        upload(
+            deps.valid_sessions.clone(),
+            Arc::new(media_conf.media_root.clone()),
+            media_conf.max_upload_length,
+        ),
     )
-    .or(upload(
-        deps.valid_sessions.clone(),
-        Arc::new(media_conf.media_root.clone()),
-        media_conf.max_upload_length,
-        deps.config.policy.disable_ratelimits,
-    ))
-    .boxed()
 }
 
-pub fn download(
-    media_root: Arc<PathBuf>,
-    host: String,
-    disable_ratelimits: bool,
-) -> BoxedFilter<(impl Reply,)> {
-    let http_client = reqwest::Client::new();
+pub fn download(media_root: Arc<PathBuf>, host: String) -> BoxedFilter<(impl Reply,)> {
+    let http_client = http_client();
     let host: SmolStr = host.into();
     warp::get()
-        .and(warp::path("_harmony"))
-        .and(warp::path("media"))
-        .and(warp::path("download"))
         .and(warp::path::param::<String>())
-        .and(
-            disable_ratelimits
-                .then(|| warp::any().boxed())
-                .unwrap_or_else(|| rate(20, 5)),
-        )
         .and_then(move |id: String| {
             async fn make_request(
-                http_client: &reqwest::Client,
-                url: Url,
-            ) -> Result<reqwest::Response, warp::Rejection> {
-                http_client
-                    .get(url)
-                    .send()
-                    .await
-                    .map_err(reject)?
-                    .error_for_status()
-                    .map_err(|err| {
-                        if err.status().unwrap() == StatusCode::NOT_FOUND {
-                            reject(ServerError::MediaNotFound)
-                        } else {
-                            reject(err)
-                        }
-                    })
+                http_client: &HttpClient,
+                url: Uri,
+            ) -> Result<http::Response<Body>, warp::Rejection> {
+                let resp = http_client.get(url).await.map_err(reject)?;
+
+                if resp.status().is_success().not() {
+                    let err = if resp.status() == StatusCode::NOT_FOUND {
+                        reject(ServerError::MediaNotFound)
+                    } else {
+                        // TODO: proper error
+                        reject(ServerError::InternalServerError)
+                    };
+                    Err(err)
+                } else {
+                    Ok(resp)
+                }
             }
             let host = host.clone();
             let id = urlencoding::decode(&id).unwrap_or_else(|_| Cow::Borrowed(id.as_str()));
@@ -99,6 +88,8 @@ pub fn download(
                 match file_id? {
                     FileId::External(url) => {
                         info!("Serving external image from {}", url);
+                        let filename = url.path().split('/').last().unwrap_or("unknown");
+                        let disposition = unsafe { disposition_header(filename) };
                         let resp = make_request(&http_client, url).await?;
                         let content_type = resp
                             .headers()
@@ -117,21 +108,8 @@ pub fn download(
                             });
 
                         if let Some(content_type) = content_type {
-                            let filename = resp
-                                .url()
-                                .path_segments()
-                                .expect("cannot be a cannot-be-a-base url")
-                                .last()
-                                .unwrap_or("unknown");
-                            let disposition = unsafe { disposition_header(filename) };
                             let len = get_content_length(&resp);
-                            let data_stream = resp.bytes_stream();
-                            Ok((
-                                disposition,
-                                content_type,
-                                warp::hyper::Body::wrap_stream(data_stream),
-                                len,
-                            ))
+                            Ok((disposition, content_type, resp.into_body(), len))
                         } else {
                             Err(reject(ServerError::NotMedia))
                         }
@@ -165,13 +143,7 @@ pub fn download(
                                         reject(ServerError::FileExtractUnexpected(e.into()))
                                     })?;
                             let len = get_content_length(&resp);
-                            let data_stream = resp.bytes_stream();
-                            Ok((
-                                disposition,
-                                mimetype,
-                                warp::hyper::Body::wrap_stream(data_stream),
-                                len,
-                            ))
+                            Ok((disposition, mimetype, resp.into_body(), len))
                         }
                     }
                     FileId::Id(id) => {
@@ -205,15 +177,8 @@ pub fn upload(
     sessions: SessionMap,
     media_root: Arc<PathBuf>,
     max_length: u64,
-    disable_ratelimits: bool,
 ) -> BoxedFilter<(impl Reply,)> {
     warp::post()
-        .and(warp::path!("_harmony" / "media" / "upload"))
-        .and(
-            disable_ratelimits
-                .then(|| warp::any().boxed())
-                .unwrap_or_else(|| rate(5, 5)),
-        )
         .and(warp::filters::header::value("authorization").and_then(
             move |maybe_token: HeaderValue| {
                 let res = maybe_token
@@ -264,7 +229,7 @@ pub fn upload(
 
 #[inline(always)]
 pub fn reject(err: impl Into<ServerError>) -> warp::Rejection {
-    warp::reject::custom(HrpcServerError::Custom(err.into()))
+    warp::reject::custom(err.into())
 }
 
 // Safety: the `name` argument MUST ONLY contain ASCII characters.

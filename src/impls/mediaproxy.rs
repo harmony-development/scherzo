@@ -1,12 +1,12 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
-use reqwest::{Client, StatusCode, Url};
+use hyper::{body::Buf, StatusCode, Uri};
 use webpage::HTML;
 
 use std::time::Instant;
 
-use super::{get_mimetype, http, prelude::*};
+use super::{get_mimetype, http, prelude::*, HttpClient};
 
 #[derive(Clone)]
 enum Metadata {
@@ -46,7 +46,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
 }
 
 pub struct MediaproxyServer {
-    http: Client,
+    http: HttpClient,
     valid_sessions: SessionMap,
     disable_ratelimits: bool,
 }
@@ -54,7 +54,7 @@ pub struct MediaproxyServer {
 impl MediaproxyServer {
     pub fn new(deps: &Dependencies) -> Self {
         Self {
-            http: Client::new(),
+            http: deps.http.clone(),
             valid_sessions: deps.valid_sessions.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
         }
@@ -66,18 +66,17 @@ impl MediaproxyServer {
             return Ok(value.value.clone());
         }
 
-        let url: Url = raw_url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = match self.http.get(url.as_ref()).send().await?.error_for_status() {
-            Ok(response) => response,
-            Err(err) => {
-                let err = if err.status() == Some(StatusCode::NOT_FOUND) {
-                    ServerError::LinkNotFound(url)
-                } else {
-                    ServerError::ReqwestError(err)
-                };
-                return Err(err);
-            }
-        };
+        let url: Uri = raw_url.parse().map_err(ServerError::InvalidUrl)?;
+        let response = self.http.get(url.clone()).await?;
+        if !response.status().is_success() {
+            let err = if response.status() == StatusCode::NOT_FOUND {
+                ServerError::LinkNotFound(url)
+            } else {
+                // TODO: change to proper error
+                ServerError::InternalServerError
+            };
+            return Err(err);
+        }
 
         let is_html = response
             .headers()
@@ -86,8 +85,9 @@ impl MediaproxyServer {
             .map_or(false, |v| v.eq_ignore_ascii_case(b"text/html"));
 
         let metadata = if is_html {
-            let html = response.text().await?;
-            let html = webpage::HTML::from_string(html, Some(raw_url))?;
+            let body = hyper::body::aggregate(response.into_body()).await?;
+            let html = String::from_utf8_lossy(body.chunk());
+            let html = webpage::HTML::from_string(html.into(), Some(raw_url))?;
             Metadata::Site(html)
         } else {
             let filename = response
@@ -100,11 +100,7 @@ impl MediaproxyServer {
                         .and_then(|f| s.get(f + FILENAME.len()..))
                         .unwrap_or(s)
                 })
-                .or_else(|| {
-                    url.path_segments()
-                        .and_then(Iterator::last)
-                        .filter(|n| !n.is_empty())
-                })
+                .or_else(|| url.path().split('/').last().filter(|n| !n.is_empty()))
                 .unwrap_or("unknown")
                 .into();
             Metadata::Media {
@@ -115,7 +111,7 @@ impl MediaproxyServer {
 
         // Insert to cache since successful
         CACHE.insert(
-            url.into(),
+            url.to_string(),
             TimedCacheValue {
                 value: metadata.clone(),
                 since: Instant::now(),
@@ -126,18 +122,16 @@ impl MediaproxyServer {
     }
 }
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
+#[async_trait]
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
-    type Error = ServerError;
-
     #[rate(2, 1)]
     async fn fetch_link_metadata(
         &self,
         request: Request<FetchLinkMetadataRequest>,
-    ) -> Result<FetchLinkMetadataResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<FetchLinkMetadataResponse>> {
         auth!();
 
-        let FetchLinkMetadataRequest { url } = request.into_parts().0.into_message().await??;
+        let FetchLinkMetadataRequest { url } = request.into_message().await?;
 
         let data = match self.fetch_metadata(url).await? {
             Metadata::Site(mut html) => Data::IsSite(SiteMetadata {
@@ -158,21 +152,21 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
             }),
         };
 
-        Ok(FetchLinkMetadataResponse { data: Some(data) })
+        Ok((FetchLinkMetadataResponse { data: Some(data) }).into_response())
     }
 
     #[rate(1, 5)]
     async fn instant_view(
         &self,
         request: Request<InstantViewRequest>,
-    ) -> Result<InstantViewResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<InstantViewResponse>> {
         auth!();
 
-        let InstantViewRequest { url } = request.into_parts().0.into_message().await??;
+        let InstantViewRequest { url } = request.into_message().await?;
 
         let data = self.fetch_metadata(url).await?;
 
-        if let Metadata::Site(html) = data {
+        let msg = if let Metadata::Site(html) = data {
             let metadata = SiteMetadata {
                 page_title: html.title.unwrap_or_default(),
                 description: html.description.unwrap_or_default(),
@@ -180,38 +174,42 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
                 ..Default::default()
             };
 
-            Ok(InstantViewResponse {
+            InstantViewResponse {
                 content: html.text_content,
                 is_valid: true,
                 metadata: Some(metadata),
-            })
+            }
         } else {
-            Ok(InstantViewResponse::default())
-        }
+            InstantViewResponse::default()
+        };
+
+        Ok(msg.into_response())
     }
 
     #[rate(20, 5)]
     async fn can_instant_view(
         &self,
         request: Request<CanInstantViewRequest>,
-    ) -> Result<CanInstantViewResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<CanInstantViewResponse>> {
         auth!();
 
-        let CanInstantViewRequest { url } = request.into_parts().0.into_message().await??;
+        let CanInstantViewRequest { url } = request.into_message().await?;
 
         if let Some(val) = get_from_cache(&url) {
-            return Ok(CanInstantViewResponse {
+            return Ok((CanInstantViewResponse {
                 can_instant_view: matches!(val.value, Metadata::Site(_)),
-            });
+            })
+            .into_response());
         }
 
-        let url: Url = url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = self.http.get(url).send().await.map_err(ServerError::from)?;
+        let url: Uri = url.parse().map_err(ServerError::InvalidUrl)?;
+        let response = self.http.get(url).await.map_err(ServerError::from)?;
 
         let ok = get_mimetype(&response).eq("text/html");
 
-        Ok(CanInstantViewResponse {
+        Ok((CanInstantViewResponse {
             can_instant_view: ok,
         })
+        .into_response())
     }
 }

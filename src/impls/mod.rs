@@ -8,34 +8,31 @@ pub mod rest;
 pub mod sync;
 pub mod voice;
 
+use hyper::{StatusCode, Uri};
 use prelude::*;
+use tower::service_fn;
 
-use std::{
-    future,
-    str::FromStr,
-    time::{Duration, UNIX_EPOCH},
-};
+use std::{str::FromStr, time::UNIX_EPOCH};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            http,
-            server::filters::{rate::Rate, rate_limit},
-            warp::{self, filters::BoxedFilter, Filter, Reply},
+            body::full_box_body,
+            client::{http_client, HttpClient},
+            exports::http,
+            server::MakeHrpcService,
+            HrpcService, HttpRequest,
         },
         prost::bytes::Bytes,
     },
-    HomeserverIdParseError, HomeserverIdentifier,
+    HomeserverIdentifier,
 };
 use parking_lot::Mutex;
 use rand::Rng;
-use reqwest::Response;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{
-    config::Config, impls::rest::reject, key, SharedConfig, SharedConfigData, SCHERZO_VERSION,
-};
+use crate::{config::Config, key, SharedConfig, SharedConfigData, SCHERZO_VERSION};
 
 use self::{
     auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
@@ -46,14 +43,17 @@ pub mod prelude {
 
     pub use crate::{
         db::{self, rkyv_arch, rkyv_ser, ArcTree, Batch, Db, DbResult, Tree},
-        ServerError, ServerResult,
+        ServerError,
     };
 
     pub use harmony_rust_sdk::api::exports::{
         hrpc::{
-            async_trait,
-            server::{ServerError as HrpcServerError, Socket},
-            Request,
+            exports::{async_trait, http},
+            server::{
+                error::{ServerError as HrpcServerError, ServerResult},
+                socket::Socket,
+            },
+            IntoResponse, Request, Response,
         },
         prost::Message,
     };
@@ -80,13 +80,14 @@ pub struct Dependencies {
     pub fed_event_dispatcher: FedEventDispatcher,
     pub key_manager: Option<Arc<key::Manager>>,
     pub action_processor: ActionProcesser,
+    pub http: HttpClient,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
 }
 
 impl Dependencies {
-    pub fn new(db: &dyn Db, config: Config) -> DbResult<(Self, FedEventReceiver)> {
+    pub fn new(db: &dyn Db, config: Config) -> DbResult<(Arc<Self>, FedEventReceiver)> {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
         let auth_tree = AuthTree::new(db)?;
@@ -106,12 +107,13 @@ impl Dependencies {
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
             action_processor: ActionProcesser { auth_tree },
+            http: http_client(),
 
             config,
             runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
         };
 
-        Ok((this, fed_event_receiver))
+        Ok((Arc::new(this), fed_event_receiver))
     }
 }
 
@@ -156,15 +158,7 @@ fn gen_rand_u64() -> u64 {
     rand::thread_rng().gen_range(1..u64::MAX)
 }
 
-fn rate(num: u64, dur: u64) -> BoxedFilter<()> {
-    rate_limit(
-        Rate::new(num, Duration::from_secs(dur)),
-        ServerError::TooFast,
-    )
-    .boxed()
-}
-
-fn get_mimetype(response: &Response) -> &str {
+fn get_mimetype<T>(response: &http::Response<T>) -> &str {
     response
         .headers()
         .get(&http::header::CONTENT_TYPE)
@@ -173,7 +167,7 @@ fn get_mimetype(response: &Response) -> &str {
         .unwrap_or("application/octet-stream")
 }
 
-fn get_content_length(response: &Response) -> http::HeaderValue {
+fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
     response
         .headers()
         .get(&http::header::CONTENT_LENGTH)
@@ -183,71 +177,109 @@ fn get_content_length(response: &Response) -> http::HeaderValue {
         })
 }
 
-pub fn about(deps: &Dependencies) -> BoxedFilter<(impl Reply,)> {
+pub mod about {
+    use super::*;
     use harmony_rust_sdk::api::rest::About;
 
-    let about_server = deps.config.server_description.clone();
-    let shared_config = deps.runtime_config.clone();
+    pub struct AboutProducer {
+        deps: Arc<Dependencies>,
+    }
 
-    warp::get()
-        .and(warp::path!("_harmony" / "about"))
-        .map(move || {
-            warp::reply::json(&About {
-                server_name: "Scherzo".to_string(),
-                version: SCHERZO_VERSION.to_string(),
-                about_server: about_server.clone(),
-                message_of_the_day: shared_config.lock().motd.clone(),
-            })
-        })
-        .boxed()
+    impl MakeHrpcService for AboutProducer {
+        fn make_hrpc_service(&self, request: &HttpRequest) -> Option<HrpcService> {
+            if request.uri().path() == "/_harmony/about" {
+                let deps = self.deps.clone();
+                let service = service_fn(move |_: HttpRequest| {
+                    let deps = deps.clone();
+                    async move {
+                        let json = serde_json::to_string(&About {
+                            server_name: "Scherzo".to_string(),
+                            version: SCHERZO_VERSION.to_string(),
+                            about_server: deps.config.server_description.clone(),
+                            message_of_the_day: deps.runtime_config.lock().motd.clone(),
+                        })
+                        .unwrap();
+
+                        Ok(http::Response::builder()
+                            .status(StatusCode::OK)
+                            .body(full_box_body(json.into_bytes().into()))
+                            .unwrap())
+                    }
+                });
+                Some(HrpcService::new(service))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn producer(deps: Arc<Dependencies>) -> AboutProducer {
+        AboutProducer { deps }
+    }
 }
 
-pub fn against_proxy() -> BoxedFilter<(impl Reply,)> {
-    let http = reqwest::Client::new();
+pub mod against {
+    use harmony_rust_sdk::api::exports::hrpc::{body::box_body, server::prelude::CustomError};
+    use hyper::header::HeaderName;
 
-    let reject_header = |err| reject(ServerError::InvalidAgainst(err));
+    use super::*;
 
-    warp::header::<String>("Against")
-        .and_then(move |host_id_raw: String| {
-            future::ready(HomeserverIdentifier::from_str(&host_id_raw).map_err(reject_header))
-        })
-        .and(warp::path::full())
-        .and(warp::body::body())
-        .and(warp::header::headers_cloned())
-        .and(warp::method())
-        .and_then(
-            move |host_id: HomeserverIdentifier,
-                  path: warp::path::FullPath,
-                  body,
-                  headers,
-                  method| {
-                let http = http.clone();
-                async move {
-                    use reqwest::Request;
+    pub struct AgainstProducer {
+        http: HttpClient,
+    }
 
-                    let url = host_id
-                        .to_url()
-                        .map_err(reject_header)?
-                        .join(path.as_str())
-                        .map_err(|_| reject_header(HomeserverIdParseError::Malformed))?;
-                    let mut request = Request::new(method, url);
-                    *request.body_mut() = Some(reqwest::Body::wrap_stream(body));
-                    *request.headers_mut() = headers;
+    impl MakeHrpcService for AgainstProducer {
+        fn make_hrpc_service(&self, request: &HttpRequest) -> Option<HrpcService> {
+            if let Some(host_id) = request
+                .headers()
+                .get(&HeaderName::from_static("Against"))
+                .and_then(|header| {
+                    header
+                        .to_str()
+                        .ok()
+                        .and_then(|v| HomeserverIdentifier::from_str(v).ok())
+                })
+            {
+                let http = self.http.clone();
 
-                    let host_response = http.execute(request).await.map_err(reject)?;
+                let service = service_fn(move |request: HttpRequest| {
+                    let http = http.clone();
+                    let (parts, body) = request.into_parts();
+                    let url = {
+                        let mut url_parts = host_id.to_url().into_parts();
+                        url_parts.path_and_query = Some(parts.uri.path().parse().unwrap());
+                        Uri::from_parts(url_parts).unwrap()
+                    };
+                    async move {
+                        let mut request = http::Request::builder()
+                            .uri(url)
+                            .method(parts.method)
+                            .body(body)
+                            .unwrap();
+                        *request.headers_mut() = parts.headers;
+                        *request.extensions_mut() = parts.extensions;
 
-                    let mut response = warp::reply::Response::default();
-                    *response.headers_mut() = host_response.headers().clone();
-                    *response.status_mut() = host_response.status();
-                    *response.version_mut() = host_response.version();
-                    *response.body_mut() =
-                        warp::hyper::Body::wrap_stream(host_response.bytes_stream());
+                        let host_response = http
+                            .request(request)
+                            .await
+                            .map(|r| r.map(box_body))
+                            .unwrap_or_else(|err| ServerError::HttpError(err).as_error_response());
 
-                    Result::<_, warp::Rejection>::Ok(response)
-                }
-            },
-        )
-        .boxed()
+                        Ok(host_response)
+                    }
+                });
+                Some(HrpcService::new(service))
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn producer() -> AgainstProducer {
+        AgainstProducer {
+            http: http_client(),
+        }
+    }
 }
 
 pub struct AdminActionError;

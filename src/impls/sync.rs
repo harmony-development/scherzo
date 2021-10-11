@@ -5,11 +5,11 @@ use std::time::Duration;
 use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::{
-    exports::hrpc::futures_util::TryFutureExt,
+    exports::hrpc::exports::futures_util::TryFutureExt,
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use reqwest::{header::HeaderValue, Url};
+use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
@@ -30,11 +30,10 @@ struct Clients(DashMap<SmolStr, PostboxServiceClient, RandomState>);
 impl Clients {
     fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, PostboxServiceClient, RandomState> {
         self.0.entry(host.clone()).or_insert_with(|| {
-            let http = reqwest::Client::new(); // each server gets its own http client
-                                               // TODO: Handle url parsing error
-            let host_url: Url = host.parse().unwrap();
+            // TODO: Handle url parsing error
+            let host_url: Uri = host.parse().unwrap();
 
-            PostboxServiceClient::new(http, host_url).unwrap()
+            PostboxServiceClient::new(host_url).unwrap()
         })
     }
 }
@@ -161,11 +160,13 @@ impl SyncServer {
         let token = self.keys_manager()?.generate_token(data).await?;
         let token = rkyv_ser(&token);
 
-        Ok(
-            Request::new(msg).header(http::header::AUTHORIZATION, unsafe {
+        let mut req = Request::new(msg);
+        req.header_map_mut()
+            .insert(http::header::AUTHORIZATION, unsafe {
                 HeaderValue::from_maybe_shared_unchecked(token)
-            }),
-        )
+            });
+
+        Ok(req)
     }
 
     fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
@@ -183,7 +184,7 @@ impl SyncServer {
     }
 
     async fn auth<T>(&self, request: &Request<T>) -> Result<SmolStr, ServerError> {
-        let maybe_auth = request.get_header(&http::header::AUTHORIZATION);
+        let maybe_auth = request.header_map().get(&http::header::AUTHORIZATION);
 
         if let Some(auth) = maybe_auth.map(|h| h.as_bytes()) {
             let token = Token::decode(auth).map_err(|_| ServerError::InvalidToken)?;
@@ -232,7 +233,7 @@ impl SyncServer {
         Ok(())
     }
 
-    fn get_event_queue(&self, host: &str) -> ServerResult<PullResponse> {
+    fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
         let key = make_host_key(host);
         let queue = self
             .sync_tree
@@ -251,7 +252,7 @@ impl SyncServer {
         host: &str,
         mut queue: PullResponse,
         event: Event,
-    ) -> ServerResult<()> {
+    ) -> Result<(), ServerError> {
         // TODO: this is a waste, find a way to optimize this
         queue.event_queue.push(event);
         let buf = rkyv_ser(&queue);
@@ -262,21 +263,13 @@ impl SyncServer {
 
 #[async_trait]
 impl postbox_service_server::PostboxService for SyncServer {
-    type Error = ServerError;
-
-    async fn pull(
-        &self,
-        request: Request<PullRequest>,
-    ) -> Result<PullResponse, HrpcServerError<Self::Error>> {
+    async fn pull(&self, request: Request<PullRequest>) -> ServerResult<Response<PullResponse>> {
         let host = self.auth(&request).await?;
         let queue = self.get_event_queue(&host)?;
-        Ok(queue)
+        Ok(queue.into_response())
     }
 
-    async fn push(
-        &self,
-        request: Request<PushRequest>,
-    ) -> Result<PushResponse, HrpcServerError<Self::Error>> {
+    async fn push(&self, request: Request<PushRequest>) -> ServerResult<Response<PushResponse>> {
         let host = self.auth(&request).await?;
         let key = make_host_key(&host);
         if !self
@@ -288,16 +281,16 @@ impl postbox_service_server::PostboxService for SyncServer {
                 .insert(&key, &[])
                 .map_err(ServerError::DbError)?;
         }
-        if let Some(event) = request.into_parts().0.into_message().await??.event {
+        if let Some(event) = request.into_message().await?.event {
             self.push_logic(&host, event)?;
         }
-        Ok(PushResponse {})
+        Ok((PushResponse {}).into_response())
     }
 
     async fn notify_new_id(
         &self,
         _request: Request<NotifyNewIdRequest>,
-    ) -> Result<NotifyNewIdResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<NotifyNewIdResponse>> {
         Err(ServerError::NotImplemented.into())
     }
 }

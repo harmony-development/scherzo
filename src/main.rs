@@ -1,7 +1,9 @@
 #![recursion_limit = "256"]
 
 use std::{
+    convert::Infallible,
     future::Future,
+    net::SocketAddr,
     path::{Path, PathBuf},
     pin::Pin,
     time::Duration,
@@ -12,13 +14,13 @@ use harmony_rust_sdk::api::{
     batch::batch_service_server::BatchServiceServer,
     chat::{chat_service_server::ChatServiceServer, ChannelKind, Permission},
     emote::emote_service_server::EmoteServiceServer,
-    exports::hrpc::{self, balanced_or_tree, warp::Filter},
+    exports::hrpc::{body::box_body, server::HrpcMakeService, HttpRequest, HttpResponse},
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
     voice::voice_service_server::VoiceServiceServer,
 };
-use hrpc::warp;
+use hyper::Uri;
 use scherzo::{
     config::DbConfig,
     db::{
@@ -26,7 +28,7 @@ use scherzo::{
         Db,
     },
     impls::{
-        against_proxy,
+        about, against,
         auth::AuthServer,
         batch::BatchServer,
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
@@ -37,8 +39,8 @@ use scherzo::{
         voice::VoiceServer,
         Dependencies,
     },
-    ServerError,
 };
+use tower::{service_fn, Service, ServiceExt};
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -254,36 +256,75 @@ pub async fn run(filter_level: Level, db_path: String) {
     let sync_server = SyncServer::new(&deps, fed_event_receiver);
     let voice_server = VoiceServer::new(&deps);
 
-    let profile = ProfileServiceServer::new(profile_server).filters();
-    let emote = EmoteServiceServer::new(emote_server).filters();
-    let auth = AuthServiceServer::new(auth_server).filters();
-    let chat = ChatServiceServer::new(chat_server).filters();
-    let rest = scherzo::impls::rest::rest(&deps);
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server).filters();
-    let sync = PostboxServiceServer::new(sync_server).filters();
-    let voice = VoiceServiceServer::new(voice_server).filters();
-    let about = scherzo::impls::about(&deps);
-    let against = against_proxy();
+    let profile = ProfileServiceServer::new(profile_server);
+    let emote = EmoteServiceServer::new(emote_server);
+    let auth = AuthServiceServer::new(auth_server);
+    let chat = ChatServiceServer::new(chat_server);
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
+    let sync = PostboxServiceServer::new(sync_server);
+    let voice = VoiceServiceServer::new(voice_server);
 
-    let filters = balanced_or_tree!(
-        against, auth, chat, mediaproxy, rest, sync, voice, emote, profile, about
-    )
-    .boxed();
+    let make_service = HrpcMakeService::new(vec![
+        Box::new(profile),
+        Box::new(emote),
+        Box::new(auth),
+        Box::new(chat),
+        Box::new(mediaproxy),
+        Box::new(sync),
+        Box::new(voice),
+    ]);
 
-    let batch_server = BatchServer::new(
-        &deps,
-        filters
-            .clone()
-            .recover(hrpc::server::handle_rejection::<ServerError>)
-            .boxed(),
-    );
-    let batch = BatchServiceServer::new(batch_server).filters();
+    let (download, upload) = scherzo::impls::rest::rest(&deps);
+    // TODO: handle errors here
+    let download = warp::service(download).map_response(|r| r.map(box_body));
+    let upload = warp::service(upload).map_response(|r| r.map(box_body));
 
-    let filters = (filters.or(batch))
-        .with(warp::trace::request())
-        .with(warp::compression::gzip())
-        .recover(hrpc::server::handle_rejection::<ServerError>)
-        .boxed();
+    let batch_server = BatchServer::new(&deps, make_service.clone());
+    let batch = BatchServiceServer::new(batch_server);
+
+    let against = against::producer();
+    let about = about::producer(deps.clone());
+
+    let make_service = HrpcMakeService::new(vec![
+        Box::new(against),
+        Box::new(make_service),
+        Box::new(batch),
+        Box::new(about),
+    ]);
+
+    let make_service = hyper::service::make_service_fn(move |_| {
+        let download = download.clone();
+        let upload = upload.clone();
+        let make_service = make_service.clone();
+        async move {
+            Result::<_, Infallible>::Ok(service_fn(move |mut request: HttpRequest| {
+                let endpoint = request.uri().path();
+                match endpoint {
+                    "/_harmony/media/upload" => {
+                        let mut upload = upload.clone();
+
+                        new_svc_fut(async move { upload.call(request).await })
+                    }
+                    x => {
+                        if let Some(path) = x.strip_prefix("/_harmony/media/download") {
+                            let mut parts = request.uri().clone().into_parts();
+                            parts.path_and_query = Some(path.parse().unwrap());
+                            let uri = Uri::from_parts(parts).unwrap();
+                            *request.uri_mut() = uri;
+
+                            let mut download = download.clone();
+                            new_svc_fut(async move { download.call(request).await })
+                        } else {
+                            let mut make_service = make_service.clone();
+                            new_svc_fut(async move {
+                                make_service.call(()).await.unwrap().call(request).await
+                            })
+                        }
+                    }
+                }
+            }))
+        }
+    });
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -313,27 +354,19 @@ pub async fn run(filter_level: Level, db_path: String) {
         }
     });
 
-    let serve = hrpc::warp::serve(filters);
-
-    let addr = if deps.config.listen_on_localhost {
-        ([127, 0, 0, 1], deps.config.port)
+    let addr: SocketAddr = if deps.config.listen_on_localhost {
+        ([127, 0, 0, 1], deps.config.port).into()
     } else {
-        ([0, 0, 0, 0], deps.config.port)
+        ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let spawn_handle = if let Some(tls_config) = deps.config.tls.as_ref() {
-        tokio::spawn(
-            serve
-                .tls()
-                .cert_path(tls_config.cert_file.clone())
-                .key_path(tls_config.key_file.clone())
-                .run(addr),
-        )
+    let spawn_handle = if let Some(_tls_config) = deps.config.tls.as_ref() {
+        todo!("impl tls again")
     } else {
-        tokio::spawn(serve.run(addr))
+        tokio::spawn(hyper::Server::bind(&addr).serve(make_service))
     };
 
-    spawn_handle.await.unwrap();
+    spawn_handle.await.unwrap().unwrap();
 }
 
 use tokio::fs;
@@ -352,4 +385,10 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::
         }
         Ok(())
     })
+}
+
+fn new_svc_fut<Fut: Future<Output = Result<HttpResponse, Infallible>> + Send + 'static>(
+    fut: Fut,
+) -> Pin<Box<dyn Future<Output = Result<HttpResponse, Infallible>> + Send + 'static>> {
+    Box::pin(fut)
 }

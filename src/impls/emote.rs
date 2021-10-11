@@ -47,17 +47,14 @@ impl EmoteServer {
 
 #[async_trait]
 impl EmoteService for EmoteServer {
-    type Error = ServerError;
-
     #[rate(20, 5)]
     async fn delete_emote_from_pack(
         &self,
         request: Request<DeleteEmoteFromPackRequest>,
-    ) -> Result<DeleteEmoteFromPackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<DeleteEmoteFromPackResponse>> {
         auth!();
 
-        let DeleteEmoteFromPackRequest { pack_id, name } =
-            request.into_parts().0.into_message().await??;
+        let DeleteEmoteFromPackRequest { pack_id, name } = request.into_message().await?;
 
         self.emote_tree
             .check_if_emote_pack_owner(pack_id, user_id)?;
@@ -78,17 +75,17 @@ impl EmoteService for EmoteServer {
             EventContext::new(equipped_users),
         );
 
-        Ok(DeleteEmoteFromPackResponse {})
+        Ok((DeleteEmoteFromPackResponse {}).into_response())
     }
 
     #[rate(5, 5)]
     async fn delete_emote_pack(
         &self,
         request: Request<DeleteEmotePackRequest>,
-    ) -> Result<DeleteEmotePackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<DeleteEmotePackResponse>> {
         auth!();
 
-        let DeleteEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
+        let DeleteEmotePackRequest { pack_id } = request.into_message().await?;
 
         self.emote_tree
             .check_if_emote_pack_owner(pack_id, user_id)?;
@@ -116,17 +113,17 @@ impl EmoteService for EmoteServer {
             EventContext::new(equipped_users),
         );
 
-        Ok(DeleteEmotePackResponse {})
+        Ok((DeleteEmotePackResponse {}).into_response())
     }
 
     #[rate(10, 5)]
     async fn dequip_emote_pack(
         &self,
         request: Request<DequipEmotePackRequest>,
-    ) -> Result<DequipEmotePackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<DequipEmotePackResponse>> {
         auth!();
 
-        let DequipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
+        let DequipEmotePackRequest { pack_id } = request.into_message().await?;
 
         self.emote_tree.dequip_emote_pack_logic(user_id, pack_id)?;
 
@@ -137,17 +134,17 @@ impl EmoteService for EmoteServer {
             EventContext::new(vec![user_id]),
         );
 
-        Ok(DequipEmotePackResponse {})
+        Ok((DequipEmotePackResponse {}).into_response())
     }
 
     #[rate(10, 5)]
     async fn equip_emote_pack(
         &self,
         request: Request<EquipEmotePackRequest>,
-    ) -> Result<EquipEmotePackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<EquipEmotePackResponse>> {
         auth!();
 
-        let EquipEmotePackRequest { pack_id } = request.into_parts().0.into_message().await??;
+        let EquipEmotePackRequest { pack_id } = request.into_message().await?;
 
         let key = make_emote_pack_key(pack_id);
         if let Some(data) = emote_get!(key) {
@@ -163,18 +160,17 @@ impl EmoteService for EmoteServer {
             return Err(ServerError::EmotePackNotFound.into());
         }
 
-        Ok(EquipEmotePackResponse {})
+        Ok((EquipEmotePackResponse {}).into_response())
     }
 
     #[rate(20, 5)]
     async fn add_emote_to_pack(
         &self,
         request: Request<AddEmoteToPackRequest>,
-    ) -> Result<AddEmoteToPackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<AddEmoteToPackResponse>> {
         auth!();
 
-        let AddEmoteToPackRequest { pack_id, emote } =
-            request.into_parts().0.into_message().await??;
+        let AddEmoteToPackRequest { pack_id, emote } = request.into_message().await?;
 
         if let Some(emote) = emote {
             self.emote_tree
@@ -198,14 +194,14 @@ impl EmoteService for EmoteServer {
             );
         }
 
-        Ok(AddEmoteToPackResponse {})
+        Ok((AddEmoteToPackResponse {}).into_response())
     }
 
     #[rate(10, 5)]
     async fn get_emote_packs(
         &self,
         request: Request<GetEmotePacksRequest>,
-    ) -> Result<GetEmotePacksResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<GetEmotePacksResponse>> {
         auth!();
 
         let prefix = make_equipped_emote_prefix(user_id);
@@ -214,7 +210,7 @@ impl EmoteService for EmoteServer {
                 .inner
                 .scan_prefix(&prefix)
                 .try_fold(Vec::new(), |mut all, res| {
-                    let (key, _) = res?;
+                    let (key, _) = res.map_err(ServerError::from)?;
                     if key.len() == make_equipped_emote_key(user_id, 0).len() {
                         let pack_id =
                         // Safety: since it will always be 8 bytes left afterwards
@@ -231,7 +227,7 @@ impl EmoteService for EmoteServer {
             .inner
             .scan_prefix(EMOTEPACK_PREFIX)
             .try_fold(Vec::new(), |mut all, res| {
-                let (key, val) = res?;
+                let (key, val) = res.map_err(ServerError::from)?;
                 if key.len() == make_emote_pack_key(0).len() {
                     let pack_id =
                         // Safety: since it will always be 8 bytes left afterwards
@@ -248,17 +244,17 @@ impl EmoteService for EmoteServer {
                 ServerResult::Ok(all)
             })?;
 
-        Ok(GetEmotePacksResponse { packs })
+        Ok((GetEmotePacksResponse { packs }).into_response())
     }
 
     #[rate(20, 5)]
     async fn get_emote_pack_emotes(
         &self,
         request: Request<GetEmotePackEmotesRequest>,
-    ) -> Result<GetEmotePackEmotesResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<GetEmotePackEmotesResponse>> {
         auth!();
 
-        let GetEmotePackEmotesRequest { pack_id } = request.into_parts().0.into_message().await??;
+        let GetEmotePackEmotesRequest { pack_id } = request.into_message().await?;
 
         let pack_key = make_emote_pack_key(pack_id);
 
@@ -271,24 +267,24 @@ impl EmoteService for EmoteServer {
                 .inner
                 .scan_prefix(&pack_key)
                 .try_fold(Vec::new(), |mut all, res| {
-                    let (key, value) = res?;
+                    let (key, value) = res.map_err(ServerError::from)?;
                     if key.len() > pack_key.len() {
                         all.push(db::deser_emote(value));
                     }
                     ServerResult::Ok(all)
                 })?;
 
-        Ok(GetEmotePackEmotesResponse { emotes })
+        Ok((GetEmotePackEmotesResponse { emotes }).into_response())
     }
 
     #[rate(5, 5)]
     async fn create_emote_pack(
         &self,
         request: Request<CreateEmotePackRequest>,
-    ) -> Result<CreateEmotePackResponse, HrpcServerError<Self::Error>> {
+    ) -> ServerResult<Response<CreateEmotePackResponse>> {
         auth!();
 
-        let CreateEmotePackRequest { pack_name } = request.into_parts().0.into_message().await??;
+        let CreateEmotePackRequest { pack_name } = request.into_message().await?;
 
         let pack_id = gen_rand_u64();
         let key = make_emote_pack_key(pack_id);
@@ -312,7 +308,7 @@ impl EmoteService for EmoteServer {
             EventContext::new(vec![user_id]),
         );
 
-        Ok(CreateEmotePackResponse { pack_id })
+        Ok((CreateEmotePackResponse { pack_id }).into_response())
     }
 }
 
@@ -367,7 +363,7 @@ impl EmoteTree {
             self.inner
                 .scan_prefix(USER_PREFIX)
                 .try_fold(Vec::new(), |mut all, res| {
-                    let (key, _) = res?;
+                    let (key, _) = res.map_err(ServerError::from)?;
                     if key.len() == make_user_profile_key(0).len() {
                         all.push(u64::from_be_bytes(unsafe {
                             key.split_at(USER_PREFIX.len())
@@ -382,7 +378,7 @@ impl EmoteTree {
             let prefix = make_equipped_emote_prefix(user_id);
             let mut has = false;
             for res in self.inner.scan_prefix(&prefix) {
-                let (key, _) = res?;
+                let (key, _) = res.map_err(ServerError::from)?;
                 if key.len() == make_equipped_emote_key(user_id, 0).len() {
                     let id = u64::from_be_bytes(unsafe {
                         key.split_at(prefix.len()).1.try_into().unwrap_unchecked()

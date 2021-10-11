@@ -11,17 +11,17 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            encode_protobuf_message, http,
-            server::{CustomError, StatusCode},
-            url::ParseError as UrlParseError,
-            warp::{self, reply::Response},
+            body::BoxBody,
+            encode_protobuf_message,
+            exports::http::{self, uri::InvalidUri as UrlParseError},
+            server::{error::CustomError, StatusCode},
         },
         prost::bytes::Bytes,
     },
     HomeserverIdParseError,
 };
+use hyper::Uri;
 use parking_lot::Mutex;
-use reqwest::Url;
 use smol_str::SmolStr;
 use triomphe::Arc;
 
@@ -36,7 +36,7 @@ pub const SCHERZO_VERSION: &str = git_version::git_version!(
     fallback = "unknown"
 );
 
-pub fn set_proto_name(mut response: Response) -> Response {
+pub fn set_proto_name(mut response: http::Response<BoxBody>) -> http::Response<BoxBody> {
     response
         .headers_mut()
         .insert(http::header::SEC_WEBSOCKET_PROTOCOL, unsafe {
@@ -117,10 +117,9 @@ pub enum ServerError {
     MissingFiles,
     TooManyFiles,
     DbError(db::DbError),
-    WarpError(warp::Error),
     IoError(IoError),
     InvalidFileId,
-    ReqwestError(reqwest::Error),
+    HttpError(hyper::Error),
     FileExtractUnexpected(SmolStr),
     NotAnImage,
     TooFast(Duration),
@@ -138,7 +137,7 @@ pub enum ServerError {
     HostNotAllowed,
     EmotePackNotFound,
     NotEmotePackOwner,
-    LinkNotFound(Url),
+    LinkNotFound(Uri),
     MessageContentCantBeEmpty,
     InviteExists(String),
     InviteNameEmpty,
@@ -149,7 +148,10 @@ pub enum ServerError {
     InvalidBatchEndpoint,
     InvalidRegistrationToken,
     WebRTCError(anyhow::Error),
+    WarpError(warp::Error),
 }
+
+impl warp::reject::Reject for ServerError {}
 
 impl StdError for ServerError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
@@ -157,10 +159,10 @@ impl StdError for ServerError {
             ServerError::InvalidAgainst(err) => Some(err),
             ServerError::InvalidUrl(err) => Some(err),
             ServerError::IoError(err) => Some(err),
-            ServerError::ReqwestError(err) => Some(err),
-            ServerError::WarpError(err) => Some(err),
+            ServerError::HttpError(err) => Some(err),
             ServerError::WebRTCError(err) => err.source(),
             ServerError::DbError(err) => Some(err),
+            ServerError::WarpError(err) => Some(err),
             _ => None,
         }
     }
@@ -265,15 +267,11 @@ impl Display for ServerError {
             ),
             ServerError::TooManyFiles => write!(f, "uploaded too many files"),
             ServerError::MissingFiles => write!(f, "must upload at least one file"),
-            ServerError::WarpError(err) => {
-                travel_error(f, err);
-                write!(f, "error occured in warp: {}", err)
-            }
             ServerError::IoError(err) => {
                 travel_error(f, err);
                 write!(f, "io error occured: {}", err)
             }
-            ServerError::ReqwestError(err) => {
+            ServerError::HttpError(err) => {
                 travel_error(f, err);
                 write!(f, "error occured in reqwest: {}", err)
             }
@@ -314,13 +312,14 @@ impl Display for ServerError {
             ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
             ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
             ServerError::DbError(err) => write!(f, "database error: {}", err),
+            ServerError::WarpError(err) => write!(f, "warp error: {}", err),
         }
     }
 }
 
 impl CustomError for ServerError {
-    fn code(&self) -> StatusCode {
-        match self {
+    fn as_status_message(&self) -> (StatusCode, Bytes) {
+        let status = match self {
             ServerError::InvalidAuthId
             | ServerError::NoFieldSpecified
             | ServerError::NoSuchField
@@ -371,109 +370,101 @@ impl CustomError for ServerError {
             | ServerError::TooManyBatchedRequests
             | ServerError::InvalidRegistrationToken => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
-            ServerError::WarpError(_)
-            | ServerError::IoError(_)
+            ServerError::IoError(_)
             | ServerError::InternalServerError
-            | ServerError::ReqwestError(_)
+            | ServerError::HttpError(_)
             | ServerError::FileExtractUnexpected(_)
             | ServerError::CantGetKey
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
-            | ServerError::DbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::DbError(_)
+            | ServerError::WarpError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
-        }
-    }
-
-    fn message(&self) -> Vec<u8> {
-        let i18n_code = match self {
-            ServerError::InternalServerError
-            | ServerError::WarpError(_)
-            | ServerError::IoError(_)
-            | ServerError::ReqwestError(_)
-            | ServerError::FileExtractUnexpected(_)
-            | ServerError::CantGetKey
-            | ServerError::CantGetHostKey(_)
-            | ServerError::WebRTCError(_)
-            | ServerError::DbError(_) => "h.internal-server-error",
-            ServerError::Unauthenticated => "h.blank-session",
-            ServerError::InvalidAuthId => "h.bad-auth-id",
-            ServerError::UserAlreadyExists => "h.already-registered",
-            ServerError::UserAlreadyInGuild => "h.already-in-guild",
-            ServerError::UserBanned => "h.banned-from-guild",
-            ServerError::NotEnoughPermissions {
-                must_be_guild_owner,
-                ..
-            } => {
-                if *must_be_guild_owner {
-                    "h.not-owner"
-                } else {
-                    "h.not-enough-permissions"
-                }
-            }
-            ServerError::NoFieldSpecified => "h.missing-form",
-            ServerError::NoSuchField => "h.missing-form",
-            ServerError::NoSuchChoice { .. } => "h.bad-auth-choice",
-            ServerError::WrongStep { .. } => "h.bad-auth-choice",
-            ServerError::WrongTypeForField { .. } => "h.missing-form",
-            ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
-            ServerError::UserNotInGuild { .. } => "h.not-joined",
-            ServerError::NotImplemented => "h.not-implemented",
-            ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
-            ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
-            ServerError::NoSuchMessage { .. } => "h.bad-message-id",
-            ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
-            ServerError::UnderSpecifiedChannels => "h.underspecified-channels",
-            ServerError::NoSuchGuild(_) => "h.bad-guild-id",
-            ServerError::NoSuchInvite(_) | ServerError::InviteNameEmpty => "h.bad-invite-id",
-            ServerError::NoSuchUser(_) => "h.bad-user-id",
-            ServerError::SessionExpired => "h.bad-session",
-            ServerError::EmptyPermissionQuery => "h.permission-query-empty",
-            ServerError::NoSuchRole { .. } => "h.bad-role-id",
-            ServerError::NoRoleSpecified => "h.missing-role",
-            ServerError::NoPermissionsSpecified => "h.missing-permissions",
-            ServerError::InvalidFileId => "h.bad-file-id",
-            ServerError::TooManyFiles => return "too-many-files".as_bytes().to_vec(),
-            ServerError::MissingFiles => return "missing-files".as_bytes().to_vec(),
-            ServerError::TooFast(_) => "h.rate-limited",
-            ServerError::NotAnImage => "h.not-an-image",
-            ServerError::NotMedia => return "not-media".as_bytes().to_vec(),
-            ServerError::MediaNotFound | ServerError::LinkNotFound(_) => {
-                return Self::NOT_FOUND_ERROR.1.to_vec()
-            }
-            ServerError::InvalidUrl(_) => "h.bad-url",
-            ServerError::InviteExpired => "h.bad-invite-id",
-            ServerError::FailedToAuthSync => "h.bad-auth",
-            ServerError::InvalidTokenData => "h.bad-token-data",
-            ServerError::InvalidTokenSignature => "h.bad-token-signature",
-            ServerError::InvalidTime => "h.bad-time",
-            ServerError::CouldntVerifyTokenData => "h.token-verify-failure",
-            ServerError::InvalidToken => "h.bad-token",
-            ServerError::FederationDisabled => "h.federation-disabled",
-            ServerError::HostNotAllowed => "h.host-not-allowed",
-            ServerError::NotEmotePackOwner => "h.not-emote-pack-owner",
-            ServerError::EmotePackNotFound => "h.emote-pack-not-found",
-            ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
-            ServerError::InviteExists(_) => "h.invite-exists",
-            ServerError::InvalidAgainst(_) => "h.invalid-against",
-            ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
-            ServerError::InvalidBatchEndpoint => "h.invalid-batch",
-            ServerError::TooManyBatchedRequests => "h.too-many-batches",
-            ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
         };
-        encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
-            identifier: i18n_code.into(),
-            human_message: self.to_string(),
-            more_details: Vec::new(),
-        })
-        .to_vec()
-    }
-}
-
-impl From<IoError> for ServerError {
-    fn from(err: IoError) -> Self {
-        ServerError::IoError(err)
+        let message = {
+            let i18n_code = match self {
+                ServerError::InternalServerError
+                | ServerError::IoError(_)
+                | ServerError::HttpError(_)
+                | ServerError::FileExtractUnexpected(_)
+                | ServerError::CantGetKey
+                | ServerError::CantGetHostKey(_)
+                | ServerError::WebRTCError(_)
+                | ServerError::DbError(_)
+                | ServerError::WarpError(_) => "h.internal-server-error",
+                ServerError::Unauthenticated => "h.blank-session",
+                ServerError::InvalidAuthId => "h.bad-auth-id",
+                ServerError::UserAlreadyExists => "h.already-registered",
+                ServerError::UserAlreadyInGuild => "h.already-in-guild",
+                ServerError::UserBanned => "h.banned-from-guild",
+                ServerError::NotEnoughPermissions {
+                    must_be_guild_owner,
+                    ..
+                } => {
+                    if *must_be_guild_owner {
+                        "h.not-owner"
+                    } else {
+                        "h.not-enough-permissions"
+                    }
+                }
+                ServerError::NoFieldSpecified => "h.missing-form",
+                ServerError::NoSuchField => "h.missing-form",
+                ServerError::NoSuchChoice { .. } => "h.bad-auth-choice",
+                ServerError::WrongStep { .. } => "h.bad-auth-choice",
+                ServerError::WrongTypeForField { .. } => "h.missing-form",
+                ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
+                ServerError::UserNotInGuild { .. } => "h.not-joined",
+                ServerError::NotImplemented => "h.not-implemented",
+                ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
+                ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
+                ServerError::NoSuchMessage { .. } => "h.bad-message-id",
+                ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
+                ServerError::UnderSpecifiedChannels => "h.underspecified-channels",
+                ServerError::NoSuchGuild(_) => "h.bad-guild-id",
+                ServerError::NoSuchInvite(_) | ServerError::InviteNameEmpty => "h.bad-invite-id",
+                ServerError::NoSuchUser(_) => "h.bad-user-id",
+                ServerError::SessionExpired => "h.bad-session",
+                ServerError::EmptyPermissionQuery => "h.permission-query-empty",
+                ServerError::NoSuchRole { .. } => "h.bad-role-id",
+                ServerError::NoRoleSpecified => "h.missing-role",
+                ServerError::NoPermissionsSpecified => "h.missing-permissions",
+                ServerError::InvalidFileId => "h.bad-file-id",
+                ServerError::TooManyFiles => "too-many-files",
+                ServerError::MissingFiles => "missing-files",
+                ServerError::TooFast(_) => "h.rate-limited",
+                ServerError::NotAnImage => "h.not-an-image",
+                ServerError::NotMedia => "not-media",
+                ServerError::MediaNotFound | ServerError::LinkNotFound(_) => "not-found",
+                ServerError::InvalidUrl(_) => "h.bad-url",
+                ServerError::InviteExpired => "h.bad-invite-id",
+                ServerError::FailedToAuthSync => "h.bad-auth",
+                ServerError::InvalidTokenData => "h.bad-token-data",
+                ServerError::InvalidTokenSignature => "h.bad-token-signature",
+                ServerError::InvalidTime => "h.bad-time",
+                ServerError::CouldntVerifyTokenData => "h.token-verify-failure",
+                ServerError::InvalidToken => "h.bad-token",
+                ServerError::FederationDisabled => "h.federation-disabled",
+                ServerError::HostNotAllowed => "h.host-not-allowed",
+                ServerError::NotEmotePackOwner => "h.not-emote-pack-owner",
+                ServerError::EmotePackNotFound => "h.emote-pack-not-found",
+                ServerError::MessageContentCantBeEmpty => "h.message-content-empty",
+                ServerError::InviteExists(_) => "h.invite-exists",
+                ServerError::InvalidAgainst(_) => "h.invalid-against",
+                ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
+                ServerError::InvalidBatchEndpoint => "h.invalid-batch",
+                ServerError::TooManyBatchedRequests => "h.too-many-batches",
+                ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
+            };
+            encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
+                identifier: i18n_code.into(),
+                human_message: self.to_string(),
+                more_details: Vec::new(),
+            })
+            .freeze()
+        };
+        (status, message)
     }
 }
 
@@ -483,9 +474,15 @@ impl From<warp::Error> for ServerError {
     }
 }
 
-impl From<reqwest::Error> for ServerError {
-    fn from(err: reqwest::Error) -> Self {
-        ServerError::ReqwestError(err)
+impl From<IoError> for ServerError {
+    fn from(err: IoError) -> Self {
+        ServerError::IoError(err)
+    }
+}
+
+impl From<hyper::Error> for ServerError {
+    fn from(err: hyper::Error) -> Self {
+        ServerError::HttpError(err)
     }
 }
 

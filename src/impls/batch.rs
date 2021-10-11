@@ -1,14 +1,12 @@
 use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
-        hrpc::{
-            server::prelude::BoxedFilter,
-            warp::{self, Reply},
-        },
+        hrpc::{exports::hyper, server::MakeHrpcService, HrpcService},
         prost::bytes::Bytes,
     },
 };
-use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+use hyper::{header, http::HeaderValue};
+use tower::Service;
 
 use super::prelude::*;
 
@@ -22,16 +20,16 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
     !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
 }
 
-pub struct BatchServer<R: Reply + 'static> {
+pub struct BatchServer<Producer: MakeHrpcService> {
     disable_ratelimits: bool,
-    filters: Arc<BoxedFilter<(R,)>>,
+    service: Producer,
 }
 
-impl<R: Reply + 'static> BatchServer<R> {
-    pub fn new(deps: &Dependencies, filters: BoxedFilter<(R,)>) -> Self {
+impl<Producer: MakeHrpcService> BatchServer<Producer> {
+    pub fn new(deps: &Dependencies, service: Producer) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            filters: Arc::new(filters),
+            service,
         }
     }
 
@@ -40,95 +38,98 @@ impl<R: Reply + 'static> BatchServer<R> {
         bodies: Vec<Bytes>,
         endpoint: Endpoint,
         auth_header: Option<HeaderValue>,
-    ) -> Result<Vec<Bytes>, HrpcServerError<ServerError>> {
-        async fn process_request<R: Reply + 'static>(
+    ) -> Result<Vec<Bytes>, HrpcServerError> {
+        async fn process_request(
             body: Bytes,
             endpoint: &str,
             auth_header: &Option<HeaderValue>,
-            filters: &BoxedFilter<(R,)>,
-        ) -> Result<Bytes, HrpcServerError<ServerError>> {
-            let mut req = warp::test::request()
-                .header(CONTENT_TYPE, unsafe {
-                    HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
-                        b"application/hrpc",
-                    ))
-                })
-                .method("POST")
-                .body(body)
-                .path(endpoint);
-            if let Some(auth) = auth_header {
-                req = req.header(AUTHORIZATION, auth.clone());
+            service: Option<&mut HrpcService>,
+        ) -> Result<Bytes, HrpcServerError> {
+            if let Some(service) = service {
+                let mut req = http::Request::builder()
+                    .header(header::CONTENT_TYPE, unsafe {
+                        HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
+                            b"application/hrpc",
+                        ))
+                    })
+                    .method(http::Method::POST)
+                    .uri(endpoint)
+                    .body(hyper::Body::from(body))
+                    .unwrap();
+                if let Some(auth) = auth_header {
+                    req.headers_mut()
+                        .insert(header::AUTHORIZATION, auth.clone());
+                }
+
+                let reply = service.call(req).await.unwrap();
+                let body = hyper::body::to_bytes(reply.into_body()).await.unwrap();
+
+                Ok(body)
+            } else {
+                Err((http::StatusCode::NOT_FOUND, "batch endpoint not found").into())
             }
-
-            let reply = req.filter(filters).await.map_err(HrpcServerError::Warp)?;
-            let body = warp::hyper::body::to_bytes(reply.into_response().into_body())
-                .await
-                .unwrap();
-
-            Ok(body)
         }
 
         if bodies.len() > 64 {
             return Err(ServerError::TooManyBatchedRequests.into());
         }
 
-        let filters = self.filters.clone();
-        let handle = tokio::runtime::Handle::current();
+        let mut responses = Vec::with_capacity(bodies.len());
 
-        std::thread::spawn(move || {
-            handle.block_on(async move {
-                let mut responses = Vec::with_capacity(bodies.len());
-
-                let filters = filters.as_ref();
-                let auth_header = &auth_header;
-                match &endpoint {
-                    Endpoint::Same(endpoint) => {
-                        tracing::info!(
-                            "batching {} requests for endpoint {}",
-                            bodies.len(),
-                            endpoint
-                        );
-                        if !is_valid_endpoint(endpoint) {
-                            return Err(ServerError::InvalidBatchEndpoint.into());
-                        }
-                        for body in bodies {
-                            responses
-                                .push(process_request(body, endpoint, auth_header, filters).await?);
-                        }
-                    }
-                    Endpoint::Different(a) => {
-                        for (body, endpoint) in bodies.into_iter().zip(a) {
-                            tracing::info!("batching request for endpoint {}", endpoint);
-                            if !is_valid_endpoint(endpoint) {
-                                return Err(ServerError::InvalidBatchEndpoint.into());
-                            }
-                            responses
-                                .push(process_request(body, endpoint, auth_header, filters).await?);
-                        }
-                    }
+        let auth_header = &auth_header;
+        match &endpoint {
+            Endpoint::Same(endpoint) => {
+                tracing::info!(
+                    "batching {} requests for endpoint {}",
+                    bodies.len(),
+                    endpoint
+                );
+                if !is_valid_endpoint(endpoint) {
+                    return Err(ServerError::InvalidBatchEndpoint.into());
                 }
+                let req = http::Request::builder()
+                    .uri(endpoint)
+                    .body(hyper::Body::empty())
+                    .unwrap();
+                let mut service = self.service.make_hrpc_service(&req);
+                for body in bodies {
+                    responses.push(
+                        process_request(body, endpoint, auth_header, service.as_mut()).await?,
+                    );
+                }
+            }
+            Endpoint::Different(a) => {
+                for (body, endpoint) in bodies.into_iter().zip(a) {
+                    tracing::info!("batching request for endpoint {}", endpoint);
+                    if !is_valid_endpoint(endpoint) {
+                        return Err(ServerError::InvalidBatchEndpoint.into());
+                    }
+                    let req = http::Request::builder()
+                        .uri(endpoint)
+                        .body(hyper::Body::empty())
+                        .unwrap();
+                    let mut service = self.service.make_hrpc_service(&req);
+                    responses.push(
+                        process_request(body, endpoint, auth_header, service.as_mut()).await?,
+                    );
+                }
+            }
+        }
 
-                Ok(responses)
-            })
-        })
-        .join()
-        .unwrap()
+        Ok(responses)
     }
 }
 
-#[harmony_rust_sdk::api::exports::hrpc::async_trait]
-impl<R: Reply + 'static> BatchService for BatchServer<R> {
-    type Error = ServerError;
-
+#[async_trait]
+impl<Producer: MakeHrpcService> BatchService for BatchServer<Producer> {
     #[rate(5, 5)]
     async fn batch(
         &self,
-        request: Request<BatchRequest>,
-    ) -> Result<BatchResponse, HrpcServerError<Self::Error>> {
-        let (body, mut headers, _) = request.into_parts();
-        let BatchRequest { requests } = body.into_message().await??;
+        mut request: Request<BatchRequest>,
+    ) -> ServerResult<Response<BatchResponse>> {
+        let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
+        let BatchRequest { requests } = request.into_message().await?;
 
-        let auth_header = headers.remove(&AUTHORIZATION);
         let request_len = requests.len();
         let (bodies, endpoints) = requests.into_iter().fold(
             (
@@ -145,22 +146,21 @@ impl<R: Reply + 'static> BatchService for BatchServer<R> {
             .make_req(bodies, Endpoint::Different(endpoints), auth_header)
             .await?;
 
-        Ok(BatchResponse { responses })
+        Ok((BatchResponse { responses }).into_response())
     }
 
     #[rate(5, 5)]
     async fn batch_same(
         &self,
-        request: Request<BatchSameRequest>,
-    ) -> Result<BatchSameResponse, HrpcServerError<Self::Error>> {
-        let (body, mut headers, _) = request.into_parts();
-        let BatchSameRequest { endpoint, requests } = body.into_message().await??;
+        mut request: Request<BatchSameRequest>,
+    ) -> ServerResult<Response<BatchSameResponse>> {
+        let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
+        let BatchSameRequest { endpoint, requests } = request.into_message().await?;
 
-        let auth_header = headers.remove(&AUTHORIZATION);
         let responses = self
             .make_req(requests, Endpoint::Same(endpoint), auth_header)
             .await?;
 
-        Ok(BatchSameResponse { responses })
+        Ok((BatchSameResponse { responses }).into_response())
     }
 }
