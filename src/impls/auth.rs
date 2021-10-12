@@ -319,7 +319,8 @@ impl auth_service_server::AuthService for AuthServer {
 
         Ok((KeyResponse {
             key: key.pk.to_vec(),
-        }).into_response())
+        })
+        .into_response())
     }
 
     fn stream_steps_on_upgrade(
@@ -438,7 +439,8 @@ impl auth_service_server::AuthService for AuthServer {
 
         Ok((BeginAuthResponse {
             auth_id: auth_id.into(),
-        }).into_response())
+        })
+        .into_response())
     }
 
     #[rate(10, 5)]
@@ -803,7 +805,8 @@ impl auth_service_server::AuthService for AuthServer {
 
         Ok((NextStepResponse {
             step: Some(next_step),
-        }).into_response())
+        })
+        .into_response())
     }
 
     #[rate(10, 5)]
@@ -847,7 +850,8 @@ impl auth_service_server::AuthService for AuthServer {
 
         Ok((StepBackResponse {
             step: Some(prev_step),
-        }).into_response())
+        })
+        .into_response())
     }
 }
 

@@ -226,20 +226,17 @@ pub mod against {
 
     pub struct AgainstProducer {
         http: HttpClient,
+        header_name: HeaderName,
     }
 
     impl MakeHrpcService for AgainstProducer {
         fn make_hrpc_service(&self, request: &HttpRequest) -> Option<HrpcService> {
-            if let Some(host_id) = request
-                .headers()
-                .get(&HeaderName::from_static("Against"))
-                .and_then(|header| {
-                    header
-                        .to_str()
-                        .ok()
-                        .and_then(|v| HomeserverIdentifier::from_str(v).ok())
-                })
-            {
+            if let Some(host_id) = request.headers().get(&self.header_name).and_then(|header| {
+                header
+                    .to_str()
+                    .ok()
+                    .and_then(|v| HomeserverIdentifier::from_str(v).ok())
+            }) {
                 let http = self.http.clone();
 
                 let service = service_fn(move |request: HttpRequest| {
@@ -278,6 +275,7 @@ pub mod against {
     pub fn producer() -> AgainstProducer {
         AgainstProducer {
             http: http_client(),
+            header_name: HeaderName::from_static("against"),
         }
     }
 }

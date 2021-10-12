@@ -14,13 +14,19 @@ use harmony_rust_sdk::api::{
     batch::batch_service_server::BatchServiceServer,
     chat::{chat_service_server::ChatServiceServer, ChannelKind, Permission},
     emote::emote_service_server::EmoteServiceServer,
-    exports::hrpc::{body::box_body, server::HrpcMakeService, HttpRequest, HttpResponse},
+    exports::hrpc::{
+        body::box_body,
+        server::{
+            prelude::{MapResponseBodyLayer, TraceLayer},
+            HrpcMakeService,
+        },
+        HrpcLayer, HttpRequest, HttpResponse,
+    },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
     voice::voice_service_server::VoiceServiceServer,
 };
-use hyper::Uri;
 use scherzo::{
     config::DbConfig,
     db::{
@@ -35,12 +41,13 @@ use scherzo::{
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
+        rest::{download, upload},
         sync::SyncServer,
         voice::VoiceServer,
         Dependencies,
     },
 };
-use tower::{service_fn, Service, ServiceExt};
+use tower::{service_fn, Service, ServiceBuilder, ServiceExt};
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -264,20 +271,22 @@ pub async fn run(filter_level: Level, db_path: String) {
     let sync = PostboxServiceServer::new(sync_server);
     let voice = VoiceServiceServer::new(voice_server);
 
-    let make_service = HrpcMakeService::new(vec![
-        Box::new(profile),
-        Box::new(emote),
-        Box::new(auth),
-        Box::new(chat),
-        Box::new(mediaproxy),
-        Box::new(sync),
-        Box::new(voice),
-    ]);
+    let make_service = HrpcMakeService::new(profile)
+        .producer(emote)
+        .producer(auth)
+        .producer(chat)
+        .producer(mediaproxy)
+        .producer(sync)
+        .producer(voice);
 
-    let (download, upload) = scherzo::impls::rest::rest(&deps);
     // TODO: handle errors here
-    let download = warp::service(download).map_response(|r| r.map(box_body));
-    let upload = warp::service(upload).map_response(|r| r.map(box_body));
+    let upload = warp::service(upload(
+        deps.valid_sessions.clone(),
+        Arc::new(deps.config.media.media_root.clone()),
+        deps.config.media.max_upload_length,
+    ))
+    .map_response(|r| r.map(box_body));
+    let download = download::producer(deps.clone());
 
     let batch_server = BatchServer::new(&deps, make_service.clone());
     let batch = BatchServiceServer::new(batch_server);
@@ -285,19 +294,23 @@ pub async fn run(filter_level: Level, db_path: String) {
     let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let make_service = HrpcMakeService::new(vec![
-        Box::new(against),
-        Box::new(make_service),
-        Box::new(batch),
-        Box::new(about),
-    ]);
+    let make_service = HrpcMakeService::new(make_service)
+        .producer(batch)
+        .producer(about)
+        .producer(download)
+        .producer(against)
+        .layer(HrpcLayer::new(
+            ServiceBuilder::new()
+                .layer(MapResponseBodyLayer::new(box_body))
+                .layer(TraceLayer::new_for_http())
+                .into_inner(),
+        ));
 
     let make_service = hyper::service::make_service_fn(move |_| {
-        let download = download.clone();
         let upload = upload.clone();
         let make_service = make_service.clone();
         async move {
-            Result::<_, Infallible>::Ok(service_fn(move |mut request: HttpRequest| {
+            Result::<_, Infallible>::Ok(service_fn(move |request: HttpRequest| {
                 let endpoint = request.uri().path();
                 match endpoint {
                     "/_harmony/media/upload" => {
@@ -305,21 +318,11 @@ pub async fn run(filter_level: Level, db_path: String) {
 
                         new_svc_fut(async move { upload.call(request).await })
                     }
-                    x => {
-                        if let Some(path) = x.strip_prefix("/_harmony/media/download") {
-                            let mut parts = request.uri().clone().into_parts();
-                            parts.path_and_query = Some(path.parse().unwrap());
-                            let uri = Uri::from_parts(parts).unwrap();
-                            *request.uri_mut() = uri;
-
-                            let mut download = download.clone();
-                            new_svc_fut(async move { download.call(request).await })
-                        } else {
-                            let mut make_service = make_service.clone();
-                            new_svc_fut(async move {
-                                make_service.call(()).await.unwrap().call(request).await
-                            })
-                        }
+                    _ => {
+                        let mut make_service = make_service.clone();
+                        new_svc_fut(async move {
+                            make_service.call(()).await.unwrap().call(request).await
+                        })
                     }
                 }
             }))
@@ -370,6 +373,7 @@ pub async fn run(filter_level: Level, db_path: String) {
 }
 
 use tokio::fs;
+use triomphe::Arc;
 
 fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::io::Result<()>>>> {
     Box::pin(async move {

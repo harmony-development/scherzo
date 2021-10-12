@@ -2734,7 +2734,6 @@ impl ChatTree {
         })
         .collect::<Vec<_>>();
         self.set_permissions_logic(guild_id, None, everyone_role_id, def_perms.clone())?;
-        tracing::info!("aaa");
         let channel_id = self.create_channel_logic(
             guild_id,
             "general".to_string(),
@@ -2742,7 +2741,6 @@ impl ChatTree {
             None,
             None,
         )?;
-        tracing::info!("bbb");
 
         self.set_permissions_logic(guild_id, Some(channel_id), everyone_role_id, def_perms)?;
 
