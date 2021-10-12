@@ -41,13 +41,15 @@ use warp::{filters::multipart::*, filters::BoxedFilter, Filter, Reply};
 const SEPERATOR: u8 = b'\n';
 
 pub mod download {
+    use std::time::Duration;
+
     use harmony_rust_sdk::api::exports::hrpc::{
         body::box_body,
         server::{prelude::CustomError, MakeHrpcService},
         HrpcService, HttpRequest,
     };
     use hyper::{header, Method};
-    use tower::service_fn;
+    use tower::{service_fn, ServiceBuilder};
 
     use super::*;
 
@@ -199,6 +201,9 @@ pub mod download {
                             .unwrap())
                     }
                 });
+                let service = ServiceBuilder::new()
+                    .rate_limit(10, Duration::from_secs(5))
+                    .service(service);
                 return Some(HrpcService::new(service));
             }
 

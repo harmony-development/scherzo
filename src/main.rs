@@ -1,7 +1,4 @@
-#![recursion_limit = "256"]
-
 use std::{
-    convert::Infallible,
     future::Future,
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -20,7 +17,7 @@ use harmony_rust_sdk::api::{
             prelude::{MapResponseBodyLayer, TraceLayer},
             HrpcMakeService,
         },
-        HrpcLayer, HttpRequest, HttpResponse,
+        HrpcLayer,
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -47,7 +44,7 @@ use scherzo::{
         Dependencies,
     },
 };
-use tower::{service_fn, Service, ServiceBuilder, ServiceExt};
+use tower::{ServiceBuilder, ServiceExt};
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -280,7 +277,7 @@ pub async fn run(filter_level: Level, db_path: String) {
         .producer(voice);
 
     // TODO: handle errors here
-    let upload = warp::service(upload(
+    let _upload = warp::service(upload(
         deps.valid_sessions.clone(),
         Arc::new(deps.config.media.media_root.clone()),
         deps.config.media.max_upload_length,
@@ -305,29 +302,6 @@ pub async fn run(filter_level: Level, db_path: String) {
                 .layer(TraceLayer::new_for_http())
                 .into_inner(),
         ));
-
-    let make_service = hyper::service::make_service_fn(move |_| {
-        let upload = upload.clone();
-        let make_service = make_service.clone();
-        async move {
-            Result::<_, Infallible>::Ok(service_fn(move |request: HttpRequest| {
-                let endpoint = request.uri().path();
-                match endpoint {
-                    "/_harmony/media/upload" => {
-                        let mut upload = upload.clone();
-
-                        new_svc_fut(async move { upload.call(request).await })
-                    }
-                    _ => {
-                        let mut make_service = make_service.clone();
-                        new_svc_fut(async move {
-                            make_service.call(()).await.unwrap().call(request).await
-                        })
-                    }
-                }
-            }))
-        }
-    });
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -389,10 +363,4 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::
         }
         Ok(())
     })
-}
-
-fn new_svc_fut<Fut: Future<Output = Result<HttpResponse, Infallible>> + Send + 'static>(
-    fut: Fut,
-) -> Pin<Box<dyn Future<Output = Result<HttpResponse, Infallible>> + Send + 'static>> {
-    Box::pin(fut)
 }
