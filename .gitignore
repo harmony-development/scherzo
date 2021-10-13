@@ -12,6 +12,7 @@
 
 /.vscode
 /db
+/media_root
 /logs
 /media
 /config.toml
