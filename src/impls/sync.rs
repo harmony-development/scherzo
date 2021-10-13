@@ -263,13 +263,19 @@ impl SyncServer {
 
 #[async_trait]
 impl postbox_service_server::PostboxService for SyncServer {
-    async fn pull(&self, request: Request<PullRequest>) -> ServerResult<Response<PullResponse>> {
+    async fn pull(
+        &mut self,
+        request: Request<PullRequest>,
+    ) -> ServerResult<Response<PullResponse>> {
         let host = self.auth(&request).await?;
         let queue = self.get_event_queue(&host)?;
         Ok(queue.into_response())
     }
 
-    async fn push(&self, request: Request<PushRequest>) -> ServerResult<Response<PushResponse>> {
+    async fn push(
+        &mut self,
+        request: Request<PushRequest>,
+    ) -> ServerResult<Response<PushResponse>> {
         let host = self.auth(&request).await?;
         let key = make_host_key(&host);
         if !self
@@ -288,7 +294,7 @@ impl postbox_service_server::PostboxService for SyncServer {
     }
 
     async fn notify_new_id(
-        &self,
+        &mut self,
         _request: Request<NotifyNewIdRequest>,
     ) -> ServerResult<Response<NotifyNewIdResponse>> {
         Err(ServerError::NotImplemented.into())

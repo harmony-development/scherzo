@@ -45,6 +45,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
     }
 }
 
+#[derive(Clone)]
 pub struct MediaproxyServer {
     http: HttpClient,
     valid_sessions: SessionMap,
@@ -126,10 +127,11 @@ impl MediaproxyServer {
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     #[rate(2, 1)]
     async fn fetch_link_metadata(
-        &self,
+        &mut self,
         request: Request<FetchLinkMetadataRequest>,
     ) -> ServerResult<Response<FetchLinkMetadataResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let FetchLinkMetadataRequest { url } = request.into_message().await?;
 
@@ -157,10 +159,11 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
 
     #[rate(1, 5)]
     async fn instant_view(
-        &self,
+        &mut self,
         request: Request<InstantViewRequest>,
     ) -> ServerResult<Response<InstantViewResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let InstantViewRequest { url } = request.into_message().await?;
 
@@ -188,10 +191,11 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
 
     #[rate(20, 5)]
     async fn can_instant_view(
-        &self,
+        &mut self,
         request: Request<CanInstantViewRequest>,
     ) -> ServerResult<Response<CanInstantViewResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let CanInstantViewRequest { url } = request.into_message().await?;
 

@@ -21,8 +21,7 @@ use harmony_rust_sdk::api::{
             body::full_box_body,
             client::{http_client, HttpClient},
             exports::http,
-            server::MakeHrpcService,
-            HrpcService, HttpRequest,
+            HttpRequest,
         },
         prost::bytes::Bytes,
     },
@@ -62,7 +61,10 @@ pub mod prelude {
     pub use smol_str::SmolStr;
     pub use triomphe::Arc;
 
-    pub use super::{auth::SessionMap, Dependencies};
+    pub use super::{
+        auth::{AuthExt, SessionMap},
+        Dependencies,
+    };
 }
 
 pub type FedEventReceiver = mpsc::UnboundedReceiver<EventDispatch>;
@@ -179,37 +181,37 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
 
 pub mod about {
     use super::*;
-    use harmony_rust_sdk::api::rest::About;
+    use harmony_rust_sdk::api::{
+        exports::hrpc::server::{MakeRouter, RouterBuilder},
+        rest::About,
+    };
 
     pub struct AboutProducer {
         deps: Arc<Dependencies>,
     }
 
-    impl MakeHrpcService for AboutProducer {
-        fn make_hrpc_service(&self, request: &HttpRequest) -> Option<HrpcService> {
-            if request.uri().path() == "/_harmony/about" {
-                let deps = self.deps.clone();
-                let service = service_fn(move |_: HttpRequest| {
-                    let deps = deps.clone();
-                    async move {
-                        let json = serde_json::to_string(&About {
-                            server_name: "Scherzo".to_string(),
-                            version: SCHERZO_VERSION.to_string(),
-                            about_server: deps.config.server_description.clone(),
-                            message_of_the_day: deps.runtime_config.lock().motd.clone(),
-                        })
-                        .unwrap();
+    impl MakeRouter for AboutProducer {
+        fn make_router(&self) -> RouterBuilder {
+            let deps = self.deps.clone();
+            let service = service_fn(move |_: HttpRequest| {
+                let deps = deps.clone();
+                async move {
+                    let json = serde_json::to_string(&About {
+                        server_name: "Scherzo".to_string(),
+                        version: SCHERZO_VERSION.to_string(),
+                        about_server: deps.config.server_description.clone(),
+                        message_of_the_day: deps.runtime_config.lock().motd.clone(),
+                    })
+                    .unwrap();
 
-                        Ok(http::Response::builder()
-                            .status(StatusCode::OK)
-                            .body(full_box_body(json.into_bytes().into()))
-                            .unwrap())
-                    }
-                });
-                Some(HrpcService::new(service))
-            } else {
-                None
-            }
+                    Ok(http::Response::builder()
+                        .status(StatusCode::OK)
+                        .body(full_box_body(json.into_bytes().into()))
+                        .unwrap())
+                }
+            });
+
+            RouterBuilder::new().route("/_harmony/about", service)
         }
     }
 
@@ -219,7 +221,10 @@ pub mod about {
 }
 
 pub mod against {
-    use harmony_rust_sdk::api::exports::hrpc::{body::box_body, server::prelude::CustomError};
+    use harmony_rust_sdk::api::exports::hrpc::{
+        body::box_body,
+        server::{prelude::CustomError, Handler},
+    };
     use hyper::header::HeaderName;
 
     use super::*;
@@ -229,46 +234,46 @@ pub mod against {
         header_name: HeaderName,
     }
 
-    impl MakeHrpcService for AgainstProducer {
-        fn make_hrpc_service(&self, request: &HttpRequest) -> Option<HrpcService> {
-            if let Some(host_id) = request.headers().get(&self.header_name).and_then(|header| {
-                header
-                    .to_str()
-                    .ok()
-                    .and_then(|v| HomeserverIdentifier::from_str(v).ok())
-            }) {
-                let http = self.http.clone();
+    impl AgainstProducer {
+        pub fn produce(&'static self) -> Handler {
+            let http = self.http.clone();
+            let service = service_fn(move |request: HttpRequest| {
+                let http = http.clone();
+                let (parts, body) = request.into_parts();
+                let host_id = parts
+                    .headers
+                    .get(&self.header_name)
+                    .and_then(|header| {
+                        header
+                            .to_str()
+                            .ok()
+                            .and_then(|v| HomeserverIdentifier::from_str(v).ok())
+                    })
+                    .unwrap();
+                let url = {
+                    let mut url_parts = host_id.to_url().into_parts();
+                    url_parts.path_and_query = Some(parts.uri.path().parse().unwrap());
+                    Uri::from_parts(url_parts).unwrap()
+                };
+                async move {
+                    let mut request = http::Request::builder()
+                        .uri(url)
+                        .method(parts.method)
+                        .body(body)
+                        .unwrap();
+                    *request.headers_mut() = parts.headers;
+                    *request.extensions_mut() = parts.extensions;
 
-                let service = service_fn(move |request: HttpRequest| {
-                    let http = http.clone();
-                    let (parts, body) = request.into_parts();
-                    let url = {
-                        let mut url_parts = host_id.to_url().into_parts();
-                        url_parts.path_and_query = Some(parts.uri.path().parse().unwrap());
-                        Uri::from_parts(url_parts).unwrap()
-                    };
-                    async move {
-                        let mut request = http::Request::builder()
-                            .uri(url)
-                            .method(parts.method)
-                            .body(body)
-                            .unwrap();
-                        *request.headers_mut() = parts.headers;
-                        *request.extensions_mut() = parts.extensions;
+                    let host_response = http
+                        .request(request)
+                        .await
+                        .map(|r| r.map(box_body))
+                        .unwrap_or_else(|err| ServerError::HttpError(err).as_error_response());
 
-                        let host_response = http
-                            .request(request)
-                            .await
-                            .map(|r| r.map(box_body))
-                            .unwrap_or_else(|err| ServerError::HttpError(err).as_error_response());
-
-                        Ok(host_response)
-                    }
-                });
-                Some(HrpcService::new(service))
-            } else {
-                None
-            }
+                    Ok(host_response)
+                }
+            });
+            Handler::new(service)
         }
     }
 

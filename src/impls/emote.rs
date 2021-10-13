@@ -14,6 +14,7 @@ use db::{
     profile::{make_user_profile_key, USER_PREFIX},
 };
 
+#[derive(Clone)]
 pub struct EmoteServer {
     emote_tree: EmoteTree,
     valid_sessions: SessionMap,
@@ -49,10 +50,11 @@ impl EmoteServer {
 impl EmoteService for EmoteServer {
     #[rate(20, 5)]
     async fn delete_emote_from_pack(
-        &self,
+        &mut self,
         request: Request<DeleteEmoteFromPackRequest>,
     ) -> ServerResult<Response<DeleteEmoteFromPackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let DeleteEmoteFromPackRequest { pack_id, name } = request.into_message().await?;
 
@@ -61,7 +63,7 @@ impl EmoteService for EmoteServer {
 
         let key = make_emote_pack_emote_key(pack_id, &name);
 
-        emote_remove!(key);
+        self.emote_tree.remove(key)?;
 
         let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id)?;
         self.send_event_through_chan(
@@ -80,10 +82,11 @@ impl EmoteService for EmoteServer {
 
     #[rate(5, 5)]
     async fn delete_emote_pack(
-        &self,
+        &mut self,
         request: Request<DeleteEmotePackRequest>,
     ) -> ServerResult<Response<DeleteEmotePackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let DeleteEmotePackRequest { pack_id } = request.into_message().await?;
 
@@ -118,10 +121,11 @@ impl EmoteService for EmoteServer {
 
     #[rate(10, 5)]
     async fn dequip_emote_pack(
-        &self,
+        &mut self,
         request: Request<DequipEmotePackRequest>,
     ) -> ServerResult<Response<DequipEmotePackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let DequipEmotePackRequest { pack_id } = request.into_message().await?;
 
@@ -139,15 +143,16 @@ impl EmoteService for EmoteServer {
 
     #[rate(10, 5)]
     async fn equip_emote_pack(
-        &self,
+        &mut self,
         request: Request<EquipEmotePackRequest>,
     ) -> ServerResult<Response<EquipEmotePackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let EquipEmotePackRequest { pack_id } = request.into_message().await?;
 
         let key = make_emote_pack_key(pack_id);
-        if let Some(data) = emote_get!(key) {
+        if let Some(data) = self.emote_tree.get(key)? {
             let pack = db::deser_emote_pack(data);
             self.emote_tree.equip_emote_pack_logic(user_id, pack_id)?;
             self.send_event_through_chan(
@@ -165,10 +170,11 @@ impl EmoteService for EmoteServer {
 
     #[rate(20, 5)]
     async fn add_emote_to_pack(
-        &self,
+        &mut self,
         request: Request<AddEmoteToPackRequest>,
     ) -> ServerResult<Response<AddEmoteToPackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let AddEmoteToPackRequest { pack_id, emote } = request.into_message().await?;
 
@@ -179,7 +185,7 @@ impl EmoteService for EmoteServer {
             let emote_key = make_emote_pack_emote_key(pack_id, &emote.name);
             let data = rkyv_ser(&emote);
 
-            emote_insert!(emote_key / data);
+            self.emote_tree.insert(emote_key, data)?;
 
             let equipped_users = self.emote_tree.calculate_users_pack_equipped(pack_id)?;
             self.send_event_through_chan(
@@ -199,10 +205,11 @@ impl EmoteService for EmoteServer {
 
     #[rate(10, 5)]
     async fn get_emote_packs(
-        &self,
+        &mut self,
         request: Request<GetEmotePacksRequest>,
     ) -> ServerResult<Response<GetEmotePacksResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let prefix = make_equipped_emote_prefix(user_id);
         let equipped_packs =
@@ -249,16 +256,17 @@ impl EmoteService for EmoteServer {
 
     #[rate(20, 5)]
     async fn get_emote_pack_emotes(
-        &self,
+        &mut self,
         request: Request<GetEmotePackEmotesRequest>,
     ) -> ServerResult<Response<GetEmotePackEmotesResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let GetEmotePackEmotesRequest { pack_id } = request.into_message().await?;
 
         let pack_key = make_emote_pack_key(pack_id);
 
-        if emote_get!(pack_key).is_none() {
+        if self.emote_tree.get(pack_key)?.is_none() {
             return Err(ServerError::EmotePackNotFound.into());
         }
 
@@ -279,10 +287,11 @@ impl EmoteService for EmoteServer {
 
     #[rate(5, 5)]
     async fn create_emote_pack(
-        &self,
+        &mut self,
         request: Request<CreateEmotePackRequest>,
     ) -> ServerResult<Response<CreateEmotePackResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let CreateEmotePackRequest { pack_name } = request.into_message().await?;
 
@@ -296,7 +305,7 @@ impl EmoteService for EmoteServer {
         };
         let data = rkyv_ser(&emote_pack);
 
-        emote_insert!(key / data);
+        self.emote_tree.insert(key, data)?;
 
         self.emote_tree.equip_emote_pack_logic(user_id, pack_id)?;
         self.send_event_through_chan(
@@ -318,28 +327,26 @@ pub struct EmoteTree {
 }
 
 impl EmoteTree {
+    impl_db_methods!(inner);
+
     pub fn new(db: &dyn Db) -> DbResult<Self> {
         let inner = db.open_tree(b"emote")?;
         Ok(Self { inner })
     }
 
-    pub fn check_if_emote_pack_owner(
-        &self,
-        pack_id: u64,
-        user_id: u64,
-    ) -> Result<EmotePack, ServerError> {
+    pub fn check_if_emote_pack_owner(&self, pack_id: u64, user_id: u64) -> ServerResult<EmotePack> {
         let key = make_emote_pack_key(pack_id);
 
-        let pack = if let Some(data) = eemote_get!(key) {
+        let pack = if let Some(data) = self.get(key)? {
             let pack = db::deser_emote_pack(data);
 
             if pack.pack_owner != user_id {
-                return Err(ServerError::NotEmotePackOwner);
+                return Err(ServerError::NotEmotePackOwner.into());
             }
 
             pack
         } else {
-            return Err(ServerError::EmotePackNotFound);
+            return Err(ServerError::EmotePackNotFound.into());
         };
 
         Ok(pack)
@@ -347,13 +354,13 @@ impl EmoteTree {
 
     pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
-        eemote_remove!(key);
+        self.remove(key)?;
         Ok(())
     }
 
     pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
-        eemote_insert!(key / &[]);
+        self.insert(key, &[])?;
         Ok(())
     }
 

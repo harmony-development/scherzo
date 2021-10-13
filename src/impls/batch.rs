@@ -1,7 +1,10 @@
 use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
-        hrpc::{exports::hyper, server::MakeHrpcService, HrpcService},
+        hrpc::{
+            exports::hyper,
+            server::{MakeRouter, Router},
+        },
         prost::bytes::Bytes,
     },
 };
@@ -20,21 +23,33 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
     !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
 }
 
-pub struct BatchServer<Producer: MakeHrpcService> {
+pub struct BatchServer<MkRouter: MakeRouter + Sync> {
     disable_ratelimits: bool,
-    service: Producer,
+    mk_router: Arc<MkRouter>,
+    router: Router,
 }
 
-impl<Producer: MakeHrpcService> BatchServer<Producer> {
-    pub fn new(deps: &Dependencies, service: Producer) -> Self {
+impl<MkRouter: MakeRouter + Sync> Clone for BatchServer<MkRouter> {
+    fn clone(&self) -> Self {
+        Self {
+            disable_ratelimits: self.disable_ratelimits,
+            mk_router: self.mk_router.clone(),
+            router: self.mk_router.make_router().build(),
+        }
+    }
+}
+
+impl<MkRouter: MakeRouter + Sync> BatchServer<MkRouter> {
+    pub fn new(deps: &Dependencies, mk_router: MkRouter) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            service,
+            router: mk_router.make_router().build(),
+            mk_router: Arc::new(mk_router),
         }
     }
 
     async fn make_req(
-        &self,
+        &mut self,
         bodies: Vec<Bytes>,
         endpoint: Endpoint,
         auth_header: Option<HeaderValue>,
@@ -43,31 +58,27 @@ impl<Producer: MakeHrpcService> BatchServer<Producer> {
             body: Bytes,
             endpoint: &str,
             auth_header: &Option<HeaderValue>,
-            service: Option<&mut HrpcService>,
+            service: &mut Router,
         ) -> Result<Bytes, HrpcServerError> {
-            if let Some(service) = service {
-                let mut req = http::Request::builder()
-                    .header(header::CONTENT_TYPE, unsafe {
-                        HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
-                            b"application/hrpc",
-                        ))
-                    })
-                    .method(http::Method::POST)
-                    .uri(endpoint)
-                    .body(hyper::Body::from(body))
-                    .unwrap();
-                if let Some(auth) = auth_header {
-                    req.headers_mut()
-                        .insert(header::AUTHORIZATION, auth.clone());
-                }
-
-                let reply = service.call(req).await.unwrap();
-                let body = hyper::body::to_bytes(reply.into_body()).await.unwrap();
-
-                Ok(body)
-            } else {
-                Err((http::StatusCode::NOT_FOUND, "batch endpoint not found").into())
+            let mut req = http::Request::builder()
+                .header(header::CONTENT_TYPE, unsafe {
+                    HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
+                        b"application/hrpc",
+                    ))
+                })
+                .method(http::Method::POST)
+                .uri(endpoint)
+                .body(hyper::Body::from(body))
+                .unwrap();
+            if let Some(auth) = auth_header {
+                req.headers_mut()
+                    .insert(header::AUTHORIZATION, auth.clone());
             }
+
+            let reply = service.call(req).await.unwrap();
+            let body = hyper::body::to_bytes(reply.into_body()).await.unwrap();
+
+            Ok(body)
         }
 
         if bodies.len() > 64 {
@@ -87,14 +98,9 @@ impl<Producer: MakeHrpcService> BatchServer<Producer> {
                 if !is_valid_endpoint(endpoint) {
                     return Err(ServerError::InvalidBatchEndpoint.into());
                 }
-                let req = http::Request::builder()
-                    .uri(endpoint)
-                    .body(hyper::Body::empty())
-                    .unwrap();
-                let mut service = self.service.make_hrpc_service(&req);
                 for body in bodies {
                     responses.push(
-                        process_request(body, endpoint, auth_header, service.as_mut()).await?,
+                        process_request(body, endpoint, auth_header, &mut self.router).await?,
                     );
                 }
             }
@@ -104,13 +110,8 @@ impl<Producer: MakeHrpcService> BatchServer<Producer> {
                     if !is_valid_endpoint(endpoint) {
                         return Err(ServerError::InvalidBatchEndpoint.into());
                     }
-                    let req = http::Request::builder()
-                        .uri(endpoint)
-                        .body(hyper::Body::empty())
-                        .unwrap();
-                    let mut service = self.service.make_hrpc_service(&req);
                     responses.push(
-                        process_request(body, endpoint, auth_header, service.as_mut()).await?,
+                        process_request(body, endpoint, auth_header, &mut self.router).await?,
                     );
                 }
             }
@@ -121,10 +122,10 @@ impl<Producer: MakeHrpcService> BatchServer<Producer> {
 }
 
 #[async_trait]
-impl<Producer: MakeHrpcService> BatchService for BatchServer<Producer> {
+impl<MkRouter: MakeRouter + Sync> BatchService for BatchServer<MkRouter> {
     #[rate(5, 5)]
     async fn batch(
-        &self,
+        &mut self,
         mut request: Request<BatchRequest>,
     ) -> ServerResult<Response<BatchResponse>> {
         let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
@@ -151,7 +152,7 @@ impl<Producer: MakeHrpcService> BatchService for BatchServer<Producer> {
 
     #[rate(5, 5)]
     async fn batch_same(
-        &self,
+        &mut self,
         mut request: Request<BatchSameRequest>,
     ) -> ServerResult<Response<BatchSameResponse>> {
         let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);

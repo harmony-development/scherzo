@@ -13,11 +13,9 @@ use harmony_rust_sdk::api::{
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
         body::box_body,
-        server::{
-            prelude::{MapResponseBodyLayer, TraceLayer},
-            HrpcMakeService,
-        },
-        HrpcLayer,
+        combine_services,
+        exports::tower_http::{map_response_body::MapResponseBodyLayer, trace::TraceLayer},
+        server::{serve, HrpcLayer, MakeRouter},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -31,7 +29,7 @@ use scherzo::{
         Db,
     },
     impls::{
-        about, against,
+        about, /*against,*/
         auth::AuthServer,
         batch::BatchServer,
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
@@ -268,13 +266,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let sync = PostboxServiceServer::new(sync_server);
     let voice = VoiceServiceServer::new(voice_server);
 
-    let make_service = HrpcMakeService::new(profile)
-        .producer(emote)
-        .producer(auth)
-        .producer(chat)
-        .producer(mediaproxy)
-        .producer(sync)
-        .producer(voice);
+    let make_service = combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice);
 
     // TODO: handle errors here
     let _upload = warp::service(upload(
@@ -288,15 +280,11 @@ pub async fn run(filter_level: Level, db_path: String) {
     let batch_server = BatchServer::new(&deps, make_service.clone());
     let batch = BatchServiceServer::new(batch_server);
 
-    let against = against::producer();
+    //let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let make_service = HrpcMakeService::new(make_service)
-        .producer(batch)
-        .producer(about)
-        .producer(download)
-        .producer(against)
-        .layer(HrpcLayer::new(
+    let make_service =
+        combine_services!(make_service, batch, about, download).layer(HrpcLayer::new(
             ServiceBuilder::new()
                 .layer(MapResponseBodyLayer::new(box_body))
                 .layer(TraceLayer::new_for_http())
@@ -340,10 +328,10 @@ pub async fn run(filter_level: Level, db_path: String) {
     let spawn_handle = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
     } else {
-        tokio::spawn(hyper::Server::bind(&addr).serve(make_service))
+        tokio::spawn(serve(make_service, addr))
     };
 
-    spawn_handle.await.unwrap().unwrap();
+    spawn_handle.await.unwrap();
 }
 
 use tokio::fs;

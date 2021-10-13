@@ -32,40 +32,42 @@ const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
 pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
 
-pub fn check_auth<T>(
-    valid_sessions: &SessionMap,
-    request: &Request<T>,
-) -> Result<u64, ServerError> {
-    let headers = request.header_map();
-    let auth_id = headers
-        .get(&http::header::AUTHORIZATION)
-        .map_or_else(
-            || {
-                // Specific handling for web clients
-                headers
-                    .get(&http::header::SEC_WEBSOCKET_PROTOCOL)
-                    .and_then(|val| {
-                        val.to_str()
-                            .ok()
-                            .and_then(|v| v.split(',').nth(1).map(str::trim))
-                    })
-            },
-            |val| val.to_str().ok(),
-        )
-        .unwrap_or("");
-
-    valid_sessions
-        .get(auth_id)
-        .as_deref()
-        .copied()
-        .map_or(Err(ServerError::Unauthenticated), Ok)
+pub trait AuthExt {
+    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError>;
 }
 
+impl AuthExt for DashMap<SmolStr, u64, RandomState> {
+    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
+        let headers = request.header_map();
+        let auth_id = headers
+            .get(&http::header::AUTHORIZATION)
+            .map_or_else(
+                || {
+                    // Specific handling for web clients
+                    headers
+                        .get(&http::header::SEC_WEBSOCKET_PROTOCOL)
+                        .and_then(|val| {
+                            val.to_str()
+                                .ok()
+                                .and_then(|v| v.split(',').nth(1).map(str::trim))
+                        })
+                },
+                |val| val.to_str().ok(),
+            )
+            .unwrap_or("");
+
+        self.get(auth_id)
+            .as_deref()
+            .copied()
+            .map_or(Err(ServerError::Unauthenticated), Ok)
+    }
+}
+#[derive(Clone)]
 pub struct AuthServer {
     valid_sessions: SessionMap,
-    step_map: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
-    send_step: DashMap<SmolStr, Sender<AuthStep>, RandomState>,
-    queued_steps: DashMap<SmolStr, Vec<AuthStep>, RandomState>,
+    step_map: Arc<DashMap<SmolStr, Vec<AuthStep>, RandomState>>,
+    send_step: Arc<DashMap<SmolStr, Sender<AuthStep>, RandomState>>,
+    queued_steps: Arc<DashMap<SmolStr, Vec<AuthStep>, RandomState>>,
     auth_tree: AuthTree,
     profile_tree: ProfileTree,
     keys_manager: Option<Arc<KeyManager>>,
@@ -160,9 +162,9 @@ impl AuthServer {
 
         Self {
             valid_sessions: deps.valid_sessions.clone(),
-            step_map: DashMap::default(),
-            send_step: DashMap::default(),
-            queued_steps: DashMap::default(),
+            step_map: DashMap::default().into(),
+            send_step: DashMap::default().into(),
+            queued_steps: DashMap::default().into(),
             auth_tree: deps.auth_tree.clone(),
             profile_tree: deps.profile_tree.clone(),
             keys_manager: deps.key_manager.clone(),
@@ -203,19 +205,21 @@ impl AuthServer {
 impl auth_service_server::AuthService for AuthServer {
     #[rate(20, 5)]
     async fn check_logged_in(
-        &self,
+        &mut self,
         request: Request<CheckLoggedInRequest>,
     ) -> Result<Response<CheckLoggedInResponse>, HrpcServerError> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
         Ok(((CheckLoggedInResponse {}).into_response()).into_response())
     }
 
     #[rate(3, 1)]
     async fn federate(
-        &self,
+        &mut self,
         request: Request<FederateRequest>,
     ) -> Result<Response<FederateResponse>, HrpcServerError> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let keys_manager = self.keys_manager()?;
 
@@ -238,7 +242,7 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(1, 5)]
     async fn login_federated(
-        &self,
+        &mut self,
         request: Request<LoginFederatedRequest>,
     ) -> Result<Response<LoginFederatedResponse>, HrpcServerError> {
         let LoginFederatedRequest {
@@ -313,7 +317,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(1, 5)]
-    async fn key(&self, _: Request<KeyRequest>) -> ServerResult<Response<KeyResponse>> {
+    async fn key(&mut self, _: Request<KeyRequest>) -> ServerResult<Response<KeyResponse>> {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
 
@@ -324,7 +328,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     fn stream_steps_on_upgrade(
-        &self,
+        &mut self,
         response: http::Response<BoxBody>,
     ) -> http::Response<BoxBody> {
         set_proto_name(response)
@@ -332,7 +336,7 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(2, 5)]
     async fn stream_steps(
-        &self,
+        &mut self,
         _request: Request<()>,
         socket: Socket<StreamStepsRequest, StreamStepsResponse>,
     ) -> Result<(), HrpcServerError> {
@@ -412,7 +416,7 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(2, 5)]
     async fn begin_auth(
-        &self,
+        &mut self,
         _: Request<BeginAuthRequest>,
     ) -> ServerResult<Response<BeginAuthResponse>> {
         let initial_step = AuthStep {
@@ -445,7 +449,7 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(10, 5)]
     async fn next_step(
-        &self,
+        &mut self,
         req: Request<NextStepRequest>,
     ) -> ServerResult<Response<NextStepResponse>> {
         let NextStepRequest {
@@ -746,7 +750,8 @@ impl auth_service_server::AuthService for AuthServer {
                                         user_name: username,
                                         ..Default::default()
                                     });
-                                    profile_insert!(make_user_profile_key(user_id) / buf);
+                                    self.profile_tree
+                                        .insert(make_user_profile_key(user_id), buf)?;
 
                                     tracing::debug!("new user {} registered", user_id,);
 
@@ -811,7 +816,7 @@ impl auth_service_server::AuthService for AuthServer {
 
     #[rate(10, 5)]
     async fn step_back(
-        &self,
+        &mut self,
         req: Request<StepBackRequest>,
     ) -> ServerResult<Response<StepBackResponse>> {
         let req = req.into_message().await?;

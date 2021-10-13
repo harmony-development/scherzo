@@ -50,6 +50,7 @@ enum Event {
     UserLeft(UserLeft),
 }
 
+#[derive(Clone)]
 pub struct VoiceServer {
     valid_sessions: SessionMap,
     worker_pool: WorkerPool,
@@ -71,11 +72,12 @@ impl VoiceServer {
 #[async_trait]
 impl VoiceService for VoiceServer {
     async fn stream_message(
-        &self,
+        &mut self,
         request: Request<()>,
         socket: Socket<StreamMessageRequest, StreamMessageResponse>,
     ) -> Result<(), HrpcServerError> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let wait_for_initialize = async {
             match socket.receive_message().await {
@@ -521,6 +523,7 @@ impl VoiceService for VoiceServer {
     }
 }
 
+#[derive(Clone)]
 struct WorkerPool {
     manager: WorkerManager,
 }
@@ -652,14 +655,15 @@ impl Clone for Channel {
     }
 }
 
+#[derive(Clone)]
 struct Channels {
-    inner: DashMap<ChannelId, Channel, RandomState>,
+    inner: Arc<DashMap<ChannelId, Channel, RandomState>>,
 }
 
 impl Channels {
     fn new() -> Self {
         Self {
-            inner: DashMap::default(),
+            inner: DashMap::default().into(),
         }
     }
 

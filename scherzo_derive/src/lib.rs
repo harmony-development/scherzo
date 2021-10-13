@@ -3,144 +3,29 @@ use quote::quote;
 use syn::{parse_macro_input, AttributeArgs, ItemFn};
 
 #[proc_macro]
-pub fn auth(_: TokenStream) -> TokenStream {
+pub fn impl_db_methods(input: TokenStream) -> TokenStream {
+    let input = proc_macro2::TokenStream::from(input);
     (quote! {
-        #[allow(unused_variable)]
-        let user_id = crate::impls::auth::check_auth(&self.valid_sessions, &request)?;
-    })
-    .into()
-}
+        pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> ServerResult<Option<Vec<u8>>> {
+            self. #input .insert(key.as_ref(), value.as_ref()).map_err(|err| ServerError::DbError(err).into())
+        }
 
-fn tree_insert(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
-    let input = input.to_string();
-    let mut split = input.split('/');
-    let key: proc_macro2::TokenStream = split.next().unwrap().parse().unwrap();
-    let value: proc_macro2::TokenStream = split.next().unwrap().parse().unwrap();
-    (quote! {
-        self. #chat .insert(#key .as_ref(), #value .as_ref()).map_err(ServerError::DbError)?;
-    })
-    .into()
-}
+        pub fn remove(&self, key: impl AsRef<[u8]>) -> ServerResult<Option<Vec<u8>>> {
+            self. #input .remove(key.as_ref()).map_err(|err| ServerError::DbError(err).into())
+        }
 
-fn tree_remove(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
-    let input: proc_macro2::TokenStream = input.into();
-    (quote! {
-        self. #chat .remove(#input .as_ref()).map_err(ServerError::DbError)?
-    })
-    .into()
-}
+        pub fn get(&self, key: impl AsRef<[u8]>) -> ServerResult<Option<Vec<u8>>> {
+            self. #input .get(key.as_ref()).map_err(|err| ServerError::DbError(err).into())
+        }
 
-fn tree_get(input: TokenStream, chat: impl quote::ToTokens) -> TokenStream {
-    let input: proc_macro2::TokenStream = input.into();
-    (quote! {
-        self. #chat .get(#input .as_ref()).map_err(ServerError::DbError)?
-    })
-    .into()
-}
+        pub fn contains_key(&self, key: impl AsRef<[u8]>) -> ServerResult<bool> {
+            self. #input .contains_key(key.as_ref()).map_err(|err| ServerError::DbError(err).into())
+        }
 
-#[proc_macro]
-pub fn emote_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { emote_tree.inner })
-}
-
-#[proc_macro]
-pub fn emote_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { emote_tree.inner })
-}
-
-#[proc_macro]
-pub fn emote_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { emote_tree.inner })
-}
-
-#[proc_macro]
-pub fn eemote_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn eemote_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn eemote_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn profile_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { profile_tree.inner })
-}
-
-#[proc_macro]
-pub fn profile_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { profile_tree.inner })
-}
-
-#[proc_macro]
-pub fn profile_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { profile_tree.inner })
-}
-
-#[proc_macro]
-pub fn pprofile_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn pprofile_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn pprofile_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { inner })
-}
-
-#[proc_macro]
-pub fn chat_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { chat_tree.chat_tree })
-}
-
-#[proc_macro]
-pub fn chat_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { chat_tree.chat_tree })
-}
-
-#[proc_macro]
-pub fn chat_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { chat_tree.chat_tree })
-}
-
-#[proc_macro]
-pub fn auth_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { auth_tree })
-}
-
-#[proc_macro]
-pub fn auth_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { auth_tree })
-}
-
-#[proc_macro]
-pub fn auth_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { auth_tree })
-}
-
-#[proc_macro]
-pub fn cchat_insert(input: TokenStream) -> TokenStream {
-    tree_insert(input, quote! { chat_tree })
-}
-
-#[proc_macro]
-pub fn cchat_remove(input: TokenStream) -> TokenStream {
-    tree_remove(input, quote! { chat_tree })
-}
-
-#[proc_macro]
-pub fn cchat_get(input: TokenStream) -> TokenStream {
-    tree_get(input, quote! { chat_tree })
+        pub fn scan_prefix<'a>(&'a self, prefix: impl AsRef<[u8]>) -> Box<dyn Iterator<Item = ServerResult<(Vec<u8>, Vec<u8>)>> + Send + 'a> {
+            Box::new(self. #input .scan_prefix(prefix.as_ref()).map(|res| ServerResult::Ok(res.map_err(ServerError::DbError)?)))
+        }
+    }).into()
 }
 
 // TODO: move this to hrpc, add error reporting for invalid inputs

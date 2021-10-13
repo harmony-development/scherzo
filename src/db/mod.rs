@@ -61,8 +61,9 @@ pub trait Db {
     fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree>;
 }
 
-type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
-type RangeIter<'a> = Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
+pub type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
+pub type RangeIter<'a> =
+    Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
 
 pub trait Tree: Send + Sync {
     fn get(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;

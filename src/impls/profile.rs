@@ -9,6 +9,7 @@ use harmony_rust_sdk::api::{
     profile::{profile_service_server::ProfileService, *},
 };
 
+#[derive(Clone)]
 pub struct ProfileServer {
     profile_tree: ProfileTree,
     chat_tree: ChatTree,
@@ -46,10 +47,11 @@ impl ProfileServer {
 impl ProfileService for ProfileServer {
     #[rate(32, 10)]
     async fn get_profile(
-        &self,
+        &mut self,
         request: Request<GetProfileRequest>,
     ) -> ServerResult<Response<GetProfileResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let GetProfileRequest { user_id } = request.into_message().await?;
 
@@ -62,36 +64,43 @@ impl ProfileService for ProfileServer {
 
     #[rate(4, 1)]
     async fn get_app_data(
-        &self,
+        &mut self,
         request: Request<GetAppDataRequest>,
     ) -> ServerResult<Response<GetAppDataResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let GetAppDataRequest { app_id } = request.into_message().await?;
-        let app_data = profile_get!(make_user_metadata_key(user_id, &app_id)).unwrap_or_default();
+        let app_data = self
+            .profile_tree
+            .get(make_user_metadata_key(user_id, &app_id))?
+            .unwrap_or_default();
 
         Ok((GetAppDataResponse { app_data }).into_response())
     }
 
     #[rate(2, 5)]
     async fn set_app_data(
-        &self,
+        &mut self,
         request: Request<SetAppDataRequest>,
     ) -> ServerResult<Response<SetAppDataResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let SetAppDataRequest { app_id, app_data } = request.into_message().await?;
-        profile_insert!(make_user_metadata_key(user_id, &app_id) / app_data);
+        self.profile_tree
+            .insert(make_user_metadata_key(user_id, &app_id), app_data)?;
 
         Ok((SetAppDataResponse {}).into_response())
     }
 
     #[rate(4, 5)]
     async fn update_profile(
-        &self,
+        &mut self,
         request: Request<UpdateProfileRequest>,
     ) -> ServerResult<Response<UpdateProfileResponse>> {
-        auth!();
+        #[allow(unused_variables)]
+        let user_id = self.valid_sessions.auth(&request)?;
 
         let UpdateProfileRequest {
             new_user_name,
@@ -131,6 +140,8 @@ pub struct ProfileTree {
 }
 
 impl ProfileTree {
+    impl_db_methods!(inner);
+
     pub fn new(db: &dyn Db) -> DbResult<Self> {
         let inner = db.open_tree(b"profile")?;
         Ok(Self { inner })
@@ -146,7 +157,9 @@ impl ProfileTree {
     ) -> ServerResult<()> {
         let key = make_user_profile_key(user_id);
 
-        let mut profile = pprofile_get!(key).map_or_else(Profile::default, db::deser_profile);
+        let mut profile = self
+            .get(key)?
+            .map_or_else(Profile::default, db::deser_profile);
 
         if let Some(new_username) = new_user_name {
             profile.user_name = new_username;
@@ -162,35 +175,34 @@ impl ProfileTree {
         }
 
         let buf = rkyv_ser(&profile);
-        pprofile_insert!(key / buf);
+        self.insert(key, buf)?;
 
         Ok(())
     }
 
-    pub fn get_profile_logic(&self, user_id: u64) -> Result<Profile, ServerError> {
+    pub fn get_profile_logic(&self, user_id: u64) -> ServerResult<Profile> {
         let key = make_user_profile_key(user_id);
 
-        let profile = if let Some(profile_raw) = pprofile_get!(key) {
+        let profile = if let Some(profile_raw) = self.get(key)? {
             db::deser_profile(profile_raw)
         } else {
-            return Err(ServerError::NoSuchUser(user_id));
+            return Err(ServerError::NoSuchUser(user_id).into());
         };
 
         Ok(profile)
     }
 
-    pub fn does_user_exist(&self, user_id: u64) -> Result<(), ServerError> {
-        self.inner
-            .contains_key(&make_user_profile_key(user_id))?
+    pub fn does_user_exist(&self, user_id: u64) -> ServerResult<()> {
+        self.contains_key(&make_user_profile_key(user_id))?
             .then(|| Ok(()))
-            .unwrap_or(Err(ServerError::NoSuchUser(user_id)))
+            .unwrap_or_else(|| Err(ServerError::NoSuchUser(user_id).into()))
     }
 
     /// Converts a local user ID to the corresponding foreign user ID and the host
     pub fn local_to_foreign_id(&self, local_id: u64) -> ServerResult<Option<(u64, SmolStr)>> {
         let key = make_local_to_foreign_user_key(local_id);
 
-        Ok(pprofile_get!(key).map(|raw| {
+        Ok(self.get(key)?.map(|raw| {
             let (raw_id, raw_host) = raw.split_at(size_of::<u64>());
             // Safety: safe since we split at u64 boundary.
             let foreign_id = u64::from_be_bytes(unsafe { raw_id.try_into().unwrap_unchecked() });
@@ -204,7 +216,8 @@ impl ProfileTree {
     pub fn foreign_to_local_id(&self, foreign_id: u64, host: &str) -> ServerResult<Option<u64>> {
         let key = make_foreign_to_local_user_key(foreign_id, host);
 
-        Ok(pprofile_get!(key)
+        Ok(self
+            .get(key)?
             // Safety: we store u64's only for these keys
             .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })))
     }
