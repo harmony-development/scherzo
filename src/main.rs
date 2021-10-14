@@ -14,7 +14,10 @@ use harmony_rust_sdk::api::{
     exports::hrpc::{
         body::box_body,
         combine_services,
-        exports::tower_http::{map_response_body::MapResponseBodyLayer, trace::TraceLayer},
+        exports::tower_http::{
+            classify::StatusInRangeAsFailures, map_response_body::MapResponseBodyLayer,
+            trace::TraceLayer,
+        },
         server::{serve, HrpcLayer, MakeRouter},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
@@ -279,7 +282,9 @@ pub async fn run(filter_level: Level, db_path: String) {
     let make_service = combine_services!(make_service, batch, about, media).layer(HrpcLayer::new(
         ServiceBuilder::new()
             .layer(MapResponseBodyLayer::new(box_body))
-            .layer(TraceLayer::new_for_http())
+            .layer(TraceLayer::new(
+                StatusInRangeAsFailures::new(400..=599).into_make_classifier(),
+            ))
             .into_inner(),
     ));
 
