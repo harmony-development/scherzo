@@ -18,15 +18,12 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "gen_client",
     "rkyv",
 ] }
-hyper = { version = "0.14", features = ["http1", "http2", "runtime"] }
+hyper = { version = "0.14", features = ["http1", "http2", "runtime", "stream"] }
 hyper-rustls = { version = "0.22", default-features = false, features = [
     "native-tokio",
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
-warp = { git = "https://github.com/yusdacra/warp.git", branch = "chore/deps", default-features = false, features = [
-    "multipart",
-] }
-
+multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
 
 rand = "0.8"

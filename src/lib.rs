@@ -148,10 +148,8 @@ pub enum ServerError {
     InvalidBatchEndpoint,
     InvalidRegistrationToken,
     WebRTCError(anyhow::Error),
-    WarpError(warp::Error),
+    MultipartError(multer::Error),
 }
-
-impl warp::reject::Reject for ServerError {}
 
 impl StdError for ServerError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
@@ -162,7 +160,7 @@ impl StdError for ServerError {
             ServerError::HttpError(err) => Some(err),
             ServerError::WebRTCError(err) => err.source(),
             ServerError::DbError(err) => Some(err),
-            ServerError::WarpError(err) => Some(err),
+            ServerError::MultipartError(err) => Some(err),
             _ => None,
         }
     }
@@ -312,7 +310,7 @@ impl Display for ServerError {
             ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
             ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
             ServerError::DbError(err) => write!(f, "database error: {}", err),
-            ServerError::WarpError(err) => write!(f, "warp error: {}", err),
+            ServerError::MultipartError(err) => write!(f, "multipart error: {}", err),
         }
     }
 }
@@ -378,7 +376,7 @@ impl CustomError for ServerError {
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
-            | ServerError::WarpError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::MultipartError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -393,7 +391,7 @@ impl CustomError for ServerError {
                 | ServerError::CantGetHostKey(_)
                 | ServerError::WebRTCError(_)
                 | ServerError::DbError(_)
-                | ServerError::WarpError(_) => "h.internal-server-error",
+                | ServerError::MultipartError(_) => "h.internal-server-error",
                 ServerError::Unauthenticated => "h.blank-session",
                 ServerError::InvalidAuthId => "h.bad-auth-id",
                 ServerError::UserAlreadyExists => "h.already-registered",
@@ -468,9 +466,9 @@ impl CustomError for ServerError {
     }
 }
 
-impl From<warp::Error> for ServerError {
-    fn from(err: warp::Error) -> Self {
-        ServerError::WarpError(err)
+impl From<multer::Error> for ServerError {
+    fn from(err: multer::Error) -> Self {
+        ServerError::MultipartError(err)
     }
 }
 

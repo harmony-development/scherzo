@@ -7,6 +7,7 @@ use harmony_rust_sdk::api::{
     exports::hrpc::body::BoxBody,
     profile::{Profile, UserStatus},
 };
+use hyper::HeaderMap;
 use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
 
@@ -33,12 +34,15 @@ const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
 
 pub trait AuthExt {
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError>;
+    fn auth_header_map(&self, headers: &HeaderMap) -> ServerResult<u64>;
+    fn auth<T>(&self, request: &Request<T>) -> ServerResult<u64> {
+        let headers = request.header_map();
+        self.auth_header_map(headers)
+    }
 }
 
 impl AuthExt for DashMap<SmolStr, u64, RandomState> {
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
-        let headers = request.header_map();
+    fn auth_header_map(&self, headers: &HeaderMap) -> ServerResult<u64> {
         let auth_id = headers
             .get(&http::header::AUTHORIZATION)
             .map_or_else(
@@ -59,7 +63,7 @@ impl AuthExt for DashMap<SmolStr, u64, RandomState> {
         self.get(auth_id)
             .as_deref()
             .copied()
-            .map_or(Err(ServerError::Unauthenticated), Ok)
+            .map_or(Err(ServerError::Unauthenticated.into()), Ok)
     }
 }
 #[derive(Clone)]

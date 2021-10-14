@@ -1,275 +1,246 @@
 use crate::http;
 
-use super::{get_content_length, prelude::*};
+use super::{gen_rand_inline_str, get_content_length, prelude::*};
 
 use std::{
     borrow::Cow,
     cmp,
-    collections::HashMap,
     fs::Metadata,
     ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
     task::Poll,
+    time::Duration,
 };
 
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
+            body::{box_body, full_box_body},
             client::HttpClient,
             exports::futures_util::{
                 future::{self, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
+            return_err_as_resp,
+            server::{prelude::CustomError, MakeRouter, RouterBuilder},
+            HttpRequest,
         },
-        prost::bytes::{Buf, Bytes, BytesMut},
+        prost::bytes::{Bytes, BytesMut},
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use http::{HeaderValue, StatusCode, Uri};
+use http::{header, HeaderValue, Method, StatusCode, Uri};
 use hyper::Body;
-use sha3::Digest;
 use tokio::{
     fs::File,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
 };
 use tokio_util::io::poll_read_buf;
+use tower::{service_fn, ServiceBuilder};
 use tracing::info;
-use warp::{filters::multipart::*, filters::BoxedFilter, Filter, Reply};
 
 const SEPERATOR: u8 = b'\n';
 
-pub mod download {
-    use std::time::Duration;
+pub struct MediaProducer {
+    deps: Arc<Dependencies>,
+}
 
-    use harmony_rust_sdk::api::exports::hrpc::{
-        body::box_body,
-        server::{prelude::CustomError, MakeRouter, RouterBuilder},
-        HttpRequest,
-    };
-    use hyper::{header, Method};
-    use tower::{service_fn, ServiceBuilder};
-
-    use super::*;
-
-    pub struct DownloadProducer {
-        deps: Arc<Dependencies>,
+impl MediaProducer {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
+        Self { deps }
     }
+}
 
-    impl MakeRouter for DownloadProducer {
-        fn make_router(&self) -> RouterBuilder {
-            let deps = self.deps.clone();
+impl MakeRouter for MediaProducer {
+    fn make_router(&self) -> RouterBuilder {
+        let deps = self.deps.clone();
 
-            let service = service_fn(move |request: HttpRequest| {
-                async fn make_request(
-                    http_client: &HttpClient,
-                    url: Uri,
-                ) -> Result<http::Response<Body>, ServerError> {
-                    let resp = http_client.get(url).await.map_err(ServerError::from)?;
+        let download = service_fn(move |request: HttpRequest| {
+            async fn make_request(
+                http_client: &HttpClient,
+                url: Uri,
+            ) -> Result<http::Response<Body>, ServerError> {
+                let resp = http_client.get(url).await.map_err(ServerError::from)?;
 
-                    if resp.status().is_success().not() {
-                        let err = if resp.status() == StatusCode::NOT_FOUND {
-                            ServerError::MediaNotFound
-                        } else {
-                            // TODO: proper error
-                            ServerError::InternalServerError
-                        };
-                        Err(err)
+                if resp.status().is_success().not() {
+                    let err = if resp.status() == StatusCode::NOT_FOUND {
+                        ServerError::MediaNotFound
                     } else {
-                        Ok(resp)
-                    }
+                        // TODO: proper error
+                        ServerError::InternalServerError
+                    };
+                    Err(err)
+                } else {
+                    Ok(resp)
+                }
+            }
+
+            let deps = deps.clone();
+            let maybe_file_id = request
+                .uri()
+                .path()
+                .strip_prefix("/_harmony/media/download/")
+                .map(|id| urlencoding::decode(id).unwrap_or(Cow::Borrowed(id)))
+                .and_then(|id| FileId::from_str(&id).ok());
+
+            async move {
+                if request.method() != Method::GET {
+                    return Ok(
+                        (StatusCode::METHOD_NOT_ALLOWED, "method must be get").as_error_response()
+                    );
                 }
 
-                let deps = deps.clone();
-                let maybe_file_id = request
-                    .uri()
-                    .path()
-                    .strip_prefix("/_harmony/media/download/")
-                    .map(|id| urlencoding::decode(id).unwrap_or(Cow::Borrowed(id)))
-                    .and_then(|id| FileId::from_str(&id).ok());
+                let file_id = match maybe_file_id {
+                    Some(file_id) => file_id,
+                    _ => return Ok(ServerError::InvalidFileId.as_error_response()),
+                };
 
-                async move {
-                    if request.method() != Method::GET {
-                        return Ok((StatusCode::METHOD_NOT_ALLOWED, "method must be get")
-                            .as_error_response());
-                    }
+                let media_root = deps.config.media.media_root.as_path();
+                let http_client = &deps.http;
+                let host = &deps.config.host;
 
-                    let file_id = match maybe_file_id {
-                        Some(file_id) => file_id,
-                        _ => return Ok(ServerError::InvalidFileId.as_error_response()),
-                    };
+                let (content_disposition, content_type, content_body, content_length) =
+                    match file_id {
+                        FileId::External(url) => {
+                            info!("Serving external image from {}", url);
+                            let filename = url.path().split('/').last().unwrap_or("unknown");
+                            let disposition = unsafe { disposition_header(filename) };
+                            let resp = match make_request(http_client, url).await {
+                                Ok(resp) => resp,
+                                Err(err) => return Ok(err.as_error_response()),
+                            };
+                            let content_type = resp
+                                .headers()
+                                .get(&http::header::CONTENT_TYPE)
+                                .and_then(|v| {
+                                    const ALLOWED_TYPES: [&[u8]; 3] =
+                                        [b"image", b"audio", b"video"];
+                                    const LEN: usize = 5;
+                                    let compare = |t: &[u8]| {
+                                        t.iter()
+                                            .zip(v.as_bytes().iter().take(LEN))
+                                            .all(|(a, b)| a == b)
+                                    };
+                                    (v.len() > LEN
+                                        && std::array::IntoIter::new(ALLOWED_TYPES).any(compare))
+                                    .then(|| v.clone())
+                                });
 
-                    let media_root = deps.config.media.media_root.as_path();
-                    let http_client = &deps.http;
-                    let host = &deps.config.host;
-
-                    let (content_disposition, content_type, content_body, content_length) =
-                        match file_id {
-                            FileId::External(url) => {
-                                info!("Serving external image from {}", url);
-                                let filename = url.path().split('/').last().unwrap_or("unknown");
-                                let disposition = unsafe { disposition_header(filename) };
+                            if let Some(content_type) = content_type {
+                                let len = get_content_length(&resp);
+                                (disposition, content_type, resp.into_body(), len)
+                            } else {
+                                return Ok(ServerError::NotMedia.as_error_response());
+                            }
+                        }
+                        FileId::Hmc(hmc) => {
+                            info!("Serving HMC from {}", hmc);
+                            if format!("{}:{}", hmc.server(), hmc.port()) == host.as_str() {
+                                info!("Serving local media with id {}", hmc.id());
+                                match get_file(media_root, hmc.id()).await {
+                                    Ok(data) => data,
+                                    Err(err) => return Ok(err.as_error_response()),
+                                }
+                            } else {
+                                // Safety: this is always valid, since HMC is a valid URL
+                                let url = unsafe {
+                                    format!(
+                                        "https://{}:{}/_harmony/media/download/{}",
+                                        hmc.server(),
+                                        hmc.port(),
+                                        hmc.id()
+                                    )
+                                    .parse()
+                                    .unwrap_unchecked()
+                                };
                                 let resp = match make_request(http_client, url).await {
                                     Ok(resp) => resp,
                                     Err(err) => return Ok(err.as_error_response()),
                                 };
-                                let content_type = resp
-                                    .headers()
-                                    .get(&http::header::CONTENT_TYPE)
-                                    .and_then(|v| {
-                                        const ALLOWED_TYPES: [&[u8]; 3] =
-                                            [b"image", b"audio", b"video"];
-                                        const LEN: usize = 5;
-                                        let compare = |t: &[u8]| {
-                                            t.iter()
-                                                .zip(v.as_bytes().iter().take(LEN))
-                                                .all(|(a, b)| a == b)
-                                        };
-                                        (v.len() > LEN
-                                            && std::array::IntoIter::new(ALLOWED_TYPES)
-                                                .any(compare))
-                                        .then(|| v.clone())
-                                    });
 
-                                if let Some(content_type) = content_type {
-                                    let len = get_content_length(&resp);
-                                    (disposition, content_type, resp.into_body(), len)
-                                } else {
-                                    return Ok(ServerError::NotMedia.as_error_response());
-                                }
-                            }
-                            FileId::Hmc(hmc) => {
-                                info!("Serving HMC from {}", hmc);
-                                if format!("{}:{}", hmc.server(), hmc.port()) == host.as_str() {
-                                    info!("Serving local media with id {}", hmc.id());
-                                    match get_file(media_root, hmc.id()).await {
-                                        Ok(data) => data,
-                                        Err(err) => return Ok(err.as_error_response()),
-                                    }
-                                } else {
-                                    // Safety: this is always valid, since HMC is a valid URL
-                                    let url = unsafe {
-                                        format!(
-                                            "https://{}:{}/_harmony/media/download/{}",
-                                            hmc.server(),
-                                            hmc.port(),
-                                            hmc.id()
-                                        )
-                                        .parse()
-                                        .unwrap_unchecked()
-                                    };
-                                    let resp = match make_request(http_client, url).await {
-                                        Ok(resp) => resp,
-                                        Err(err) => return Ok(err.as_error_response()),
-                                    };
-
-                                    let extract_result =
-                                        extract_file_info_from_download_response(resp.headers())
-                                            .map(|(name, mimetype, _)| {
-                                                (
-                                                    unsafe { disposition_header(name) },
-                                                    mimetype.clone(),
-                                                )
-                                            })
-                                            .map_err(|e| {
-                                                ServerError::FileExtractUnexpected(e.into())
-                                            });
-                                    let (disposition, mimetype) = match extract_result {
-                                        Ok(data) => data,
-                                        Err(err) => return Ok(err.as_error_response()),
-                                    };
-                                    let len = get_content_length(&resp);
-                                    (disposition, mimetype, resp.into_body(), len)
-                                }
-                            }
-                            FileId::Id(id) => {
-                                info!("Serving local media with id {}", id);
-                                match get_file(media_root, &id).await {
+                                let extract_result =
+                                    extract_file_info_from_download_response(resp.headers())
+                                        .map(|(name, mimetype, _)| {
+                                            (unsafe { disposition_header(name) }, mimetype.clone())
+                                        })
+                                        .map_err(|e| ServerError::FileExtractUnexpected(e.into()));
+                                let (disposition, mimetype) = match extract_result {
                                     Ok(data) => data,
                                     Err(err) => return Ok(err.as_error_response()),
-                                }
+                                };
+                                let len = get_content_length(&resp);
+                                (disposition, mimetype, resp.into_body(), len)
                             }
-                        };
+                        }
+                        FileId::Id(id) => {
+                            info!("Serving local media with id {}", id);
+                            match get_file(media_root, &id).await {
+                                Ok(data) => data,
+                                Err(err) => return Ok(err.as_error_response()),
+                            }
+                        }
+                    };
+
+                Ok(http::Response::builder()
+                    .header(header::CONTENT_TYPE, content_type)
+                    .header(header::CONTENT_DISPOSITION, content_disposition)
+                    .header(header::CONTENT_LENGTH, content_length)
+                    .body(box_body(content_body))
+                    .unwrap())
+            }
+        });
+        let download = ServiceBuilder::new()
+            .rate_limit(10, Duration::from_secs(5))
+            .service(download);
+
+        let deps = self.deps.clone();
+        let upload = service_fn(move |request: HttpRequest| {
+            let deps = deps.clone();
+
+            let auth_res = deps.valid_sessions.auth_header_map(request.headers());
+
+            async move {
+                if let Err(err) = auth_res {
+                    return Ok(err.into_response());
+                }
+                let boundary_res = request
+                    .headers()
+                    .get(&header::CONTENT_TYPE)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|v| multer::parse_boundary(v).ok())
+                    .ok_or((
+                        StatusCode::BAD_REQUEST,
+                        "content_type header not found or was invalid",
+                    ));
+                let boundary = return_err_as_resp!(boundary_res);
+                let mut multipart = multer::Multipart::new(request.into_body(), boundary);
+
+                if let Ok(Some(field)) = multipart.next_field().await {
+                    let id = return_err_as_resp!(
+                        write_file(deps.config.media.media_root.as_path(), field, None).await
+                    );
 
                     Ok(http::Response::builder()
-                        .header(header::CONTENT_TYPE, content_type)
-                        .header(header::CONTENT_DISPOSITION, content_disposition)
-                        .header(header::CONTENT_LENGTH, content_length)
-                        .body(box_body(content_body))
+                        .status(StatusCode::OK)
+                        .body(full_box_body(
+                            format!(r#"{{ "id": "{}" }}"#, id).into_bytes().into(),
+                        ))
                         .unwrap())
+                } else {
+                    Ok(ServerError::MissingFiles.as_error_response())
                 }
-            });
-            let service = ServiceBuilder::new()
-                .rate_limit(10, Duration::from_secs(5))
-                .service(service);
+            }
+        });
+        let upload = ServiceBuilder::new()
+            .rate_limit(3, Duration::from_secs(5))
+            .service(upload);
 
-            RouterBuilder::new().route("/_harmony/media/download/:id", service)
-        }
+        RouterBuilder::new()
+            .route("/_harmony/media/download/:id", download)
+            .route("/_harmony/media/upload", upload)
     }
-
-    pub fn producer(deps: Arc<Dependencies>) -> DownloadProducer {
-        DownloadProducer { deps }
-    }
-}
-
-pub fn upload(
-    sessions: SessionMap,
-    media_root: Arc<PathBuf>,
-    max_length: u64,
-) -> BoxedFilter<(impl Reply,)> {
-    warp::post()
-        .and(warp::filters::header::value("authorization").and_then(
-            move |maybe_token: HeaderValue| {
-                let res = maybe_token
-                    .to_str()
-                    .map(|token| {
-                        sessions
-                            .contains_key(token)
-                            .then(|| ())
-                            .ok_or(ServerError::Unauthenticated)
-                    })
-                    .map_err(|_| ServerError::InvalidAuthId)
-                    .and_then(std::convert::identity)
-                    .map_err(reject);
-                future::ready(res)
-            },
-        ))
-        .untuple_one()
-        .and(warp::query::<HashMap<SmolStr, SmolStr>>())
-        .and(form().max_length(max_length))
-        .and_then(
-            move |param: HashMap<SmolStr, SmolStr>, mut form: FormData| {
-                let media_root = media_root.clone();
-                async move {
-                    if let Some(res) = form.next().await {
-                        let mut part = res.map_err(reject)?;
-                        let data = part
-                            .data()
-                            .await
-                            .ok_or_else(|| reject(ServerError::MissingFiles))?
-                            .map_err(reject)?;
-                        let data = data.chunk();
-                        let name = param.get("filename").map(SmolStr::as_str);
-                        let content_type = param.get("contentType").map(SmolStr::as_str);
-
-                        let id = write_file(media_root.as_path(), data, name, content_type, None)
-                            .await
-                            .map_err(reject)?;
-
-                        Ok(format!(r#"{{ "id": "{}" }}"#, id))
-                    } else {
-                        Err(reject(ServerError::MissingFiles))
-                    }
-                }
-            },
-        )
-        .boxed()
-}
-
-#[inline(always)]
-pub fn reject(err: impl Into<ServerError>) -> warp::Rejection {
-    warp::reject::custom(err.into())
 }
 
 // Safety: the `name` argument MUST ONLY contain ASCII characters.
@@ -281,32 +252,50 @@ unsafe fn disposition_header(name: &str) -> HeaderValue {
 
 pub async fn write_file(
     media_root: &Path,
-    data: &[u8],
-    name: Option<&str>,
-    content_type: Option<&str>,
+    mut part: multer::Field<'static>,
     write_to: Option<PathBuf>,
-) -> Result<String, ServerError> {
-    let id = format!("{:x}", sha3::Sha3_256::digest(data));
-    let path = write_to.unwrap_or_else(|| media_root.join(&id));
+) -> Result<SmolStr, ServerError> {
+    let id = gen_rand_inline_str();
+    let path = write_to.unwrap_or_else(|| media_root.join(id.as_str()));
     if path.exists() {
         return Ok(id);
     }
-    // [tag:ascii_filename_upload]
-    let name = name.unwrap_or("unknown");
-    // [tag:ascii_mimetype_upload]
-    let content_type = content_type
-        .or_else(|| infer::get(data).map(|t| t.mime_type()))
-        .unwrap_or("application/octet-stream");
-    let data = [
-        name.as_bytes(),
-        &[SEPERATOR],
-        content_type.as_bytes(),
-        &[SEPERATOR],
-        data,
-    ]
-    .concat();
+    let first_chunk = part.chunk().await?.ok_or(ServerError::MissingFiles)?;
 
-    tokio::fs::write(path, data).await?;
+    let file = tokio::fs::OpenOptions::default()
+        .append(true)
+        .create(true)
+        .open(path)
+        .await?;
+    let mut buf_writer = BufWriter::new(file);
+
+    // [tag:ascii_filename_upload]
+    let name = part.file_name().unwrap_or("unknown");
+    // [tag:ascii_mimetype_upload]
+    let content_type = part
+        .content_type()
+        .map(|m| m.essence_str())
+        .or_else(|| infer::get(&first_chunk).map(|t| t.mime_type()))
+        .unwrap_or("application/octet-stream");
+
+    // Write prefix
+    buf_writer.write_all(name.as_bytes()).await?;
+    buf_writer.write_all(&[SEPERATOR]).await?;
+    buf_writer.write_all(content_type.as_bytes()).await?;
+    buf_writer.write_all(&[SEPERATOR]).await?;
+
+    // Write our first chunk
+    buf_writer.write_all(&first_chunk).await?;
+
+    // flush before starting to write other chunks
+    buf_writer.flush().await?;
+
+    while let Some(chunk) = part.chunk().await? {
+        buf_writer.write_all(&chunk).await?;
+    }
+
+    // flush everything else
+    buf_writer.flush().await?;
 
     Ok(id)
 }
@@ -390,7 +379,7 @@ pub fn is_id_jpeg(id: &str) -> bool {
 pub async fn get_file(
     media_root: &Path,
     id: &str,
-) -> Result<(HeaderValue, HeaderValue, warp::hyper::Body, HeaderValue), ServerError> {
+) -> Result<(HeaderValue, HeaderValue, hyper::Body, HeaderValue), ServerError> {
     let is_jpeg = is_id_jpeg(id);
     let (mut file, metadata) = get_file_handle(media_root, id).await?;
     let (filename_raw, mimetype_raw, _) = read_bufs(&mut file, is_jpeg).await?;
@@ -410,7 +399,7 @@ pub async fn get_file(
     Ok((
         disposition,
         mimetype,
-        warp::hyper::Body::wrap_stream(file_stream(file, buf_size, (start, end))),
+        hyper::Body::wrap_stream(file_stream(file, buf_size, (start, end))),
         unsafe {
             HeaderValue::from_maybe_shared_unchecked(Bytes::from(
                 (end - start).to_string().into_bytes(),

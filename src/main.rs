@@ -36,13 +36,13 @@ use scherzo::{
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
-        rest::{download, upload},
+        rest::MediaProducer,
         sync::SyncServer,
         voice::VoiceServer,
         Dependencies,
     },
 };
-use tower::{ServiceBuilder, ServiceExt};
+use tower::ServiceBuilder;
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -268,14 +268,7 @@ pub async fn run(filter_level: Level, db_path: String) {
 
     let make_service = combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice);
 
-    // TODO: handle errors here
-    let _upload = warp::service(upload(
-        deps.valid_sessions.clone(),
-        Arc::new(deps.config.media.media_root.clone()),
-        deps.config.media.max_upload_length,
-    ))
-    .map_response(|r| r.map(box_body));
-    let download = download::producer(deps.clone());
+    let media = MediaProducer::new(deps.clone());
 
     let batch_server = BatchServer::new(&deps, make_service.clone());
     let batch = BatchServiceServer::new(batch_server);
@@ -283,13 +276,12 @@ pub async fn run(filter_level: Level, db_path: String) {
     //let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let make_service =
-        combine_services!(make_service, batch, about, download).layer(HrpcLayer::new(
-            ServiceBuilder::new()
-                .layer(MapResponseBodyLayer::new(box_body))
-                .layer(TraceLayer::new_for_http())
-                .into_inner(),
-        ));
+    let make_service = combine_services!(make_service, batch, about, media).layer(HrpcLayer::new(
+        ServiceBuilder::new()
+            .layer(MapResponseBodyLayer::new(box_body))
+            .layer(TraceLayer::new_for_http())
+            .into_inner(),
+    ));
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -335,7 +327,6 @@ pub async fn run(filter_level: Level, db_path: String) {
 }
 
 use tokio::fs;
-use triomphe::Arc;
 
 fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::io::Result<()>>>> {
     Box::pin(async move {
