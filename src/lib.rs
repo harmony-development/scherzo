@@ -366,7 +366,10 @@ impl CustomError for ServerError {
             | ServerError::CantKickOrBanYourself
             | ServerError::InvalidBatchEndpoint
             | ServerError::TooManyBatchedRequests
-            | ServerError::InvalidRegistrationToken => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidRegistrationToken
+            | ServerError::MultipartError(
+                multer::Error::StreamSizeExceeded { .. } | multer::Error::UnknownField { .. },
+            ) => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::IoError(_)
             | ServerError::InternalServerError

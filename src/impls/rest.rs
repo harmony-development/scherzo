@@ -215,21 +215,34 @@ impl MakeRouter for MediaProducer {
                         "content_type header not found or was invalid",
                     ));
                 let boundary = return_err_as_resp!(boundary_res);
-                let mut multipart = multer::Multipart::new(request.into_body(), boundary);
+                let mut multipart = multer::Multipart::with_constraints(
+                    request.into_body(),
+                    boundary,
+                    multer::Constraints::new()
+                        .allowed_fields(vec!["file"])
+                        .size_limit(
+                            multer::SizeLimit::new()
+                                .whole_stream(deps.config.media.max_upload_length),
+                        ),
+                );
 
-                if let Ok(Some(field)) = multipart.next_field().await {
-                    let id = return_err_as_resp!(
-                        write_file(deps.config.media.media_root.as_path(), field, None).await
-                    );
-
-                    Ok(http::Response::builder()
-                        .status(StatusCode::OK)
-                        .body(full_box_body(
-                            format!(r#"{{ "id": "{}" }}"#, id).into_bytes().into(),
-                        ))
-                        .unwrap())
-                } else {
-                    Ok(ServerError::MissingFiles.as_error_response())
+                match multipart.next_field().await {
+                    Ok(maybe_field) => match maybe_field {
+                        Some(field) => {
+                            let id = return_err_as_resp!(
+                                write_file(deps.config.media.media_root.as_path(), field, None).await
+                            );
+        
+                            Ok(http::Response::builder()
+                                .status(StatusCode::OK)
+                                .body(full_box_body(
+                                    format!(r#"{{ "id": "{}" }}"#, id).into_bytes().into(),
+                                ))
+                                .unwrap())
+                        }
+                        None => Ok(ServerError::MissingFiles.as_error_response()),
+                    }
+                    Err(err) => Ok(ServerError::from(err).as_error_response()),
                 }
             }
         });
