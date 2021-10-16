@@ -18,7 +18,7 @@ use harmony_rust_sdk::api::{
             classify::StatusInRangeAsFailures, map_response_body::MapResponseBodyLayer,
             trace::TraceLayer,
         },
-        server::{serve, HrpcLayer, MakeRouter},
+        server::{serve, HrpcLayer, Server},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -209,7 +209,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     if current_db_version == 0 {
         let guild_id = deps
             .chat_tree
-            .create_guild_logic(0, "Admin".to_string(), String::new(), None)
+            .create_guild_logic(0, "Admin".to_string(), None, None)
             .unwrap();
         deps.chat_tree
             .set_permissions_logic(
@@ -328,7 +328,7 @@ pub async fn run(filter_level: Level, db_path: String) {
         tokio::spawn(serve(make_service, addr))
     };
 
-    spawn_handle.await.unwrap();
+    spawn_handle.await.unwrap().unwrap();
 }
 
 use tokio::fs;

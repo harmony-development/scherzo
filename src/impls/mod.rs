@@ -182,7 +182,7 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
 pub mod about {
     use super::*;
     use harmony_rust_sdk::api::{
-        exports::hrpc::server::{MakeRouter, RouterBuilder},
+        exports::hrpc::server::{RouterBuilder, Server},
         rest::About,
     };
 
@@ -190,7 +190,7 @@ pub mod about {
         deps: Arc<Dependencies>,
     }
 
-    impl MakeRouter for AboutProducer {
+    impl Server for AboutProducer {
         fn make_router(&self) -> RouterBuilder {
             let deps = self.deps.clone();
             let service = service_fn(move |_: HttpRequest| {

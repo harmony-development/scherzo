@@ -165,7 +165,7 @@ impl ProfileTree {
             profile.user_name = new_username;
         }
         if let Some(new_avatar) = new_user_avatar {
-            profile.user_avatar = new_avatar;
+            profile.user_avatar = Some(new_avatar);
         }
         if let Some(new_status) = new_user_status {
             profile.user_status = new_status;

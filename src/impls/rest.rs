@@ -24,7 +24,7 @@ use harmony_rust_sdk::api::{
                 ready, stream, FutureExt, Stream, StreamExt,
             },
             return_err_as_resp,
-            server::{prelude::CustomError, MakeRouter, RouterBuilder},
+            server::{prelude::CustomError, RouterBuilder, Server},
             HttpRequest,
         },
         prost::bytes::{Bytes, BytesMut},
@@ -53,7 +53,7 @@ impl MediaProducer {
     }
 }
 
-impl MakeRouter for MediaProducer {
+impl Server for MediaProducer {
     fn make_router(&self) -> RouterBuilder {
         let deps = self.deps.clone();
 
@@ -230,9 +230,10 @@ impl MakeRouter for MediaProducer {
                     Ok(maybe_field) => match maybe_field {
                         Some(field) => {
                             let id = return_err_as_resp!(
-                                write_file(deps.config.media.media_root.as_path(), field, None).await
+                                write_file(deps.config.media.media_root.as_path(), field, None)
+                                    .await
                             );
-        
+
                             Ok(http::Response::builder()
                                 .status(StatusCode::OK)
                                 .body(full_box_body(
@@ -241,7 +242,7 @@ impl MakeRouter for MediaProducer {
                                 .unwrap())
                         }
                         None => Ok(ServerError::MissingFiles.as_error_response()),
-                    }
+                    },
                     Err(err) => Ok(ServerError::from(err).as_error_response()),
                 }
             }

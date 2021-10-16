@@ -149,6 +149,7 @@ pub enum ServerError {
     InvalidRegistrationToken,
     WebRTCError(anyhow::Error),
     MultipartError(multer::Error),
+    MustNotBeLastOwner,
 }
 
 impl StdError for ServerError {
@@ -311,6 +312,9 @@ impl Display for ServerError {
             ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
             ServerError::DbError(err) => write!(f, "database error: {}", err),
             ServerError::MultipartError(err) => write!(f, "multipart error: {}", err),
+            ServerError::MustNotBeLastOwner => {
+                f.write_str("must not be the last owner left in the guild")
+            }
         }
     }
 }
@@ -369,7 +373,8 @@ impl CustomError for ServerError {
             | ServerError::InvalidRegistrationToken
             | ServerError::MultipartError(
                 multer::Error::StreamSizeExceeded { .. } | multer::Error::UnknownField { .. },
-            ) => StatusCode::BAD_REQUEST,
+            )
+            | ServerError::MustNotBeLastOwner => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::IoError(_)
             | ServerError::InternalServerError
@@ -457,6 +462,7 @@ impl CustomError for ServerError {
                 ServerError::InvalidBatchEndpoint => "h.invalid-batch",
                 ServerError::TooManyBatchedRequests => "h.too-many-batches",
                 ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
+                ServerError::MustNotBeLastOwner => "h.last-owner-in-guild",
             };
             encode_protobuf_message(harmony_rust_sdk::api::harmonytypes::Error {
                 identifier: i18n_code.into(),

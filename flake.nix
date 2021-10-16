@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixCargoIntegration = {
-      url = "github:yusdacra/nix-cargo-integration";
+      url = "github:yusdacra/nix-cargo-integration/fix/devshell-attrs";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakeCompat = {

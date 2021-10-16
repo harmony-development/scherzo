@@ -639,14 +639,9 @@ impl chat_service_server::ChatService for ChatServer {
             new_metadata,
         } = request.into_message().await?;
 
-        let key = guild_id.to_be_bytes();
-        let mut guild_info = if let Some(raw) = self.chat_tree.get(key)? {
-            db::deser_guild(raw)
-        } else {
-            return Err(ServerError::NoSuchGuild(guild_id).into());
-        };
+        self.chat_tree.check_guild_user(guild_id, user_id)?;
 
-        self.chat_tree.is_user_in_guild(guild_id, user_id)?;
+        let mut guild_info = self.chat_tree.get_guild_logic(guild_id)?;
 
         self.chat_tree.check_perms(
             guild_id,
@@ -660,14 +655,13 @@ impl chat_service_server::ChatService for ChatServer {
             guild_info.name = new_guild_name;
         }
         if let Some(new_guild_picture) = new_guild_picture.clone() {
-            guild_info.picture = new_guild_picture;
+            guild_info.picture = Some(new_guild_picture);
         }
         if let Some(new_metadata) = new_metadata.clone() {
             guild_info.metadata = Some(new_metadata);
         }
 
-        let buf = rkyv_ser(&guild_info);
-        self.chat_tree.insert(key, buf)?;
+        self.chat_tree.put_guild_logic(guild_id, guild_info)?;
 
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
@@ -1382,11 +1376,11 @@ impl chat_service_server::ChatService for ChatServer {
                 perms_to_give.clone(),
             )?;
             let members = self.chat_tree.get_guild_members_logic(guild_id)?.members;
-            let guild_owner = self.chat_tree.get_guild_owner(guild_id)?;
+            let guild_owners = self.chat_tree.get_guild_owners(guild_id)?;
             let for_users = members.iter().try_fold(
                 Vec::with_capacity(members.len()),
                 |mut all, user_id| {
-                    if guild_owner.ne(user_id) {
+                    if !guild_owners.contains(user_id) {
                         let maybe_user = self
                             .chat_tree
                             .get_user_roles_logic(guild_id, *user_id)?
@@ -2093,6 +2087,55 @@ impl chat_service_server::ChatService for ChatServer {
 
         Ok((RemoveReactionResponse {}).into_response())
     }
+
+    async fn grant_ownership(
+        &mut self,
+        request: Request<GrantOwnershipRequest>,
+    ) -> ServerResult<Response<GrantOwnershipResponse>> {
+        let user_id = self.valid_sessions.auth(&request)?;
+
+        let GrantOwnershipRequest {
+            new_owner_id,
+            guild_id,
+        } = request.into_message().await?;
+
+        self.chat_tree.check_guild_user(guild_id, user_id)?;
+        self.chat_tree.is_user_in_guild(guild_id, new_owner_id)?;
+
+        self.chat_tree
+            .check_perms(guild_id, None, user_id, "", true)?;
+
+        let mut guild = self.chat_tree.get_guild_logic(guild_id)?;
+        guild.owner_ids.push(new_owner_id);
+        self.chat_tree.put_guild_logic(guild_id, guild)?;
+
+        Ok((GrantOwnershipResponse {}).into_response())
+    }
+
+    async fn give_up_ownership(
+        &mut self,
+        request: Request<GiveUpOwnershipRequest>,
+    ) -> ServerResult<Response<GiveUpOwnershipResponse>> {
+        let user_id = self.valid_sessions.auth(&request)?;
+
+        let GiveUpOwnershipRequest { guild_id } = request.into_message().await?;
+
+        self.chat_tree.check_guild_user(guild_id, user_id)?;
+
+        self.chat_tree
+            .check_perms(guild_id, None, user_id, "", true)?;
+
+        let mut guild = self.chat_tree.get_guild_logic(guild_id)?;
+        if guild.owner_ids.len() > 1 {
+            if let Some(pos) = guild.owner_ids.iter().position(|id| user_id.eq(id)) {
+                guild.owner_ids.remove(pos);
+            }
+        } else {
+            return Err(ServerError::MustNotBeLastOwner.into());
+        }
+
+        Ok((GiveUpOwnershipResponse {}).into_response())
+    }
 }
 
 #[derive(Clone)]
@@ -2143,17 +2186,20 @@ impl ChatTree {
         self.contains_key(&make_banned_member_key(guild_id, user_id))
     }
 
-    pub fn get_guild_owner(&self, guild_id: u64) -> ServerResult<u64> {
+    pub fn get_guild_owners(&self, guild_id: u64) -> ServerResult<Vec<u64>> {
         self.get(guild_id.to_be_bytes().as_ref())?
             .map_or_else(
                 || Err(ServerError::NoSuchGuild(guild_id)),
-                |raw| Ok(db::deser_guild(raw).owner_id),
+                |raw| Ok(db::deser_guild(raw).owner_ids),
             )
             .map_err(Into::into)
     }
 
     pub fn is_user_guild_owner(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
-        self.get_guild_owner(guild_id).map(|owner| owner == user_id)
+        Ok(self
+            .get_guild_owners(guild_id)?
+            .into_iter()
+            .any(|owner| owner == user_id))
     }
 
     pub fn check_guild_user_channel(
@@ -2206,6 +2252,11 @@ impl ChatTree {
         };
 
         Ok(guild)
+    }
+
+    pub fn put_guild_logic(&self, guild_id: u64, guild: Guild) -> ServerResult<()> {
+        let buf = rkyv_ser(&guild);
+        self.insert(guild_id.to_be_bytes(), buf).map(|_| ())
     }
 
     pub fn get_guild_invites_logic(&self, guild_id: u64) -> ServerResult<GetGuildInvitesResponse> {
@@ -2694,7 +2745,7 @@ impl ChatTree {
         &self,
         user_id: u64,
         name: String,
-        picture: String,
+        picture: Option<String>,
         metadata: Option<Metadata>,
     ) -> ServerResult<u64> {
         let guild_id = {
@@ -2709,7 +2760,7 @@ impl ChatTree {
         let guild = Guild {
             name,
             picture,
-            owner_id: user_id,
+            owner_ids: vec![user_id],
             metadata,
         };
         let buf = rkyv_ser(&guild);
