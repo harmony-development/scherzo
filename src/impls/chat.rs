@@ -15,8 +15,8 @@ use harmony_rust_sdk::api::{
     },
     emote::Emote,
     exports::hrpc::{
+        bail_result,
         body::BoxBody,
-        return_error,
         server::{
             error::{ServerError as HrpcServerError, SocketError},
             socket::Socket,
@@ -1980,7 +1980,7 @@ impl chat_service_server::ChatService for ChatServer {
         let send_loop = self.spawn_event_stream_processor(user_id, sub_rx, socket.clone());
         let recv_loop = async move {
             loop {
-                let req = return_error!(socket.receive_message().await);
+                let req = bail_result!(socket.receive_message().await);
                 if let Some(req) = req.request {
                     use stream_events_request::*;
 

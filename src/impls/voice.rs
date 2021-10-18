@@ -8,7 +8,7 @@ use super::{chat::ChatTree, prelude::*};
 use ahash::RandomState;
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{
-    exports::hrpc::return_error,
+    exports::hrpc::bail_result,
     voice::{
         stream_message_request::{Initialize, Message as RequestMessage},
         stream_message_response::{
@@ -462,7 +462,7 @@ impl VoiceService for VoiceServer {
                     Event::UserLeft(user_left) => ResponseMessage::UserLeft(user_left),
                 };
 
-                return_error!(
+                bail_result!(
                     socket
                         .send_message(StreamMessageResponse {
                             message: Some(message)
@@ -475,7 +475,7 @@ impl VoiceService for VoiceServer {
 
         let process_client_messages = async {
             loop {
-                let message = return_error!(socket.receive_message().await);
+                let message = bail_result!(socket.receive_message().await);
                 if let StreamMessageRequest {
                     message: Some(RequestMessage::ResumeConsumer(resume)),
                 } = message

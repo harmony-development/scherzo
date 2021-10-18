@@ -18,7 +18,7 @@ use harmony_rust_sdk::api::{
             classify::StatusInRangeAsFailures, map_response_body::MapResponseBodyLayer,
             trace::TraceLayer,
         },
-        server::{serve, HrpcLayer, Server},
+        server::{HrpcLayer, Server},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -279,7 +279,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     //let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let make_service = combine_services!(make_service, batch, about, media).layer(HrpcLayer::new(
+    let server = combine_services!(make_service, batch, about, media).layer(HrpcLayer::new(
         ServiceBuilder::new()
             .layer(MapResponseBodyLayer::new(box_body))
             .layer(TraceLayer::new(
@@ -325,7 +325,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let spawn_handle = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
     } else {
-        tokio::spawn(serve(make_service, addr))
+        tokio::spawn(server.serve(addr))
     };
 
     spawn_handle.await.unwrap().unwrap();

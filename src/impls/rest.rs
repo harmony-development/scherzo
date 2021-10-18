@@ -17,14 +17,14 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
+            bail_result_as_response,
             body::{box_body, full_box_body},
             client::HttpClient,
             exports::futures_util::{
                 future::{self, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
-            return_err_as_resp,
-            server::{prelude::CustomError, RouterBuilder, Server},
+            server::{prelude::CustomError, router::Routes, Server},
             HttpRequest,
         },
         prost::bytes::{Bytes, BytesMut},
@@ -54,7 +54,7 @@ impl MediaProducer {
 }
 
 impl Server for MediaProducer {
-    fn make_router(&self) -> RouterBuilder {
+    fn make_routes(&self) -> Routes {
         let deps = self.deps.clone();
 
         let download = service_fn(move |request: HttpRequest| {
@@ -214,7 +214,7 @@ impl Server for MediaProducer {
                         StatusCode::BAD_REQUEST,
                         "content_type header not found or was invalid",
                     ));
-                let boundary = return_err_as_resp!(boundary_res);
+                let boundary = bail_result_as_response!(boundary_res);
                 let mut multipart = multer::Multipart::with_constraints(
                     request.into_body(),
                     boundary,
@@ -229,7 +229,7 @@ impl Server for MediaProducer {
                 match multipart.next_field().await {
                     Ok(maybe_field) => match maybe_field {
                         Some(field) => {
-                            let id = return_err_as_resp!(
+                            let id = bail_result_as_response!(
                                 write_file(deps.config.media.media_root.as_path(), field, None)
                                     .await
                             );
@@ -251,7 +251,7 @@ impl Server for MediaProducer {
             .rate_limit(3, Duration::from_secs(5))
             .service(upload);
 
-        RouterBuilder::new()
+        Routes::new()
             .route("/_harmony/media/download/:id", download)
             .route("/_harmony/media/upload", upload)
     }

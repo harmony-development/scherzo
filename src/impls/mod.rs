@@ -182,7 +182,7 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
 pub mod about {
     use super::*;
     use harmony_rust_sdk::api::{
-        exports::hrpc::server::{RouterBuilder, Server},
+        exports::hrpc::server::{router::Routes, Server},
         rest::About,
     };
 
@@ -191,7 +191,7 @@ pub mod about {
     }
 
     impl Server for AboutProducer {
-        fn make_router(&self) -> RouterBuilder {
+        fn make_routes(&self) -> Routes {
             let deps = self.deps.clone();
             let service = service_fn(move |_: HttpRequest| {
                 let deps = deps.clone();
@@ -211,7 +211,7 @@ pub mod about {
                 }
             });
 
-            RouterBuilder::new().route("/_harmony/about", service)
+            Routes::new().route("/_harmony/about", service)
         }
     }
 
@@ -223,7 +223,7 @@ pub mod about {
 pub mod against {
     use harmony_rust_sdk::api::exports::hrpc::{
         body::box_body,
-        server::{prelude::CustomError, Handler},
+        server::{handler::Handler, prelude::CustomError},
     };
     use hyper::header::HeaderName;
 

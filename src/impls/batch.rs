@@ -3,7 +3,7 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             exports::hyper,
-            server::{Router, Server},
+            server::{router::RoutesFinalized, Server},
         },
         prost::bytes::Bytes,
     },
@@ -26,7 +26,7 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
 pub struct BatchServer<MkRouter: Server + Sync> {
     disable_ratelimits: bool,
     mk_router: Arc<MkRouter>,
-    router: Router,
+    router: RoutesFinalized,
 }
 
 impl<MkRouter: Server + Sync> Clone for BatchServer<MkRouter> {
@@ -34,7 +34,7 @@ impl<MkRouter: Server + Sync> Clone for BatchServer<MkRouter> {
         Self {
             disable_ratelimits: self.disable_ratelimits,
             mk_router: self.mk_router.clone(),
-            router: self.mk_router.make_router().build(),
+            router: self.mk_router.make_routes().build(),
         }
     }
 }
@@ -43,7 +43,7 @@ impl<MkRouter: Server + Sync> BatchServer<MkRouter> {
     pub fn new(deps: &Dependencies, mk_router: MkRouter) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            router: mk_router.make_router().build(),
+            router: mk_router.make_routes().build(),
             mk_router: Arc::new(mk_router),
         }
     }
@@ -58,7 +58,7 @@ impl<MkRouter: Server + Sync> BatchServer<MkRouter> {
             body: Bytes,
             endpoint: &str,
             auth_header: &Option<HeaderValue>,
-            service: &mut Router,
+            service: &mut RoutesFinalized,
         ) -> Result<Bytes, HrpcServerError> {
             let mut req = http::Request::builder()
                 .header(header::CONTENT_TYPE, unsafe {

@@ -13,8 +13,8 @@ use harmony_rust_sdk::api::{
         hrpc::{
             body::BoxBody,
             encode_protobuf_message,
-            exports::http::{self, uri::InvalidUri as UrlParseError},
-            server::{error::CustomError, StatusCode},
+            exports::http::{self, uri::InvalidUri as UrlParseError, StatusCode},
+            server::error::CustomError,
         },
         prost::bytes::Bytes,
     },
