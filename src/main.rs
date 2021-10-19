@@ -12,19 +12,15 @@ use harmony_rust_sdk::api::{
     chat::{chat_service_server::ChatServiceServer, ChannelKind, Permission},
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
-        body::box_body,
         combine_services,
-        exports::tower_http::{
-            classify::StatusInRangeAsFailures, map_response_body::MapResponseBodyLayer,
-            trace::TraceLayer,
-        },
-        server::{HrpcLayer, Server},
+        server::{utils::recommended_layers as hrpc_recommended_layers, Server},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
     voice::voice_service_server::VoiceServiceServer,
 };
+use hyper::header::{self, HeaderName};
 use scherzo::{
     config::DbConfig,
     db::{
@@ -45,7 +41,6 @@ use scherzo::{
         Dependencies,
     },
 };
-use tower::ServiceBuilder;
 use tracing::{debug, error, info, info_span, warn, Level};
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -130,7 +125,9 @@ pub async fn run(filter_level: Level, db_path: String) {
         .add_directive("sled=error".parse().unwrap())
         .add_directive("hyper=error".parse().unwrap());
     #[cfg(feature = "console")]
-    let filter = filter.add_directive("tokio=trace".parse().unwrap());
+    let filter = filter
+        .add_directive("tokio=trace".parse().unwrap())
+        .add_directive("runtime=trace".parse().unwrap());
     #[cfg(feature = "console")]
     let (console_layer, console_server) = console_subscriber::TasksLayer::new();
 
@@ -279,14 +276,8 @@ pub async fn run(filter_level: Level, db_path: String) {
     //let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let server = combine_services!(make_service, batch, about, media).layer(HrpcLayer::new(
-        ServiceBuilder::new()
-            .layer(MapResponseBodyLayer::new(box_body))
-            .layer(TraceLayer::new(
-                StatusInRangeAsFailures::new(400..=599).into_make_classifier(),
-            ))
-            .into_inner(),
-    ));
+    let server = combine_services!(make_service, batch, about, media)
+        .layer(hrpc_recommended_layers(Some(filter_auth)));
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -347,4 +338,8 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::
         }
         Ok(())
     })
+}
+
+fn filter_auth(h: &HeaderName) -> bool {
+    h != header::AUTHORIZATION
 }
