@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixCargoIntegration = {
-      url = "github:yusdacra/nix-cargo-integration/fix/devshell-attrs";
+      url = "github:yusdacra/nix-cargo-integration/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakeCompat = {
@@ -21,7 +21,22 @@
         };
       };
       shell = common: prev: {
-        packages = prev.packages ++ [ common.pkgs.musl.dev ];
+        packages = prev.packages ++ [
+          common.pkgs.musl.dev
+          (common.lib.buildCrate {
+            memberName = "tokio-console";
+            defaultCrateOverrides = (common.lib.removePropagatedEnv common.crateOverrides) // {
+              tokio-console = _: {
+                CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
+              };
+            };
+            root = builtins.fetchGit {
+              url = "https://github.com/tokio-rs/console.git";
+              rev = "3d80c4b68b97db9c20cb496a2e3df0ccc1336b38";
+              ref = "main";
+            };
+          })
+        ];
         commands = prev.commands ++ [
           {
             name = "generate-cert";
