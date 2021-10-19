@@ -48,7 +48,11 @@ notice = "warn"
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 ignore = [
-    #"RUSTSEC-0000-0000",
+    # xml5ever uses time 0.1.43, which in turn is used by markup5ever_rcdom, which is used by webpage
+    # TODO(yusdacra): open issues for all of these
+    "RUSTSEC-2020-0071",
+    # chrono advisory, will be fixed when it is fixed (tracing-subscriber uses chrono)
+    "RUSTSEC-2020-0159",
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
