@@ -46,10 +46,6 @@
               mv localhost+2-key.pem key.pem
             '';
           }
-          {
-            name = "run-with-console";
-            command = ''RUSTFLAGS="--cfg tokio_unstable" cargo r --features console'';
-          }
         ];
       };
     };

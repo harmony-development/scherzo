@@ -8,7 +8,7 @@ authors = ["Yusuf Bera Ertan <y.bera003.06@protonmail.com>"]
 edition = "2018"
 
 [features]
-default = ["sled"]
+default = ["sled", "console"]
 console = ["console-subscriber", "tokio/tracing"]
 
 [dependencies]

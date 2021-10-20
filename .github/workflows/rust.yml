@@ -48,15 +48,15 @@ jobs:
     - name: Clippy
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--target x86_64-unknown-linux-musl"
+        args: "--target x86_64-unknown-linux-musl --no-default-features --features sled"
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
     - name: Test
-      run: cargo test --target x86_64-unknown-linux-musl
+      run: cargo test --target x86_64-unknown-linux-musl --no-default-features --features sled
 
     - name: Build
-      run: cargo build --release --target x86_64-unknown-linux-musl
+      run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features sled
     
     - name: Pack with upx
       run: upx target/x86_64-unknown-linux-musl/release/scherzo
