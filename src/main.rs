@@ -42,7 +42,7 @@ use scherzo::{
     },
 };
 use tracing::{debug, error, info, info_span, warn, Level};
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
 // TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
@@ -119,6 +119,12 @@ pub async fn run(filter_level: Level, db_path: String) {
         fmt::layer().event_format(AdminLogChannelLogger::empty()),
     );
     let term_logger = fmt::layer();
+    let combined_logger = term_logger.and_then(wrapped_admin_logger).with_filter(
+        Targets::default()
+            .with_target("tokio", Level::ERROR)
+            .with_default(filter_level),
+    );
+
     let filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive(filter_level.into())
         .add_directive("rustyline=error".parse().unwrap())
@@ -134,15 +140,13 @@ pub async fn run(filter_level: Level, db_path: String) {
     #[cfg(not(feature = "console"))]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
-        .with(term_logger)
-        .with(wrapped_admin_logger);
+        .with(combined_logger);
 
     #[cfg(feature = "console")]
     let base_loggers = tracing_subscriber::registry()
         .with(filter)
         .with(console_layer)
-        .with(term_logger)
-        .with(wrapped_admin_logger);
+        .with(combined_logger);
 
     base_loggers.init();
 
