@@ -41,7 +41,7 @@ use scherzo::{
         Dependencies,
     },
 };
-use tracing::{debug, error, info, info_span, warn, Level};
+use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
 // TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
@@ -49,48 +49,66 @@ const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
 
 #[tokio::main]
 async fn main() {
-    let mut filter_level = Level::INFO;
     let mut db_path = "db".to_string();
+    let mut console = true;
+    let mut level_filter = Level::INFO;
 
     for (index, arg) in std::env::args().enumerate() {
         match arg.as_str() {
-            "-v" | "--verbose" => filter_level = Level::TRACE,
-            "-d" | "--debug" => filter_level = Level::DEBUG,
-            "-q" | "--quiet" => filter_level = Level::WARN,
-            "-qq" => filter_level = Level::ERROR,
             "--db" => {
                 if let Some(path) = std::env::args().nth(index + 1) {
                     db_path = path;
                 }
             }
+            "--disable-console" => {
+                console = false;
+            }
+            "-d" | "--debug" => level_filter = Level::DEBUG,
+            "-v" | "--verbose" => level_filter = Level::TRACE,
+            "-q" | "--quiet" => level_filter = Level::ERROR,
             _ => {}
         }
     }
 
-    run(filter_level, db_path).await
+    run(db_path, console, level_filter).await
 }
 
 #[cfg(feature = "sled")]
 fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
     db_path: P,
     db_config: DbConfig,
+) -> Result<Box<dyn Db>, String> {
+    let result = sled::Config::new()
+        .use_compression(true)
+        .path(db_path)
+        .cache_capacity(db_config.db_cache_limit)
+        .mode(
+            db_config
+                .sled_throughput_at_storage_cost
+                .then(|| sled::Mode::HighThroughput)
+                .unwrap_or(sled::Mode::LowSpace),
+        )
+        .open()
+        .and_then(|db| db.verify_integrity().map(|_| db));
+
+    match result {
+        Ok(db) => Ok(Box::new(db)),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
+    _db_path: P,
+    _db_config: DbConfig,
 ) -> Box<dyn Db> {
-    let span = info_span!("db", path = %db_path);
-    let db = span.in_scope(|| {
+    let span = info_span!("scherzo::db", path = %_db_path);
+    span.in_scope(|| {
         info!("initializing database");
 
-        let db_result = sled::Config::new()
-            .use_compression(true)
-            .path(db_path)
-            .cache_capacity(db_config.db_cache_limit)
-            .mode(
-                db_config
-                    .sled_throughput_at_storage_cost
-                    .then(|| sled::Mode::HighThroughput)
-                    .unwrap_or(sled::Mode::LowSpace),
-            )
-            .open()
-            .and_then(|db| db.verify_integrity().map(|_| db));
+        #[cfg(feature = "sled")]
+        let db_result = open_sled(_db_path, _db_config);
+        #[cfg(not(any(feature = "sled")))]
+        let db_result = Ok(Box::new(scherzo::db::noop::NoopDb));
 
         match db_result {
             Ok(db) => db,
@@ -100,60 +118,57 @@ fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
                 std::process::exit(1);
             }
         }
-    });
-    Box::new(db)
+    })
 }
 
-fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
-    _db_path: P,
-    _db_config: DbConfig,
-) -> Box<dyn Db> {
-    #[cfg(feature = "sled")]
-    return open_sled(_db_path, _db_config);
-    #[cfg(not(any(feature = "sled")))]
-    return Box::new(scherzo::db::noop::NoopDb);
-}
+pub async fn run(db_path: String, console: bool, level_filter: Level) {
+    let (combined_logger, admin_logger_handle) = {
+        let (admin_logger, admin_logger_handle) = tracing_subscriber::reload::Layer::new(
+            fmt::layer().event_format(AdminLogChannelLogger::empty()),
+        );
+        let term_logger = fmt::layer();
 
-pub async fn run(filter_level: Level, db_path: String) {
-    let (wrapped_admin_logger, admin_logger_handle) = tracing_subscriber::reload::Layer::new(
-        fmt::layer().event_format(AdminLogChannelLogger::empty()),
-    );
-    let term_logger = fmt::layer();
-    let combined_logger = term_logger.and_then(wrapped_admin_logger).with_filter(
-        Targets::default()
-            .with_target("tokio", Level::ERROR)
-            .with_default(filter_level),
-    );
+        (
+            term_logger.and_then(admin_logger).with_filter(
+                Targets::default()
+                    .with_targets([
+                        ("rustyline", Level::ERROR),
+                        ("sled", Level::ERROR),
+                        ("hyper", Level::ERROR),
+                        ("tokio", Level::DEBUG),
+                        ("runtime", Level::DEBUG),
+                        ("console_subscriber::aggregator", Level::DEBUG),
+                    ])
+                    .with_default(level_filter),
+            ),
+            admin_logger_handle,
+        )
+    };
 
-    let filter = tracing_subscriber::EnvFilter::from_default_env()
-        .add_directive(filter_level.into())
-        .add_directive("rustyline=error".parse().unwrap())
-        .add_directive("sled=error".parse().unwrap())
-        .add_directive("hyper=error".parse().unwrap());
-    #[cfg(feature = "console")]
-    let filter = filter
-        .add_directive("tokio=trace".parse().unwrap())
-        .add_directive("runtime=trace".parse().unwrap());
-    #[cfg(feature = "console")]
-    let (console_layer, console_server) = console_subscriber::TasksLayer::new();
+    let (console_serve_tx, console_serve_rx) = oneshot::channel::<()>();
+    let console_layer = if console {
+        let (console_layer, console_server) = console_subscriber::TasksLayer::new();
+        tokio::spawn(async move {
+            if console_serve_rx.await.is_ok() {
+                info_span!("scherzo::tokio_console").in_scope(|| info!("spawning console server"));
+                console_server.serve().await.unwrap();
+            }
+        });
 
-    #[cfg(not(feature = "console"))]
-    let base_loggers = tracing_subscriber::registry()
-        .with(filter)
-        .with(combined_logger);
+        Some(console_layer.with_filter(
+            Targets::default().with_targets([("tokio", Level::TRACE), ("runtime", Level::TRACE)]),
+        ))
+    } else {
+        None
+    };
 
-    #[cfg(feature = "console")]
-    let base_loggers = tracing_subscriber::registry()
-        .with(filter)
+    tracing_subscriber::registry()
         .with(console_layer)
-        .with(combined_logger);
-
-    base_loggers.init();
+        .with(combined_logger)
+        .init();
+    let _ = console_serve_tx.send(());
 
     info!("logging initialized");
-
-    #[cfg(feature = "console")]
-    tokio::spawn(console_server.serve());
 
     use scherzo::config::Config;
 
@@ -281,7 +296,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let about = about::producer(deps.clone());
 
     let server = combine_services!(make_service, batch, about, media)
-        .layer(hrpc_recommended_layers(Some(filter_auth)));
+        .layer(|| hrpc_recommended_layers(filter_auth));
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
@@ -290,7 +305,7 @@ pub async fn run(filter_level: Level, db_path: String) {
     let stt = deps.sync_tree.clone();
 
     std::thread::spawn(move || {
-        let span = info_span!("db_validate");
+        let span = info_span!("scherzo::db");
         let _guard = span.enter();
         info!("database integrity verification task is running");
         loop {
@@ -317,16 +332,21 @@ pub async fn run(filter_level: Level, db_path: String) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let spawn_handle = if let Some(_tls_config) = deps.config.tls.as_ref() {
+    let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
     } else {
-        tokio::spawn(server.serve(addr))
+        server.serve(addr).instrument(info_span!("scherzo::serve"))
     };
 
-    spawn_handle.await.unwrap().unwrap();
+    tokio::task::Builder::new()
+        .name("scherzo::serve")
+        .spawn(serve)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
-use tokio::fs;
+use tokio::{fs, sync::oneshot};
 
 fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::io::Result<()>>>> {
     Box::pin(async move {

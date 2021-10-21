@@ -203,7 +203,7 @@ impl Server for MediaProducer {
 
             async move {
                 if let Err(err) = auth_res {
-                    return Ok(err.into_response());
+                    return Ok(err.as_error_response());
                 }
                 let boundary_res = request
                     .headers()

@@ -17,10 +17,7 @@ use harmony_rust_sdk::api::{
     exports::hrpc::{
         bail_result,
         body::BoxBody,
-        server::{
-            error::{ServerError as HrpcServerError, SocketError},
-            socket::Socket,
-        },
+        server::{error::ServerError as HrpcServerError, socket::Socket},
         Request,
     },
     harmonytypes::{item_position, Empty, ItemPosition, Metadata},
@@ -180,18 +177,11 @@ impl ChatServer {
                 .await
                 .map_or_else(
                     |err| {
-                        if !matches!(
-                            err,
-                            HrpcServerError::SocketError(
-                                SocketError::ConnectionClosed | SocketError::AlreadyClosed
-                            )
-                        ) {
-                            tracing::error!(
-                                "couldnt write to stream events socket for user {}: {}",
-                                user_id,
-                                err
-                            );
-                        }
+                        tracing::error!(
+                            "couldnt write to stream events socket for user {}: {}",
+                            user_id,
+                            err
+                        );
                         true
                     },
                     |_| false,

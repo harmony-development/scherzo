@@ -267,9 +267,9 @@ dependencies = [
 
 [[package]]
 name = "bumpalo"
-version = "3.7.1"
+version = "3.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9df67f7bf9ef8498769f994239c45613ef0c5899415fb58e9add412d2c1a538"
+checksum = "8f1e260c3a9040a7c19a12468758f4c16f31a81a1fe087482be9570ec864bb6c"
 
 [[package]]
 name = "bytecheck"
@@ -931,7 +931,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#b59c4ae2ded0e909dd5fefb307c4e3b4f140543a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#74fa8a5efb502d0bb2bc0de785fe514c726039cb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -941,7 +941,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#b59c4ae2ded0e909dd5fefb307c4e3b4f140543a"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#74fa8a5efb502d0bb2bc0de785fe514c726039cb"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -1000,9 +1000,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.22.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e2f7d5f019c8a2f4fb770390dd361bf315272049dd8ee3aa7501a635d13927"
+checksum = "20781003ce77056d91cebcac47f07403737d333a5f6c6dda41187b09d331db28"
 dependencies = [
  "ahash",
  "async-trait",
@@ -1011,6 +1011,7 @@ dependencies = [
  "dashmap",
  "flume",
  "futures-util",
+ "hrpc-build",
  "http",
  "http-body",
  "hyper",
@@ -1018,6 +1019,7 @@ dependencies = [
  "matchit",
  "parking_lot",
  "prost 0.9.0",
+ "prost-build 0.9.0",
  "rustls-native-certs",
  "sha-1",
  "tokio",
@@ -1030,9 +1032,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.22.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5b61554ed41144ee387d08a92b66e3d3455da1c1be2a812f6bcfb95de9754da"
+checksum = "9ab37d928615c3038977966591e0dd7d6eac1c9a41a47365c7be32fbc4fe429e"
 dependencies = [
  "proc-macro2",
  "prost-build 0.9.0",
@@ -2717,9 +2719,9 @@ dependencies = [
 
 [[package]]
 name = "tower"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d15a6b60cdff0cb039d81d3b37f8bc3d7e53dca09069aae3ef2502ca4834fe30"
+checksum = "c00e500fff5fa1131c866b246041a6bf96da9c965f8fe4128cb1421f23e93c00"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -3183,9 +3185,9 @@ checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
 
 [[package]]
 name = "xml5ever"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b1b52e6e8614d4a58b8e70cf51ec0cc21b256ad8206708bcff8139b5bbd6a59"
+checksum = "9234163818fd8e2418fcde330655e757900d4236acd8cc70fef345ef91f6d865"
 dependencies = [
  "log",
  "mac",
