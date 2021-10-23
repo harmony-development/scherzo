@@ -1,11 +1,12 @@
 [workspace]
 members = ["scherzo_derive"]
+resolver = "2"
 
 [package]
 name = "scherzo"
 version = "0.1.0"
 authors = ["Yusuf Bera Ertan <y.bera003.06@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 default = ["sled"]
