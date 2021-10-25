@@ -23,7 +23,7 @@
       shell = common: prev: {
         packages = prev.packages ++ [
           common.pkgs.musl.dev
-          (common.lib.buildCrate {
+          /*(common.lib.buildCrate {
             memberName = "tokio-console";
             defaultCrateOverrides = (common.lib.removePropagatedEnv common.crateOverrides) // {
               tokio-console = _: {
@@ -35,7 +35,7 @@
               rev = "3d80c4b68b97db9c20cb496a2e3df0ccc1336b38";
               ref = "main";
             };
-          })
+          })*/
         ];
         commands = prev.commands ++ [
           {
