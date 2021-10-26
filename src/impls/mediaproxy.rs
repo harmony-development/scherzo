@@ -8,13 +8,40 @@ use std::time::Instant;
 
 use super::{get_mimetype, http, prelude::*, HttpClient};
 
+fn site_metadata_from_html(html: &HTML) -> SiteMetadata {
+    SiteMetadata {
+        page_title: html.title.clone().unwrap_or_default(),
+        description: html.description.clone().unwrap_or_default(),
+        url: html.url.clone().unwrap_or_default(),
+        image: html
+            .opengraph
+            .images
+            .last()
+            .map(|og| og.url.clone())
+            .unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
 #[derive(Clone)]
 enum Metadata {
-    Site(HTML),
+    Site(Arc<HTML>),
     Media {
         filename: SmolStr,
         mimetype: SmolStr,
     },
+}
+
+impl From<Metadata> for Data {
+    fn from(metadata: Metadata) -> Self {
+        match metadata {
+            Metadata::Site(html) => Data::IsSite(site_metadata_from_html(&html)),
+            Metadata::Media { filename, mimetype } => Data::IsMedia(MediaMetadata {
+                mimetype: mimetype.into(),
+                filename: filename.into(),
+            }),
+        }
+    }
 }
 
 struct TimedCacheValue<T> {
@@ -89,7 +116,7 @@ impl MediaproxyServer {
             let body = hyper::body::aggregate(response.into_body()).await?;
             let html = String::from_utf8_lossy(body.chunk());
             let html = webpage::HTML::from_string(html.into(), Some(raw_url))?;
-            Metadata::Site(html)
+            Metadata::Site(Arc::new(html))
         } else {
             let filename = response
                 .headers()
@@ -135,24 +162,7 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
 
         let FetchLinkMetadataRequest { url } = request.into_message().await?;
 
-        let data = match self.fetch_metadata(url).await? {
-            Metadata::Site(mut html) => Data::IsSite(SiteMetadata {
-                page_title: html.title.unwrap_or_default(),
-                description: html.description.unwrap_or_default(),
-                url: html.url.unwrap_or_default(),
-                image: html
-                    .opengraph
-                    .images
-                    .pop()
-                    .map(|og| og.url)
-                    .unwrap_or_default(),
-                ..Default::default()
-            }),
-            Metadata::Media { filename, mimetype } => Data::IsMedia(MediaMetadata {
-                mimetype: mimetype.into(),
-                filename: filename.into(),
-            }),
-        };
+        let data = self.fetch_metadata(url).await?.into();
 
         Ok((FetchLinkMetadataResponse { data: Some(data) }).into_response())
     }
@@ -170,20 +180,15 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
         let data = self.fetch_metadata(url).await?;
 
         let msg = if let Metadata::Site(html) = data {
-            let metadata = SiteMetadata {
-                page_title: html.title.unwrap_or_default(),
-                description: html.description.unwrap_or_default(),
-                url: html.url.unwrap_or_default(),
-                ..Default::default()
-            };
+            let metadata = site_metadata_from_html(&html);
 
             InstantViewResponse {
-                content: html.text_content,
+                content: html.text_content.clone(),
                 is_valid: true,
                 metadata: Some(metadata),
             }
         } else {
-            InstantViewResponse::default()
+            InstantViewResponse::default().with_is_valid(false)
         };
 
         Ok(msg.into_response())

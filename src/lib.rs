@@ -150,6 +150,7 @@ pub enum ServerError {
     WebRTCError(anyhow::Error),
     MultipartError(multer::Error),
     MustNotBeLastOwner,
+    ContentCantBeSentByUser,
 }
 
 impl StdError for ServerError {
@@ -315,6 +316,9 @@ impl Display for ServerError {
             ServerError::MustNotBeLastOwner => {
                 f.write_str("must not be the last owner left in the guild")
             }
+            ServerError::ContentCantBeSentByUser => {
+                f.write_str("this content type cannot be used by a regular user")
+            }
         }
     }
 }
@@ -374,7 +378,8 @@ impl CustomError for ServerError {
             | ServerError::MultipartError(
                 multer::Error::StreamSizeExceeded { .. } | multer::Error::UnknownField { .. },
             )
-            | ServerError::MustNotBeLastOwner => StatusCode::BAD_REQUEST,
+            | ServerError::MustNotBeLastOwner
+            | ServerError::ContentCantBeSentByUser => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::IoError(_)
             | ServerError::InternalServerError
@@ -469,6 +474,7 @@ impl CustomError for ServerError {
             ServerError::TooManyBatchedRequests => "h.too-many-batches",
             ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
             ServerError::MustNotBeLastOwner => "h.last-owner-in-guild",
+            ServerError::ContentCantBeSentByUser => "h.content-not-allowed-for-user",
         };
 
         Cow::Borrowed(identifier)

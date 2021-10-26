@@ -228,6 +228,8 @@ impl SyncServer {
                     self.chat_tree
                         .add_guild_to_guild_list(user_id, guild_id, host)?;
                 }
+                Kind::UserInvited(_) => todo!(),
+                Kind::UserRejectedInvite(_) => todo!(),
             }
         }
         Ok(())

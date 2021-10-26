@@ -624,8 +624,8 @@ impl chat_service_server::ChatService for ChatServer {
 
         let UpdateGuildInformationRequest {
             guild_id,
-            new_guild_name,
-            new_guild_picture,
+            new_name,
+            new_picture,
             new_metadata,
         } = request.into_message().await?;
 
@@ -641,11 +641,11 @@ impl chat_service_server::ChatService for ChatServer {
             false,
         )?;
 
-        if let Some(new_guild_name) = new_guild_name.clone() {
-            guild_info.name = new_guild_name;
+        if let Some(new_name) = new_name.clone() {
+            guild_info.name = new_name;
         }
-        if let Some(new_guild_picture) = new_guild_picture.clone() {
-            guild_info.picture = Some(new_guild_picture);
+        if let Some(new_picture) = new_picture.clone() {
+            guild_info.picture = Some(new_picture);
         }
         if let Some(new_metadata) = new_metadata.clone() {
             guild_info.metadata = Some(new_metadata);
@@ -657,8 +657,8 @@ impl chat_service_server::ChatService for ChatServer {
             EventSub::Guild(guild_id),
             stream_event::Event::EditedGuild(stream_event::GuildUpdated {
                 guild_id,
-                new_name: new_guild_name,
-                new_picture: new_guild_picture,
+                new_name,
+                new_picture,
                 new_metadata,
             }),
             None,
@@ -2012,6 +2012,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
+    #[rate(10, 5)]
     async fn add_reaction(
         &mut self,
         request: Request<AddReactionRequest>,
@@ -2044,6 +2045,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((AddReactionResponse {}).into_response())
     }
 
+    #[rate(10, 5)]
     async fn remove_reaction(
         &mut self,
         request: Request<RemoveReactionRequest>,
@@ -2078,6 +2080,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((RemoveReactionResponse {}).into_response())
     }
 
+    #[rate(2, 60)]
     async fn grant_ownership(
         &mut self,
         request: Request<GrantOwnershipRequest>,
@@ -2102,6 +2105,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((GrantOwnershipResponse {}).into_response())
     }
 
+    #[rate(2, 60)]
     async fn give_up_ownership(
         &mut self,
         request: Request<GiveUpOwnershipRequest>,
@@ -2125,6 +2129,55 @@ impl chat_service_server::ChatService for ChatServer {
         }
 
         Ok((GiveUpOwnershipResponse {}).into_response())
+    }
+
+    async fn create_room(
+        &mut self,
+        request: Request<CreateRoomRequest>,
+    ) -> ServerResult<Response<CreateRoomResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn create_direct_message(
+        &mut self,
+        request: Request<CreateDirectMessageRequest>,
+    ) -> ServerResult<Response<CreateDirectMessageResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn upgrade_room_to_guild(
+        &mut self,
+        request: Request<v1::UpgradeRoomToGuildRequest>,
+    ) -> ServerResult<Response<v1::UpgradeRoomToGuildResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn invite_user_to_guild(
+        &mut self,
+        request: Request<v1::InviteUserToGuildRequest>,
+    ) -> ServerResult<Response<v1::InviteUserToGuildResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn get_pending_invites(
+        &mut self,
+        request: Request<v1::GetPendingInvitesRequest>,
+    ) -> ServerResult<Response<v1::GetPendingInvitesResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn reject_pending_invite(
+        &mut self,
+        request: Request<v1::RejectPendingInviteRequest>,
+    ) -> ServerResult<Response<v1::RejectPendingInviteResponse>> {
+        Err(ServerError::NotImplemented.into())
+    }
+
+    async fn ignore_pending_invite(
+        &mut self,
+        request: Request<v1::IgnorePendingInviteRequest>,
+    ) -> ServerResult<Response<v1::IgnorePendingInviteResponse>> {
+        Err(ServerError::NotImplemented.into())
     }
 }
 
@@ -2752,6 +2805,9 @@ impl ChatTree {
             picture,
             owner_ids: vec![user_id],
             metadata,
+            kind: Some(GuildKind {
+                kind: Some(guild_kind::Kind::new_normal(guild_kind::Normal::new())),
+            }),
         };
         let buf = rkyv_ser(&guild);
 
@@ -3027,6 +3083,8 @@ impl ChatTree {
         media_root: &Path,
         host: &str,
     ) -> Result<Content, ServerError> {
+        use content::Content as MsgContent;
+
         let inner_content = content.and_then(|c| c.content);
         let content = if let Some(content) = inner_content {
             let content = match content {
@@ -3095,9 +3153,7 @@ impl ChatTree {
                             } else {
                                 let (_, _, data, _) = get_file_full(media_root, id).await?;
 
-                                if image::guess_format(&data).is_err() {
-                                    return Err(ServerError::NotAnImage);
-                                }
+                                image::guess_format(&data).map_err(|_| ServerError::NotAnImage)?;
 
                                 let image = image::load_from_memory(&data)
                                     .map_err(|_| ServerError::InternalServerError)?;
@@ -3211,6 +3267,11 @@ impl ChatTree {
                         return Err(ServerError::MessageContentCantBeEmpty);
                     }
                     content::Content::EmbedMessage(embed)
+                }
+                MsgContent::InviteAccepted(_)
+                | MsgContent::InviteRejected(_)
+                | MsgContent::RoomUpgradedToGuild(_) => {
+                    return Err(ServerError::ContentCantBeSentByUser)
                 }
             };
             Content {
