@@ -58,12 +58,28 @@ impl Default for Config {
     }
 }
 
-#[derive(Default, Debug, Clone, Deserialize, Serialize)]
+const fn max_concurrent_requests_default() -> usize {
+    512
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PolicyConfig {
     #[serde(default)]
     pub disable_ratelimits: bool,
     #[serde(default)]
     pub disable_registration: bool,
+    #[serde(default = "max_concurrent_requests_default")]
+    pub max_concurrent_requests: usize,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            disable_ratelimits: false,
+            disable_registration: false,
+            max_concurrent_requests: max_concurrent_requests_default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

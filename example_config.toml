@@ -11,6 +11,9 @@ port = 2289
 disable_ratelimits = false
 # Whether to disable registration and only allow it using admin generated tokens.
 disable_registration = false
+# Maximum amount of requests that should be processed concurrently.
+# Note: you'll want to increase this if your server has 100+ members.
+max_concurrent_requests = 512
 
 [db]
 # Path to a directory to put db backups in.

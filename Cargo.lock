@@ -1001,8 +1001,7 @@ dependencies = [
 [[package]]
 name = "hrpc"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20781003ce77056d91cebcac47f07403737d333a5f6c6dda41187b09d331db28"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=master#4c31168d42db344f731cd76f7e5cf000d715d37f"
 dependencies = [
  "ahash",
  "async-trait",
@@ -1033,8 +1032,7 @@ dependencies = [
 [[package]]
 name = "hrpc-build"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ab37d928615c3038977966591e0dd7d6eac1c9a41a47365c7be32fbc4fe429e"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=master#4c31168d42db344f731cd76f7e5cf000d715d37f"
 dependencies = [
  "proc-macro2",
  "prost-build 0.9.0",

@@ -41,6 +41,7 @@ use scherzo::{
         Dependencies,
     },
 };
+use tower::ServiceBuilder;
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
@@ -295,8 +296,14 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     //let against = against::producer();
     let about = about::producer(deps.clone());
 
-    let server = combine_services!(make_service, batch, about, media)
-        .layer(|| hrpc_recommended_layers(filter_auth));
+    let server = combine_services!(make_service, batch, about, media).layer(
+        ServiceBuilder::new()
+            .layer(hrpc_recommended_layers(filter_auth))
+            .layer(tower::limit::ConcurrencyLimitLayer::new(
+                deps.config.policy.max_concurrent_requests,
+            ))
+            .into_inner(),
+    );
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
