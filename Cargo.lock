@@ -374,7 +374,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#54d6559c231571051bc73ab448fa19152c45e687"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#31704326f2e8665a7f062ceca84bf8d843007017"
 dependencies = [
  "prost 0.8.0",
  "prost-types 0.8.0",
@@ -386,7 +386,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#54d6559c231571051bc73ab448fa19152c45e687"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#31704326f2e8665a7f062ceca84bf8d843007017"
 dependencies = [
  "console-api",
  "futures",
@@ -400,7 +400,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-core",
- "tracing-subscriber",
+ "tracing-subscriber 0.3.1",
 ]
 
 [[package]]
@@ -2160,7 +2160,7 @@ dependencies = [
  "toml",
  "tower",
  "tracing",
- "tracing-subscriber",
+ "tracing-subscriber 0.2.25",
  "triomphe",
  "urlencoding",
  "webpage",
@@ -2801,6 +2801,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80a4ddde70311d8da398062ecf6fc2c309337de6b0f77d6c27aff8d53f6fca52"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
 ]
 
 [[package]]
