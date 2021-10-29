@@ -69,8 +69,8 @@ impl VoiceServer {
     }
 }
 
-#[async_trait]
 impl VoiceService for VoiceServer {
+    #[handler]
     async fn stream_message(
         &mut self,
         request: Request<()>,

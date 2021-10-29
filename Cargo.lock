@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#aa3b4c139f1803e531ed0449af4ba7bb4b2e3ba8"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#5639e39bce7f5ffa0467fc26161b6466afb9da1b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -916,7 +916,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#aa3b4c139f1803e531ed0449af4ba7bb4b2e3ba8"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#5639e39bce7f5ffa0467fc26161b6466afb9da1b"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -975,18 +975,17 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b627ab245087bc1b73dca86b05c1e5ae443c05059dff0dccb68ab49bfe086040"
+version = "0.26.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#ec4c1ac67e6c0764c220355175bd64df55a07e68"
 dependencies = [
  "ahash",
- "async-trait",
  "base64",
  "bytes",
  "dashmap",
  "flume",
  "futures-util",
  "hrpc-build",
+ "hrpc-proc-macro",
  "http",
  "http-body",
  "hyper",
@@ -1007,15 +1006,19 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0c228bf1bd29d9441aa80a54e099a14c5081c8e697c6c4a25c3a48d465d9606"
+version = "0.26.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#ec4c1ac67e6c0764c220355175bd64df55a07e68"
 dependencies = [
  "proc-macro2",
  "prost-build 0.9.0",
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "hrpc-proc-macro"
+version = "0.26.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#ec4c1ac67e6c0764c220355175bd64df55a07e68"
 
 [[package]]
 name = "html5ever"
@@ -1310,8 +1313,7 @@ checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 [[package]]
 name = "matchit"
 version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58b6f41fdfbec185dd3dff58b51e323f5bc61692c0de38419a957b0dcfccca3c"
+source = "git+https://github.com/yusdacra/matchit.git?branch=feat/values#253421dacef7cb57703b88c6d7d6c242c91fed94"
 
 [[package]]
 name = "mediasoup"

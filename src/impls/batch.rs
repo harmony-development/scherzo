@@ -121,9 +121,9 @@ impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
     }
 }
 
-#[async_trait]
 impl<MkRouter: Service + Sync> BatchService for BatchServer<MkRouter> {
     #[rate(5, 5)]
+    #[handler]
     async fn batch(
         &mut self,
         mut request: Request<BatchRequest>,
@@ -151,6 +151,7 @@ impl<MkRouter: Service + Sync> BatchService for BatchServer<MkRouter> {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn batch_same(
         &mut self,
         mut request: Request<BatchSameRequest>,

@@ -205,9 +205,9 @@ impl AuthServer {
     }
 }
 
-#[async_trait]
 impl auth_service_server::AuthService for AuthServer {
     #[rate(20, 5)]
+    #[handler]
     async fn check_logged_in(
         &mut self,
         request: Request<CheckLoggedInRequest>,
@@ -218,6 +218,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(3, 1)]
+    #[handler]
     async fn federate(
         &mut self,
         request: Request<FederateRequest>,
@@ -245,6 +246,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(1, 5)]
+    #[handler]
     async fn login_federated(
         &mut self,
         request: Request<LoginFederatedRequest>,
@@ -321,6 +323,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(1, 5)]
+    #[handler]
     async fn key(&mut self, _: Request<KeyRequest>) -> ServerResult<Response<KeyResponse>> {
         let keys_manager = self.keys_manager()?;
         let key = keys_manager.get_own_key().await?;
@@ -339,6 +342,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn stream_steps(
         &mut self,
         _request: Request<()>,
@@ -419,6 +423,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn begin_auth(
         &mut self,
         _: Request<BeginAuthRequest>,
@@ -452,6 +457,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn next_step(
         &mut self,
         req: Request<NextStepRequest>,
@@ -819,6 +825,7 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn step_back(
         &mut self,
         req: Request<StepBackRequest>,

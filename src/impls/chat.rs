@@ -348,9 +348,9 @@ impl ChatServer {
     }
 }
 
-#[async_trait]
 impl chat_service_server::ChatService for ChatServer {
     #[rate(1, 5)]
+    #[handler]
     async fn create_guild(
         &mut self,
         request: Request<CreateGuildRequest>,
@@ -378,6 +378,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn create_invite(
         &mut self,
         request: Request<CreateInviteRequest>,
@@ -402,6 +403,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn create_channel(
         &mut self,
         request: Request<CreateChannelRequest>,
@@ -452,6 +454,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(15, 5)]
+    #[handler]
     async fn get_guild_list(
         &mut self,
         request: Request<GetGuildListRequest>,
@@ -487,6 +490,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(15, 5)]
+    #[handler]
     async fn get_guild(
         &mut self,
         request: Request<GetGuildRequest>,
@@ -504,6 +508,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(15, 5)]
+    #[handler]
     async fn get_guild_invites(
         &mut self,
         request: Request<GetGuildInvitesRequest>,
@@ -523,6 +528,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(15, 5)]
+    #[handler]
     async fn get_guild_members(
         &mut self,
         request: Request<GetGuildMembersRequest>,
@@ -540,6 +546,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(15, 5)]
+    #[handler]
     async fn get_guild_channels(
         &mut self,
         request: Request<GetGuildChannelsRequest>,
@@ -557,6 +564,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_channel_messages(
         &mut self,
         request: Request<GetChannelMessagesRequest>,
@@ -589,6 +597,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_message(
         &mut self,
         request: Request<GetMessageRequest>,
@@ -619,6 +628,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn update_guild_information(
         &mut self,
         request: Request<UpdateGuildInformationRequest>,
@@ -673,6 +683,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn update_channel_information(
         &mut self,
         request: Request<UpdateChannelInformationRequest>,
@@ -738,6 +749,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn update_channel_order(
         &mut self,
         request: Request<UpdateChannelOrderRequest>,
@@ -789,6 +801,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(1, 5)]
+    #[handler]
     async fn update_all_channel_order(
         &mut self,
         request: Request<UpdateAllChannelOrderRequest>,
@@ -845,6 +858,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn update_message_text(
         &mut self,
         request: Request<UpdateMessageTextRequest>,
@@ -912,6 +926,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(1, 15)]
+    #[handler]
     async fn delete_guild(
         &mut self,
         request: Request<DeleteGuildRequest>,
@@ -983,6 +998,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn delete_invite(
         &mut self,
         request: Request<DeleteInviteRequest>,
@@ -1008,6 +1024,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn delete_channel(
         &mut self,
         request: Request<DeleteChannelRequest>,
@@ -1073,6 +1090,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn delete_message(
         &mut self,
         request: Request<DeleteMessageRequest>,
@@ -1129,6 +1147,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn join_guild(
         &mut self,
         request: Request<JoinGuildRequest>,
@@ -1187,6 +1206,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn leave_guild(
         &mut self,
         request: Request<LeaveGuildRequest>,
@@ -1220,6 +1240,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(20, 5)]
+    #[handler]
     async fn trigger_action(
         &mut self,
         _request: Request<TriggerActionRequest>,
@@ -1228,6 +1249,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(50, 10)]
+    #[handler]
     async fn send_message(
         &mut self,
         request: Request<SendMessageRequest>,
@@ -1324,7 +1346,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((SendMessageResponse { message_id }).into_response())
     }
 
-    #[rate(30, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn query_has_permission(
         &mut self,
         request: Request<QueryHasPermissionRequest>,
@@ -1337,7 +1360,8 @@ impl chat_service_server::ChatService for ChatServer {
             .map(Response::new)
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn set_permissions(
         &mut self,
         request: Request<SetPermissionsRequest>,
@@ -1423,6 +1447,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_permissions(
         &mut self,
         request: Request<GetPermissionsRequest>,
@@ -1458,7 +1483,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((GetPermissionsResponse { perms }).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn move_role(
         &mut self,
         request: Request<MoveRoleRequest>,
@@ -1496,6 +1522,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_guild_roles(
         &mut self,
         request: Request<GetGuildRolesRequest>,
@@ -1514,7 +1541,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((GetGuildRolesResponse { roles }).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn add_guild_role(
         &mut self,
         request: Request<AddGuildRoleRequest>,
@@ -1558,7 +1586,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((AddGuildRoleResponse { role_id }).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn modify_guild_role(
         &mut self,
         request: Request<ModifyGuildRoleRequest>,
@@ -1619,7 +1648,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((ModifyGuildRoleResponse {}).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn delete_guild_role(
         &mut self,
         request: Request<DeleteGuildRoleRequest>,
@@ -1649,7 +1679,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((DeleteGuildRoleResponse {}).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn manage_user_roles(
         &mut self,
         request: Request<ManageUserRolesRequest>,
@@ -1696,6 +1727,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_user_roles(
         &mut self,
         request: Request<GetUserRolesRequest>,
@@ -1724,6 +1756,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
+    #[handler]
     async fn typing(
         &mut self,
         request: Request<TypingRequest>,
@@ -1761,6 +1794,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn preview_guild(
         &mut self,
         request: Request<PreviewGuildRequest>,
@@ -1795,6 +1829,8 @@ impl chat_service_server::ChatService for ChatServer {
         .into_response())
     }
 
+    #[rate(7, 5)]
+    #[handler]
     async fn get_banned_users(
         &mut self,
         request: Request<GetBannedUsersRequest>,
@@ -1822,6 +1858,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
+    #[handler]
     async fn ban_user(
         &mut self,
         request: Request<BanUserRequest>,
@@ -1867,6 +1904,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
+    #[handler]
     async fn kick_user(
         &mut self,
         request: Request<KickUserRequest>,
@@ -1907,6 +1945,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(4, 5)]
+    #[handler]
     async fn unban_user(
         &mut self,
         request: Request<UnbanUserRequest>,
@@ -1929,6 +1968,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((UnbanUserResponse {}).into_response())
     }
 
+    #[handler]
     async fn get_pinned_messages(
         &mut self,
         _request: Request<GetPinnedMessagesRequest>,
@@ -1936,6 +1976,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn pin_message(
         &mut self,
         _request: Request<PinMessageRequest>,
@@ -1943,6 +1984,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn unpin_message(
         &mut self,
         _request: Request<UnpinMessageRequest>,
@@ -1958,6 +2000,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(1, 5)]
+    #[handler]
     async fn stream_events(
         &mut self,
         request: Request<()>,
@@ -2016,7 +2059,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok(())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn add_reaction(
         &mut self,
         request: Request<AddReactionRequest>,
@@ -2049,7 +2093,8 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((AddReactionResponse {}).into_response())
     }
 
-    #[rate(10, 5)]
+    #[rate(5, 7)]
+    #[handler]
     async fn remove_reaction(
         &mut self,
         request: Request<RemoveReactionRequest>,
@@ -2085,6 +2130,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 60)]
+    #[handler]
     async fn grant_ownership(
         &mut self,
         request: Request<GrantOwnershipRequest>,
@@ -2110,6 +2156,7 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     #[rate(2, 60)]
+    #[handler]
     async fn give_up_ownership(
         &mut self,
         request: Request<GiveUpOwnershipRequest>,
@@ -2135,6 +2182,7 @@ impl chat_service_server::ChatService for ChatServer {
         Ok((GiveUpOwnershipResponse {}).into_response())
     }
 
+    #[handler]
     async fn create_room(
         &mut self,
         request: Request<CreateRoomRequest>,
@@ -2142,6 +2190,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn create_direct_message(
         &mut self,
         request: Request<CreateDirectMessageRequest>,
@@ -2149,6 +2198,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn upgrade_room_to_guild(
         &mut self,
         request: Request<v1::UpgradeRoomToGuildRequest>,
@@ -2156,6 +2206,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn invite_user_to_guild(
         &mut self,
         request: Request<v1::InviteUserToGuildRequest>,
@@ -2163,6 +2214,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn get_pending_invites(
         &mut self,
         request: Request<v1::GetPendingInvitesRequest>,
@@ -2170,6 +2222,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn reject_pending_invite(
         &mut self,
         request: Request<v1::RejectPendingInviteRequest>,
@@ -2177,6 +2230,7 @@ impl chat_service_server::ChatService for ChatServer {
         Err(ServerError::NotImplemented.into())
     }
 
+    #[handler]
     async fn ignore_pending_invite(
         &mut self,
         request: Request<v1::IgnorePendingInviteRequest>,

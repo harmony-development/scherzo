@@ -47,9 +47,10 @@ pub mod prelude {
 
     pub use harmony_rust_sdk::api::exports::{
         hrpc::{
-            exports::{async_trait, http},
+            exports::http,
             server::{
                 error::{ServerError as HrpcServerError, ServerResult},
+                prelude::*,
                 socket::Socket,
             },
             IntoResponse, Request, Response,

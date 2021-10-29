@@ -150,9 +150,9 @@ impl MediaproxyServer {
     }
 }
 
-#[async_trait]
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     #[rate(2, 1)]
+    #[handler]
     async fn fetch_link_metadata(
         &mut self,
         request: Request<FetchLinkMetadataRequest>,
@@ -168,6 +168,7 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     }
 
     #[rate(1, 5)]
+    #[handler]
     async fn instant_view(
         &mut self,
         request: Request<InstantViewRequest>,
@@ -195,6 +196,7 @@ impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
     }
 
     #[rate(20, 5)]
+    #[handler]
     async fn can_instant_view(
         &mut self,
         request: Request<CanInstantViewRequest>,

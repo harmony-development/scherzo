@@ -263,8 +263,8 @@ impl SyncServer {
     }
 }
 
-#[async_trait]
 impl postbox_service_server::PostboxService for SyncServer {
+    #[handler]
     async fn pull(
         &mut self,
         request: Request<PullRequest>,
@@ -274,6 +274,7 @@ impl postbox_service_server::PostboxService for SyncServer {
         Ok(queue.into_response())
     }
 
+    #[handler]
     async fn push(
         &mut self,
         request: Request<PushRequest>,
@@ -295,6 +296,7 @@ impl postbox_service_server::PostboxService for SyncServer {
         Ok((PushResponse {}).into_response())
     }
 
+    #[handler]
     async fn notify_new_id(
         &mut self,
         _request: Request<NotifyNewIdRequest>,

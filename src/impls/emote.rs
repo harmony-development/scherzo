@@ -46,9 +46,9 @@ impl EmoteServer {
     }
 }
 
-#[async_trait]
 impl EmoteService for EmoteServer {
     #[rate(20, 5)]
+    #[handler]
     async fn delete_emote_from_pack(
         &mut self,
         request: Request<DeleteEmoteFromPackRequest>,
@@ -81,6 +81,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn delete_emote_pack(
         &mut self,
         request: Request<DeleteEmotePackRequest>,
@@ -120,6 +121,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn dequip_emote_pack(
         &mut self,
         request: Request<DequipEmotePackRequest>,
@@ -142,6 +144,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn equip_emote_pack(
         &mut self,
         request: Request<EquipEmotePackRequest>,
@@ -169,6 +172,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(20, 5)]
+    #[handler]
     async fn add_emote_to_pack(
         &mut self,
         request: Request<AddEmoteToPackRequest>,
@@ -204,6 +208,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(10, 5)]
+    #[handler]
     async fn get_emote_packs(
         &mut self,
         request: Request<GetEmotePacksRequest>,
@@ -255,6 +260,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(20, 5)]
+    #[handler]
     async fn get_emote_pack_emotes(
         &mut self,
         request: Request<GetEmotePackEmotesRequest>,
@@ -286,6 +292,7 @@ impl EmoteService for EmoteServer {
     }
 
     #[rate(5, 5)]
+    #[handler]
     async fn create_emote_pack(
         &mut self,
         request: Request<CreateEmotePackRequest>,

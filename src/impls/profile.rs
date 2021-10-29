@@ -43,9 +43,9 @@ impl ProfileServer {
     }
 }
 
-#[async_trait]
 impl ProfileService for ProfileServer {
-    #[rate(32, 10)]
+    #[rate(5, 10)]
+    #[handler]
     async fn get_profile(
         &mut self,
         request: Request<GetProfileRequest>,
@@ -63,6 +63,7 @@ impl ProfileService for ProfileServer {
     }
 
     #[rate(4, 1)]
+    #[handler]
     async fn get_app_data(
         &mut self,
         request: Request<GetAppDataRequest>,
@@ -80,6 +81,7 @@ impl ProfileService for ProfileServer {
     }
 
     #[rate(2, 5)]
+    #[handler]
     async fn set_app_data(
         &mut self,
         request: Request<SetAppDataRequest>,
@@ -95,6 +97,7 @@ impl ProfileService for ProfileServer {
     }
 
     #[rate(4, 5)]
+    #[handler]
     async fn update_profile(
         &mut self,
         request: Request<UpdateProfileRequest>,
