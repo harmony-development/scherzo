@@ -3,13 +3,13 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             exports::hyper,
-            server::{router::RoutesFinalized, Server},
+            server::{router::RoutesFinalized, Service},
         },
         prost::bytes::Bytes,
     },
 };
 use hyper::{header, http::HeaderValue};
-use tower::Service;
+use tower::Service as _;
 
 use super::prelude::*;
 
@@ -23,13 +23,13 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
     !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
 }
 
-pub struct BatchServer<MkRouter: Server + Sync> {
+pub struct BatchServer<MkRouter: Service + Sync> {
     disable_ratelimits: bool,
     mk_router: Arc<MkRouter>,
     router: RoutesFinalized,
 }
 
-impl<MkRouter: Server + Sync> Clone for BatchServer<MkRouter> {
+impl<MkRouter: Service + Sync> Clone for BatchServer<MkRouter> {
     fn clone(&self) -> Self {
         Self {
             disable_ratelimits: self.disable_ratelimits,
@@ -39,7 +39,7 @@ impl<MkRouter: Server + Sync> Clone for BatchServer<MkRouter> {
     }
 }
 
-impl<MkRouter: Server + Sync> BatchServer<MkRouter> {
+impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
     pub fn new(deps: &Dependencies, mk_router: MkRouter) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
@@ -122,7 +122,7 @@ impl<MkRouter: Server + Sync> BatchServer<MkRouter> {
 }
 
 #[async_trait]
-impl<MkRouter: Server + Sync> BatchService for BatchServer<MkRouter> {
+impl<MkRouter: Service + Sync> BatchService for BatchServer<MkRouter> {
     #[rate(5, 5)]
     async fn batch(
         &mut self,

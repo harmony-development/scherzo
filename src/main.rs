@@ -9,11 +9,11 @@ use std::{
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
-    chat::{chat_service_server::ChatServiceServer, ChannelKind, Permission},
+    chat::{chat_service_server::ChatServiceServer, guild_kind, ChannelKind, Permission},
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
         combine_services,
-        server::{utils::recommended_layers as hrpc_recommended_layers, Server},
+        server::{utils::recommended_layers as hrpc_recommended_layers, Service},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -226,7 +226,13 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     if current_db_version == 0 {
         let guild_id = deps
             .chat_tree
-            .create_guild_logic(0, "Admin".to_string(), None, None)
+            .create_guild_logic(
+                0,
+                "Admin".to_string(),
+                None,
+                None,
+                guild_kind::Kind::new_normal(guild_kind::Normal::new()),
+            )
             .unwrap();
         deps.chat_tree
             .set_permissions_logic(

@@ -24,7 +24,7 @@ use harmony_rust_sdk::api::{
                 future::{self, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
-            server::{prelude::CustomError, router::Routes, Server},
+            server::{prelude::CustomError, router::Routes, Service},
             HttpRequest,
         },
         prost::bytes::{Bytes, BytesMut},
@@ -53,7 +53,7 @@ impl MediaProducer {
     }
 }
 
-impl Server for MediaProducer {
+impl Service for MediaProducer {
     fn make_routes(&self) -> Routes {
         let deps = self.deps.clone();
 

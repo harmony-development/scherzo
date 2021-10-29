@@ -364,9 +364,13 @@ impl chat_service_server::ChatService for ChatServer {
             picture,
         } = request.into_message().await?;
 
-        let guild_id = self
-            .chat_tree
-            .create_guild_logic(user_id, name, picture, metadata)?;
+        let guild_id = self.chat_tree.create_guild_logic(
+            user_id,
+            name,
+            picture,
+            metadata,
+            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
+        )?;
 
         self.dispatch_guild_join(guild_id, user_id)?;
 
@@ -2790,6 +2794,7 @@ impl ChatTree {
         name: String,
         picture: Option<String>,
         metadata: Option<Metadata>,
+        kind: guild_kind::Kind,
     ) -> ServerResult<u64> {
         let guild_id = {
             let mut rng = rand::thread_rng();
@@ -2805,9 +2810,7 @@ impl ChatTree {
             picture,
             owner_ids: vec![user_id],
             metadata,
-            kind: Some(GuildKind {
-                kind: Some(guild_kind::Kind::new_normal(guild_kind::Normal::new())),
-            }),
+            kind: Some(GuildKind { kind: Some(kind) }),
         };
         let buf = rkyv_ser(&guild);
 
@@ -3391,7 +3394,9 @@ impl ChatTree {
 
 use std::fmt::{self, Debug};
 use tracing::Subscriber;
-use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields, FormattedFields};
+use tracing_subscriber::fmt::{
+    format::Writer as TracingWriter, FmtContext, FormatEvent, FormatFields, FormattedFields,
+};
 use tracing_subscriber::registry::LookupSpan;
 
 pub struct AdminLogChannelLogger {
@@ -3418,7 +3423,7 @@ where
     fn format_event(
         &self,
         ctx: &FmtContext<'_, S, N>,
-        _writer: &mut dyn fmt::Write,
+        _writer: TracingWriter<'_>,
         event: &tracing::Event<'_>,
     ) -> fmt::Result {
         use tracing::Level;
@@ -3466,7 +3471,8 @@ where
 
                 let mut body_text = String::new();
 
-                ctx.field_format().format_fields(&mut body_text, event)?;
+                // TODO: fix this
+                //ctx.field_format().format_fields(&mut body_text, event)?;
 
                 let content = Content {
                     content: Some(content::Content::EmbedMessage(content::EmbedContent {
