@@ -8,7 +8,7 @@ pub mod rest;
 pub mod sync;
 pub mod voice;
 
-use hyper::{StatusCode, Uri};
+use hyper::Uri;
 use prelude::*;
 use tower::service_fn;
 
@@ -18,7 +18,6 @@ use dashmap::DashMap;
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            body::full_box_body,
             client::{http_client, HttpClient},
             exports::http,
             HttpRequest,
@@ -31,7 +30,7 @@ use parking_lot::Mutex;
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{config::Config, key, SharedConfig, SharedConfigData, SCHERZO_VERSION};
+use crate::{config::Config, key, SharedConfig, SharedConfigData};
 
 use self::{
     auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
@@ -53,7 +52,7 @@ pub mod prelude {
                 prelude::*,
                 socket::Socket,
             },
-            IntoResponse, Request, Response,
+            HttpResponse, IntoResponse, Request, Response,
         },
         prost::Message,
     };
@@ -66,6 +65,8 @@ pub mod prelude {
         auth::{AuthExt, SessionMap},
         Dependencies,
     };
+
+    pub(crate) use super::{impl_unary_handlers, impl_ws_handlers};
 }
 
 pub type FedEventReceiver = mpsc::UnboundedReceiver<EventDispatch>;
@@ -180,47 +181,6 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
         })
 }
 
-pub mod about {
-    use super::*;
-    use harmony_rust_sdk::api::{
-        exports::hrpc::server::{router::Routes, Service},
-        rest::About,
-    };
-
-    pub struct AboutProducer {
-        deps: Arc<Dependencies>,
-    }
-
-    impl Service for AboutProducer {
-        fn make_routes(&self) -> Routes {
-            let deps = self.deps.clone();
-            let service = service_fn(move |_: HttpRequest| {
-                let deps = deps.clone();
-                async move {
-                    let json = serde_json::to_string(&About {
-                        server_name: "Scherzo".to_string(),
-                        version: SCHERZO_VERSION.to_string(),
-                        about_server: deps.config.server_description.clone(),
-                        message_of_the_day: deps.runtime_config.lock().motd.clone(),
-                    })
-                    .unwrap();
-
-                    Ok(http::Response::builder()
-                        .status(StatusCode::OK)
-                        .body(full_box_body(json.into_bytes().into()))
-                        .unwrap())
-                }
-            });
-
-            Routes::new().route("/_harmony/about", service)
-        }
-    }
-
-    pub fn producer(deps: Arc<Dependencies>) -> AboutProducer {
-        AboutProducer { deps }
-    }
-}
-
 pub mod against {
     use harmony_rust_sdk::api::exports::hrpc::{
         body::box_body,
@@ -324,3 +284,38 @@ impl ActionProcesser {
         }
     }
 }
+
+macro_rules! impl_unary_handlers {
+    ($(
+        $( #[$attr:meta] )*
+        $handler:ident, $req:ty, $resp:ty;
+    )+) => {
+        $(
+            $( #[$attr] )*
+            fn $handler(&mut self, request: Request<$req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<Response<$resp>>> {
+                Box::pin($handler::handler(self, request))
+            }
+        )+
+    };
+}
+
+macro_rules! impl_ws_handlers {
+    ($(
+        $( #[$attr:meta] )*
+        $handler:ident, $handler_on_upgrade:ident, $req:ty, $resp:ty;
+    )+) => {
+        $(
+            $( #[$attr] )*
+            fn $handler(&mut self, request: Request<()>, socket: Socket<$req, $resp>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
+                Box::pin($handler::handler(self, request, socket))
+            }
+
+            fn $handler_on_upgrade(&mut self, response: HttpResponse) -> HttpResponse {
+                $handler::on_upgrade(self, response)
+            }
+        )+
+    };
+}
+
+pub(crate) use impl_unary_handlers;
+pub(crate) use impl_ws_handlers;

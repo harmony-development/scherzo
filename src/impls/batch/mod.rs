@@ -13,6 +13,10 @@ use tower::Service as _;
 
 use super::prelude::*;
 
+#[allow(clippy::module_inception)]
+pub mod batch;
+pub mod batch_same;
+
 enum Endpoint {
     Same(String),
     Different(Vec<String>),
@@ -122,47 +126,10 @@ impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
 }
 
 impl<MkRouter: Service + Sync> BatchService for BatchServer<MkRouter> {
-    #[rate(5, 5)]
-    #[handler]
-    async fn batch(
-        &mut self,
-        mut request: Request<BatchRequest>,
-    ) -> ServerResult<Response<BatchResponse>> {
-        let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
-        let BatchRequest { requests } = request.into_message().await?;
-
-        let request_len = requests.len();
-        let (bodies, endpoints) = requests.into_iter().fold(
-            (
-                Vec::with_capacity(request_len),
-                Vec::with_capacity(request_len),
-            ),
-            |(mut bodies, mut endpoints), request| {
-                bodies.push(request.request);
-                endpoints.push(request.endpoint);
-                (bodies, endpoints)
-            },
-        );
-        let responses = self
-            .make_req(bodies, Endpoint::Different(endpoints), auth_header)
-            .await?;
-
-        Ok((BatchResponse { responses }).into_response())
-    }
-
-    #[rate(5, 5)]
-    #[handler]
-    async fn batch_same(
-        &mut self,
-        mut request: Request<BatchSameRequest>,
-    ) -> ServerResult<Response<BatchSameResponse>> {
-        let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
-        let BatchSameRequest { endpoint, requests } = request.into_message().await?;
-
-        let responses = self
-            .make_req(requests, Endpoint::Same(endpoint), auth_header)
-            .await?;
-
-        Ok((BatchSameResponse { responses }).into_response())
+    impl_unary_handlers! {
+        #[rate(5, 5)]
+        batch, BatchRequest, BatchResponse;
+        #[rate(5, 5)]
+        batch_same, BatchSameRequest, BatchSameResponse;
     }
 }

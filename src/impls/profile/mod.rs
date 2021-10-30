@@ -9,6 +9,11 @@ use harmony_rust_sdk::api::{
     profile::{profile_service_server::ProfileService, *},
 };
 
+pub mod get_app_data;
+pub mod get_profile;
+pub mod set_app_data;
+pub mod update_profile;
+
 #[derive(Clone)]
 pub struct ProfileServer {
     profile_tree: ProfileTree,
@@ -44,96 +49,15 @@ impl ProfileServer {
 }
 
 impl ProfileService for ProfileServer {
-    #[rate(5, 10)]
-    #[handler]
-    async fn get_profile(
-        &mut self,
-        request: Request<GetProfileRequest>,
-    ) -> ServerResult<Response<GetProfileResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let GetProfileRequest { user_id } = request.into_message().await?;
-
-        self.profile_tree
-            .get_profile_logic(user_id)
-            .map(|p| GetProfileResponse { profile: Some(p) })
-            .map(Response::new)
-            .map_err(Into::into)
-    }
-
-    #[rate(4, 1)]
-    #[handler]
-    async fn get_app_data(
-        &mut self,
-        request: Request<GetAppDataRequest>,
-    ) -> ServerResult<Response<GetAppDataResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let GetAppDataRequest { app_id } = request.into_message().await?;
-        let app_data = self
-            .profile_tree
-            .get(make_user_metadata_key(user_id, &app_id))?
-            .unwrap_or_default();
-
-        Ok((GetAppDataResponse { app_data }).into_response())
-    }
-
-    #[rate(2, 5)]
-    #[handler]
-    async fn set_app_data(
-        &mut self,
-        request: Request<SetAppDataRequest>,
-    ) -> ServerResult<Response<SetAppDataResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let SetAppDataRequest { app_id, app_data } = request.into_message().await?;
-        self.profile_tree
-            .insert(make_user_metadata_key(user_id, &app_id), app_data)?;
-
-        Ok((SetAppDataResponse {}).into_response())
-    }
-
-    #[rate(4, 5)]
-    #[handler]
-    async fn update_profile(
-        &mut self,
-        request: Request<UpdateProfileRequest>,
-    ) -> ServerResult<Response<UpdateProfileResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let UpdateProfileRequest {
-            new_user_name,
-            new_user_avatar,
-            new_user_status,
-            new_is_bot,
-        } = request.into_message().await?;
-
-        self.profile_tree.update_profile_logic(
-            user_id,
-            new_user_name.clone(),
-            new_user_avatar.clone(),
-            new_user_status,
-            new_is_bot,
-        )?;
-
-        self.send_event_through_chan(
-            EventSub::Homeserver,
-            stream_event::Event::ProfileUpdated(ProfileUpdated {
-                user_id,
-                new_username: new_user_name,
-                new_avatar: new_user_avatar,
-                new_status: new_user_status,
-                new_is_bot,
-            }),
-            None,
-            EventContext::new(self.chat_tree.calculate_users_seeing_user(user_id)?),
-        );
-
-        Ok((UpdateProfileResponse {}).into_response())
+    impl_unary_handlers! {
+        #[rate(5, 10)]
+        get_profile, GetProfileRequest, GetProfileResponse;
+        #[rate(4, 1)]
+        get_app_data, GetAppDataRequest, GetAppDataResponse;
+        #[rate(2, 5)]
+        set_app_data, SetAppDataRequest, SetAppDataResponse;
+        #[rate(4, 5)]
+        update_profile, UpdateProfileRequest, UpdateProfileResponse;
     }
 }
 

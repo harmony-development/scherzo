@@ -28,14 +28,14 @@ use scherzo::{
         Db,
     },
     impls::{
-        about, /*against,*/
+        /*against,*/
         auth::AuthServer,
         batch::BatchServer,
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
-        rest::MediaProducer,
+        rest::RestServer,
         sync::SyncServer,
         voice::VoiceServer,
         Dependencies,
@@ -294,15 +294,12 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
 
     let make_service = combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice);
 
-    let media = MediaProducer::new(deps.clone());
+    let rest = RestServer::new(deps.clone());
 
     let batch_server = BatchServer::new(&deps, make_service.clone());
     let batch = BatchServiceServer::new(batch_server);
 
-    //let against = against::producer();
-    let about = about::producer(deps.clone());
-
-    let server = combine_services!(make_service, batch, about, media).layer(
+    let server = combine_services!(make_service, batch, rest).layer(
         ServiceBuilder::new()
             .layer(hrpc_recommended_layers(filter_auth))
             .layer(tower::limit::ConcurrencyLimitLayer::new(

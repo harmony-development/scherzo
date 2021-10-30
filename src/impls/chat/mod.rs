@@ -48,7 +48,7 @@ use crate::{
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
     impls::{
         auth, get_time_secs,
-        rest::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
+        rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
     set_proto_name,
@@ -3523,10 +3523,10 @@ where
                     Ok(())
                 })?;
 
-                let mut body_text = String::new();
-
-                // TODO: fix this
-                //ctx.field_format().format_fields(&mut body_text, event)?;
+                let mut fields = FormattedFields::<N>::new(String::new());
+                ctx.field_format()
+                    .format_fields(fields.as_writer(), event)?;
+                let body_text = fields.fields;
 
                 let content = Content {
                     content: Some(content::Content::EmbedMessage(content::EmbedContent {

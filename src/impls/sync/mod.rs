@@ -20,6 +20,10 @@ use crate::{
 use super::{chat::ChatTree, get_time_secs, http, prelude::*};
 use db::sync::*;
 
+pub mod notify_new_id;
+pub mod pull;
+pub mod push;
+
 pub struct EventDispatch {
     pub host: SmolStr,
     pub event: Event,
@@ -264,43 +268,9 @@ impl SyncServer {
 }
 
 impl postbox_service_server::PostboxService for SyncServer {
-    #[handler]
-    async fn pull(
-        &mut self,
-        request: Request<PullRequest>,
-    ) -> ServerResult<Response<PullResponse>> {
-        let host = self.auth(&request).await?;
-        let queue = self.get_event_queue(&host)?;
-        Ok(queue.into_response())
-    }
-
-    #[handler]
-    async fn push(
-        &mut self,
-        request: Request<PushRequest>,
-    ) -> ServerResult<Response<PushResponse>> {
-        let host = self.auth(&request).await?;
-        let key = make_host_key(&host);
-        if !self
-            .sync_tree
-            .contains_key(&key)
-            .map_err(ServerError::DbError)?
-        {
-            self.sync_tree
-                .insert(&key, &[])
-                .map_err(ServerError::DbError)?;
-        }
-        if let Some(event) = request.into_message().await?.event {
-            self.push_logic(&host, event)?;
-        }
-        Ok((PushResponse {}).into_response())
-    }
-
-    #[handler]
-    async fn notify_new_id(
-        &mut self,
-        _request: Request<NotifyNewIdRequest>,
-    ) -> ServerResult<Response<NotifyNewIdResponse>> {
-        Err(ServerError::NotImplemented.into())
+    impl_unary_handlers! {
+        pull, PullRequest, PullResponse;
+        push, PushRequest, PushResponse;
+        notify_new_id, NotifyNewIdRequest, NotifyNewIdResponse;
     }
 }

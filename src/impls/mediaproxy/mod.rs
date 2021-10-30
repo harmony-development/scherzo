@@ -8,6 +8,10 @@ use std::time::Instant;
 
 use super::{get_mimetype, http, prelude::*, HttpClient};
 
+pub mod can_instant_view;
+pub mod fetch_link_metadata;
+pub mod instant_view;
+
 fn site_metadata_from_html(html: &HTML) -> SiteMetadata {
     SiteMetadata {
         page_title: html.title.clone().unwrap_or_default(),
@@ -151,76 +155,12 @@ impl MediaproxyServer {
 }
 
 impl media_proxy_service_server::MediaProxyService for MediaproxyServer {
-    #[rate(2, 1)]
-    #[handler]
-    async fn fetch_link_metadata(
-        &mut self,
-        request: Request<FetchLinkMetadataRequest>,
-    ) -> ServerResult<Response<FetchLinkMetadataResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let FetchLinkMetadataRequest { url } = request.into_message().await?;
-
-        let data = self.fetch_metadata(url).await?.into();
-
-        Ok((FetchLinkMetadataResponse { data: Some(data) }).into_response())
-    }
-
-    #[rate(1, 5)]
-    #[handler]
-    async fn instant_view(
-        &mut self,
-        request: Request<InstantViewRequest>,
-    ) -> ServerResult<Response<InstantViewResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let InstantViewRequest { url } = request.into_message().await?;
-
-        let data = self.fetch_metadata(url).await?;
-
-        let msg = if let Metadata::Site(html) = data {
-            let metadata = site_metadata_from_html(&html);
-
-            InstantViewResponse {
-                content: html.text_content.clone(),
-                is_valid: true,
-                metadata: Some(metadata),
-            }
-        } else {
-            InstantViewResponse::default().with_is_valid(false)
-        };
-
-        Ok(msg.into_response())
-    }
-
-    #[rate(20, 5)]
-    #[handler]
-    async fn can_instant_view(
-        &mut self,
-        request: Request<CanInstantViewRequest>,
-    ) -> ServerResult<Response<CanInstantViewResponse>> {
-        #[allow(unused_variables)]
-        let user_id = self.valid_sessions.auth(&request)?;
-
-        let CanInstantViewRequest { url } = request.into_message().await?;
-
-        if let Some(val) = get_from_cache(&url) {
-            return Ok((CanInstantViewResponse {
-                can_instant_view: matches!(val.value, Metadata::Site(_)),
-            })
-            .into_response());
-        }
-
-        let url: Uri = url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = self.http.get(url).await.map_err(ServerError::from)?;
-
-        let ok = get_mimetype(&response).eq("text/html");
-
-        Ok((CanInstantViewResponse {
-            can_instant_view: ok,
-        })
-        .into_response())
+    impl_unary_handlers! {
+        #[rate(2, 1)]
+        fetch_link_metadata, FetchLinkMetadataRequest, FetchLinkMetadataResponse;
+        #[rate(1, 5)]
+        instant_view, InstantViewRequest, InstantViewResponse;
+        #[rate(20, 5)]
+        can_instant_view, CanInstantViewRequest, CanInstantViewResponse;
     }
 }
