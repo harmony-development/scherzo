@@ -2,7 +2,7 @@ use super::*;
 
 pub async fn handler(
     _svc: &mut ChatServer,
-    _request: Request<TriggerActionRequest>,
-) -> ServerResult<Response<TriggerActionResponse>> {
+    _request: Request<GetPinnedMessagesRequest>,
+) -> ServerResult<Response<GetPinnedMessagesResponse>> {
     Err(ServerError::NotImplemented.into())
 }
