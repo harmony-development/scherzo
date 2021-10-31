@@ -65,6 +65,8 @@ pub type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send
 pub type RangeIter<'a> =
     Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
 
+// TODO: Tree methods should use async
+// TODO: make a wrapper return type over DB return types (like `IVec`) to not allocate a `Vec`
 pub trait Tree: Send + Sync {
     fn get(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
     fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<Vec<u8>>>;
