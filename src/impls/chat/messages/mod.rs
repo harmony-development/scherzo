@@ -1,5 +1,6 @@
 use super::*;
 
+pub mod get_channel_messages;
 pub mod unpin_message;
 pub mod update_message_text;
 pub mod remove_reaction;

@@ -69,7 +69,6 @@ pub mod permissions;
 pub mod moderation;
 pub mod invites;
 pub mod messages;
-pub mod get_guild_list;
 pub mod trigger_action;
 pub mod stream_events;
 
