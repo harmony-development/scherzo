@@ -13,7 +13,7 @@ const fn port_default() -> u16 {
 }
 
 const fn db_cache_limit_default() -> u64 {
-    1024 * 1024 * 1024
+    1024
 }
 
 fn federation_config_default() -> Option<FederationConfig> {
@@ -84,6 +84,7 @@ impl Default for PolicyConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DbConfig {
+    /// This is in MiB
     #[serde(default = "db_cache_limit_default")]
     pub db_cache_limit: u64,
     #[serde(default)]
@@ -113,13 +114,14 @@ fn media_root_default() -> PathBuf {
 }
 
 const fn max_upload_length_default() -> u64 {
-    1000 * 1000 * 50
+    50
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MediaConfig {
     #[serde(default = "media_root_default")]
     pub media_root: PathBuf,
+    /// This is in MiB
     #[serde(default = "max_upload_length_default")]
     pub max_upload_length: u64,
 }

@@ -83,7 +83,7 @@ fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
     let result = sled::Config::new()
         .use_compression(true)
         .path(db_path)
-        .cache_capacity(db_config.db_cache_limit)
+        .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
         .mode(
             db_config
                 .sled_throughput_at_storage_cost

@@ -28,7 +28,8 @@ pub fn handler(deps: Arc<Dependencies>) -> Handler {
                 multer::Constraints::new()
                     .allowed_fields(vec!["file"])
                     .size_limit(
-                        multer::SizeLimit::new().whole_stream(deps.config.media.max_upload_length),
+                        multer::SizeLimit::new()
+                            .whole_stream(deps.config.media.max_upload_length * 1024 * 1024),
                     ),
             );
 

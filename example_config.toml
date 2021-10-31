@@ -18,8 +18,8 @@ max_concurrent_requests = 512
 [db]
 # Path to a directory to put db backups in.
 db_backup_path = "."
-# Database in-memory cache limit in bytes.
-db_cache_limit = 1073741824
+# Database in-memory cache limit in MiB.
+db_cache_limit = 1024
 # (sled only) whether to increase throughput at the cost of more storage usage.
 sled_throughput_at_storage_cost = false
 
@@ -30,8 +30,8 @@ key_file = "./key"
 
 # Media settings
 [media]
-# Max upload length for files.
-max_upload_length = 100_000_000
+# Max upload length for files in MiB.
+max_upload_length = 50
 # Where to store media files.
 media_root = "./media"
 
