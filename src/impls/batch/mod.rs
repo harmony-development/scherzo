@@ -91,6 +91,10 @@ impl BatchServer {
             Ok(body)
         }
 
+        let router = tower::ServiceExt::ready(&mut self.router)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
         if bodies.len() > 64 {
             return Err(ServerError::TooManyBatchedRequests.into());
         }
@@ -109,9 +113,7 @@ impl BatchServer {
                     return Err(ServerError::InvalidBatchEndpoint.into());
                 }
                 for body in bodies {
-                    responses.push(
-                        process_request(body, endpoint, auth_header, &mut self.router).await?,
-                    );
+                    responses.push(process_request(body, endpoint, auth_header, router).await?);
                 }
             }
             Endpoint::Different(a) => {
@@ -120,9 +122,7 @@ impl BatchServer {
                     if !is_valid_endpoint(endpoint) {
                         return Err(ServerError::InvalidBatchEndpoint.into());
                     }
-                    responses.push(
-                        process_request(body, endpoint, auth_header, &mut self.router).await?,
-                    );
+                    responses.push(process_request(body, endpoint, auth_header, router).await?);
                 }
             }
         }
