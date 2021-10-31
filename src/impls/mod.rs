@@ -1,3 +1,4 @@
+pub mod against;
 pub mod auth;
 pub mod batch;
 pub mod chat;
@@ -179,71 +180,6 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
         .unwrap_or_else(|| unsafe {
             http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
         })
-}
-
-pub mod against {
-    use harmony_rust_sdk::api::exports::hrpc::{
-        body::box_body,
-        server::{handler::Handler, prelude::CustomError},
-    };
-    use hyper::header::HeaderName;
-
-    use super::*;
-
-    pub struct AgainstProducer {
-        http: HttpClient,
-        header_name: HeaderName,
-    }
-
-    impl AgainstProducer {
-        pub fn produce(&'static self) -> Handler {
-            let http = self.http.clone();
-            let service = service_fn(move |request: HttpRequest| {
-                let http = http.clone();
-                let (parts, body) = request.into_parts();
-                let host_id = parts
-                    .headers
-                    .get(&self.header_name)
-                    .and_then(|header| {
-                        header
-                            .to_str()
-                            .ok()
-                            .and_then(|v| HomeserverIdentifier::from_str(v).ok())
-                    })
-                    .unwrap();
-                let url = {
-                    let mut url_parts = host_id.to_url().into_parts();
-                    url_parts.path_and_query = Some(parts.uri.path().parse().unwrap());
-                    Uri::from_parts(url_parts).unwrap()
-                };
-                async move {
-                    let mut request = http::Request::builder()
-                        .uri(url)
-                        .method(parts.method)
-                        .body(body)
-                        .unwrap();
-                    *request.headers_mut() = parts.headers;
-                    *request.extensions_mut() = parts.extensions;
-
-                    let host_response = http
-                        .request(request)
-                        .await
-                        .map(|r| r.map(box_body))
-                        .unwrap_or_else(|err| ServerError::HttpError(err).as_error_response());
-
-                    Ok(host_response)
-                }
-            });
-            Handler::new(service)
-        }
-    }
-
-    pub fn producer() -> AgainstProducer {
-        AgainstProducer {
-            http: http_client(),
-            header_name: HeaderName::from_static("against"),
-        }
-    }
 }
 
 pub struct AdminActionError;

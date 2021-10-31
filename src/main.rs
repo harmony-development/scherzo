@@ -28,7 +28,7 @@ use scherzo::{
         Db,
     },
     impls::{
-        /*against,*/
+        against,
         auth::AuthServer,
         batch::BatchServer,
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
@@ -301,6 +301,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
 
     let server = combine_services!(make_service, batch, rest).layer(
         ServiceBuilder::new()
+            .layer(against::AgainstLayer::default())
             .layer(hrpc_recommended_layers(filter_auth))
             .layer(tower::limit::ConcurrencyLimitLayer::new(
                 deps.config.policy.max_concurrent_requests,

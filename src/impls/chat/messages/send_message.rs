@@ -19,11 +19,7 @@ pub async fn handler(
 
     let content = svc
         .chat_tree
-        .process_message_content(
-            request.content.take(),
-            svc.media_root.as_path(),
-            &svc.host,
-        )
+        .process_message_content(request.content.take(), svc.media_root.as_path(), &svc.host)
         .await?;
     request.content = Some(content);
     let (message_id, message) = svc.chat_tree.send_message_logic(user_id, request)?;
