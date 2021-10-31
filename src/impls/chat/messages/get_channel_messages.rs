@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<GetChannelMessagesRequest>,
 ) -> ServerResult<Response<GetChannelMessagesResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let GetChannelMessagesRequest {
         guild_id,
@@ -15,12 +14,12 @@ pub async fn handler(
         count,
     } = request.into_message().await?;
 
-    svc.chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    svc.chat_tree
+    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
+    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
+
+    chat_tree
         .get_channel_messages_logic(
             guild_id,
             channel_id,

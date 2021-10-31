@@ -1,6 +1,9 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
-use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
+use harmony_rust_sdk::api::{
+    exports::hrpc::client::http_client,
+    mediaproxy::{fetch_link_metadata_response::Data, *},
+};
 use hyper::{body::Buf, StatusCode, Uri};
 use webpage::HTML;
 
@@ -79,16 +82,16 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
 #[derive(Clone)]
 pub struct MediaproxyServer {
     http: HttpClient,
-    valid_sessions: SessionMap,
     disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl MediaproxyServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            http: deps.http.clone(),
-            valid_sessions: deps.valid_sessions.clone(),
+            http: http_client(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            deps,
         }
     }
 

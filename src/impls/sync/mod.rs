@@ -12,12 +12,9 @@ use harmony_rust_sdk::api::{
 use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::{
-    config::FederationConfig,
-    key::{self, Manager as KeyManager},
-};
+use crate::key::{self, Manager as KeyManager};
 
-use super::{chat::ChatTree, get_time_secs, http, prelude::*};
+use super::{get_time_secs, http, prelude::*};
 use db::sync::*;
 
 pub mod notify_new_id;
@@ -44,24 +41,12 @@ impl Clients {
 
 #[derive(Clone)]
 pub struct SyncServer {
-    chat_tree: ChatTree,
-    sync_tree: ArcTree,
-    keys_manager: Option<Arc<KeyManager>>,
-    federation_config: Option<FederationConfig>,
-    host: String,
-    disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl SyncServer {
-    pub fn new(deps: &Dependencies, mut dispatch_rx: UnboundedReceiver<EventDispatch>) -> Self {
-        let sync = Self {
-            chat_tree: deps.chat_tree.clone(),
-            sync_tree: deps.sync_tree.clone(),
-            keys_manager: deps.key_manager.clone(),
-            federation_config: deps.config.federation.clone(),
-            host: deps.config.host.clone(),
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
-        };
+    pub fn new(deps: Arc<Dependencies>, mut dispatch_rx: UnboundedReceiver<EventDispatch>) -> Self {
+        let sync = Self { deps };
         let sync2 = sync.clone();
         let clients = Clients(DashMap::default());
 
@@ -69,7 +54,7 @@ impl SyncServer {
             loop {
                 tokio::select! {
                     _ = async {
-                        let hosts = sync2.sync_tree.scan_prefix(HOST_PREFIX).flat_map(|res| {
+                        let hosts = sync2.deps.sync_tree.scan_prefix(HOST_PREFIX).flat_map(|res| {
                             let key = match res {
                                 Ok((key, _)) => key,
                                 Err(err) => {
@@ -157,7 +142,7 @@ impl SyncServer {
 
     async fn generate_request<Msg: Message>(&self, msg: Msg) -> Result<Request<Msg>, ServerError> {
         let data = AuthData {
-            server_id: self.host.clone(),
+            server_id: self.deps.config.host.clone(),
             time: get_time_secs(),
         };
 
@@ -174,13 +159,16 @@ impl SyncServer {
     }
 
     fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
-        self.keys_manager
+        self.deps
+            .key_manager
             .as_ref()
             .ok_or(ServerError::FederationDisabled)
     }
 
     fn is_host_allowed(&self, host: &str) -> Result<(), ServerError> {
-        self.federation_config
+        self.deps
+            .config
+            .federation
             .as_ref()
             .map_or(Err(ServerError::FederationDisabled), |conf| {
                 conf.is_host_allowed(host)
@@ -225,11 +213,13 @@ impl SyncServer {
         if let Some(kind) = event.kind {
             match kind {
                 Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
-                    self.chat_tree
+                    self.deps
+                        .chat_tree
                         .remove_guild_from_guild_list(user_id, guild_id, host)?;
                 }
                 Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
-                    self.chat_tree
+                    self.deps
+                        .chat_tree
                         .add_guild_to_guild_list(user_id, guild_id, host)?;
                 }
                 Kind::UserInvited(_) => todo!(),
@@ -242,6 +232,7 @@ impl SyncServer {
     fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
         let key = make_host_key(host);
         let queue = self
+            .deps
             .sync_tree
             .get(&key)?
             .map_or_else(PullResponse::default, |val| {
@@ -249,7 +240,7 @@ impl SyncServer {
                     .deserialize(&mut rkyv::Infallible)
                     .unwrap()
             });
-        self.sync_tree.remove(&key)?;
+        self.deps.sync_tree.remove(&key)?;
         Ok(queue)
     }
 
@@ -262,7 +253,9 @@ impl SyncServer {
         // TODO: this is a waste, find a way to optimize this
         queue.event_queue.push(event);
         let buf = rkyv_ser(&queue);
-        self.sync_tree.insert(&make_host_key(host), buf.as_ref())?;
+        self.deps
+            .sync_tree
+            .insert(&make_host_key(host), buf.as_ref())?;
         Ok(())
     }
 }

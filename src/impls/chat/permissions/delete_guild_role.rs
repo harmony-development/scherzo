@@ -4,16 +4,16 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<DeleteGuildRoleRequest>,
 ) -> ServerResult<Response<DeleteGuildRoleResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let DeleteGuildRoleRequest { guild_id, role_id } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "roles.manage", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    svc.chat_tree
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
+
+    chat_tree
         .chat_tree
         .remove(&make_guild_role_key(guild_id, role_id))
         .map_err(ServerError::DbError)?

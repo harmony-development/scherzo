@@ -5,7 +5,7 @@ pub async fn handler(
     request: Request<AddGuildRoleRequest>,
 ) -> ServerResult<Response<AddGuildRoleResponse>> {
     #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let AddGuildRoleRequest {
         guild_id,
@@ -15,9 +15,10 @@ pub async fn handler(
         pingable,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "roles.manage", false)?;
+    let chat_tree = &svc.deps.chat_tree;
+
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
     let role = Role {
         name: name.clone(),
@@ -25,7 +26,7 @@ pub async fn handler(
         hoist,
         pingable,
     };
-    let role_id = svc.chat_tree.add_guild_role_logic(guild_id, None, role)?;
+    let role_id = chat_tree.add_guild_role_logic(guild_id, None, role)?;
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleCreated(stream_event::RoleCreated {

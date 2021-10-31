@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut MediaproxyServer,
     request: Request<InstantViewRequest>,
 ) -> ServerResult<Response<InstantViewResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    svc.deps.valid_sessions.auth(&request)?;
 
     let InstantViewRequest { url } = request.into_message().await?;
 

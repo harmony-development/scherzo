@@ -1,5 +1,5 @@
 use super::{
-    chat::{ChatTree, EventBroadcast, EventContext, EventSender, EventSub, PermCheck},
+    chat::{EventBroadcast, EventContext, EventSub, PermCheck},
     prelude::*,
 };
 
@@ -16,21 +16,15 @@ pub mod update_profile;
 
 #[derive(Clone)]
 pub struct ProfileServer {
-    profile_tree: ProfileTree,
-    chat_tree: ChatTree,
-    valid_sessions: SessionMap,
-    pub broadcast_send: EventSender,
     disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl ProfileServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            profile_tree: deps.profile_tree.clone(),
-            chat_tree: deps.chat_tree.clone(),
-            valid_sessions: deps.valid_sessions.clone(),
-            broadcast_send: deps.chat_event_sender.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            deps,
         }
     }
 
@@ -44,7 +38,7 @@ impl ProfileServer {
     ) {
         let broadcast = EventBroadcast::new(sub, Event::Profile(event), perm_check, context);
 
-        drop(self.broadcast_send.send(Arc::new(broadcast)));
+        drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
     }
 }
 

@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<UpdateGuildInformationRequest>,
 ) -> ServerResult<Response<UpdateGuildInformationResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let UpdateGuildInformationRequest {
         guild_id,
@@ -14,11 +13,13 @@ pub async fn handler(
         new_metadata,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    let mut guild_info = svc.chat_tree.get_guild_logic(guild_id)?;
+    chat_tree.check_guild_user(guild_id, user_id)?;
 
-    svc.chat_tree.check_perms(
+    let mut guild_info = chat_tree.get_guild_logic(guild_id)?;
+
+    chat_tree.check_perms(
         guild_id,
         None,
         user_id,
@@ -36,7 +37,7 @@ pub async fn handler(
         guild_info.metadata = Some(new_metadata);
     }
 
-    svc.chat_tree.put_guild_logic(guild_id, guild_info)?;
+    chat_tree.put_guild_logic(guild_id, guild_info)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

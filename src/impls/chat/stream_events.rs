@@ -5,13 +5,12 @@ pub async fn handler(
     request: Request<()>,
     socket: Socket<StreamEventsRequest, StreamEventsResponse>,
 ) -> Result<(), HrpcServerError> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
     tracing::debug!("stream events validated for user {}", user_id);
 
     tracing::debug!("creating stream events for user {}", user_id);
     let (sub_tx, sub_rx) = mpsc::channel(64);
-    let chat_tree = svc.chat_tree.clone();
+    let chat_tree = svc.deps.chat_tree.clone();
 
     let send_loop = svc.spawn_event_stream_processor(user_id, sub_rx, socket.clone());
     let recv_loop = async move {

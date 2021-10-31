@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<ModifyGuildRoleRequest>,
 ) -> ServerResult<Response<ModifyGuildRoleResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let ModifyGuildRoleRequest {
         guild_id,
@@ -16,12 +15,13 @@ pub async fn handler(
         new_pingable,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "roles.manage", false)?;
+    let chat_tree = &svc.deps.chat_tree;
+
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
 
     let key = make_guild_role_key(guild_id, role_id);
-    let mut role = if let Some(raw) = svc.chat_tree.get(key)? {
+    let mut role = if let Some(raw) = chat_tree.get(key)? {
         db::deser_role(raw)
     } else {
         return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
@@ -41,7 +41,7 @@ pub async fn handler(
     }
 
     let ser_role = rkyv_ser(&role);
-    svc.chat_tree.insert(key, ser_role)?;
+    chat_tree.insert(key, ser_role)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

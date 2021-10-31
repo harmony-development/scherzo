@@ -1,7 +1,7 @@
 use super::*;
 
-pub async fn handler<MkRouter: Service + Sync>(
-    svc: &mut BatchServer<MkRouter>,
+pub async fn handler(
+    svc: &mut BatchServer,
     mut request: Request<BatchSameRequest>,
 ) -> ServerResult<Response<BatchSameResponse>> {
     let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);

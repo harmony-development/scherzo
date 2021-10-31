@@ -277,12 +277,12 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         .reload(fmt::layer().event_format(AdminLogChannelLogger::new(&deps)))
         .unwrap();
 
-    let profile_server = ProfileServer::new(&deps);
-    let emote_server = EmoteServer::new(&deps);
-    let auth_server = AuthServer::new(&deps);
-    let chat_server = ChatServer::new(&deps);
-    let mediaproxy_server = MediaproxyServer::new(&deps);
-    let sync_server = SyncServer::new(&deps, fed_event_receiver);
+    let profile_server = ProfileServer::new(deps.clone());
+    let emote_server = EmoteServer::new(deps.clone());
+    let auth_server = AuthServer::new(deps.clone());
+    let chat_server = ChatServer::new(deps.clone());
+    let mediaproxy_server = MediaproxyServer::new(deps.clone());
+    let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
     let voice_server = VoiceServer::new(&deps);
 
     let profile = ProfileServiceServer::new(profile_server);
@@ -297,7 +297,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
 
     let rest = RestServer::new(deps.clone());
 
-    let batch_server = BatchServer::new(&deps, make_service.clone());
+    let batch_server = BatchServer::new(&deps, &make_service);
     let batch = BatchServiceServer::new(batch_server);
 
     let server = combine_services!(make_service, batch, rest).layer(

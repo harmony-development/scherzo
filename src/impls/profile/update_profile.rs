@@ -5,7 +5,7 @@ pub async fn handler(
     request: Request<UpdateProfileRequest>,
 ) -> ServerResult<Response<UpdateProfileResponse>> {
     #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let UpdateProfileRequest {
         new_user_name,
@@ -14,7 +14,7 @@ pub async fn handler(
         new_is_bot,
     } = request.into_message().await?;
 
-    svc.profile_tree.update_profile_logic(
+    svc.deps.profile_tree.update_profile_logic(
         user_id,
         new_user_name.clone(),
         new_user_avatar.clone(),
@@ -32,7 +32,7 @@ pub async fn handler(
             new_is_bot,
         }),
         None,
-        EventContext::new(svc.chat_tree.calculate_users_seeing_user(user_id)?),
+        EventContext::new(svc.deps.chat_tree.calculate_users_seeing_user(user_id)?),
     );
 
     Ok((UpdateProfileResponse {}).into_response())

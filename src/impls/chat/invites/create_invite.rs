@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<CreateInviteRequest>,
 ) -> ServerResult<Response<CreateInviteResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let CreateInviteRequest {
         guild_id,
@@ -13,12 +12,12 @@ pub async fn handler(
         possible_uses,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "invites.manage.create", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    svc.chat_tree
-        .create_invite_logic(guild_id, name.as_str(), possible_uses)?;
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "invites.manage.create", false)?;
+
+    chat_tree.create_invite_logic(guild_id, name.as_str(), possible_uses)?;
 
     Ok((CreateInviteResponse { invite_id: name }).into_response())
 }

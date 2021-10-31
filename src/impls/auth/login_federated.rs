@@ -23,6 +23,7 @@ pub async fn handler(
         } = TokenData::decode(token.data.as_slice()).map_err(|_| ServerError::InvalidTokenData)?;
 
         let local_user_id = if let Some(id) = svc
+            .deps
             .profile_tree
             .foreign_to_local_id(foreign_id, &server_id)?
         {
@@ -50,7 +51,8 @@ pub async fn handler(
             };
             let buf = rkyv_ser(&profile);
             batch.insert(make_user_profile_key(local_id).to_vec(), buf);
-            svc.profile_tree
+            svc.deps
+                .profile_tree
                 .inner
                 .apply_batch(batch)
                 .map_err(ServerError::DbError)?;
@@ -63,7 +65,7 @@ pub async fn handler(
             session_token: session_token.to_string(),
             user_id: local_user_id,
         };
-        svc.valid_sessions.insert(session_token, local_user_id);
+        svc.deps.valid_sessions.insert(session_token, local_user_id);
 
         return Ok((LoginFederatedResponse {
             session: Some(session),

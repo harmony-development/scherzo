@@ -7,11 +7,13 @@ pub async fn handler(
     let host = svc.auth(&request).await?;
     let key = make_host_key(&host);
     if !svc
+        .deps
         .sync_tree
         .contains_key(&key)
         .map_err(ServerError::DbError)?
     {
-        svc.sync_tree
+        svc.deps
+            .sync_tree
             .insert(&key, &[])
             .map_err(ServerError::DbError)?;
     }

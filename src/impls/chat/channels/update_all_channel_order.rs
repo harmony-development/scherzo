@@ -4,34 +4,32 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<UpdateAllChannelOrderRequest>,
 ) -> ServerResult<Response<UpdateAllChannelOrderResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let UpdateAllChannelOrderRequest {
         guild_id,
         channel_ids,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "channels.manage.move", false)?;
+    let chat_tree = &svc.deps.chat_tree;
+
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "channels.manage.move", false)?;
 
     for channel_id in &channel_ids {
-        svc.chat_tree.does_channel_exist(guild_id, *channel_id)?;
+        chat_tree.does_channel_exist(guild_id, *channel_id)?;
     }
 
     let prefix = make_guild_chan_prefix(guild_id);
-    let channels =
-        svc.chat_tree
-            .chat_tree
-            .scan_prefix(&prefix)
-            .try_fold(Vec::new(), |mut all, res| {
-                let (key, _) = res.map_err(ServerError::from)?;
-                if key.len() == prefix.len() + size_of::<u64>() {
-                    all.push(unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) });
-                }
-                ServerResult::Ok(all)
-            })?;
+    let channels = chat_tree
+        .scan_prefix(&prefix)
+        .try_fold(Vec::new(), |mut all, res| {
+            let (key, _) = res?;
+            if key.len() == prefix.len() + size_of::<u64>() {
+                all.push(unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) });
+            }
+            ServerResult::Ok(all)
+        })?;
 
     for channel_id in channels {
         if !channel_ids.contains(&channel_id) {
@@ -40,8 +38,8 @@ pub async fn handler(
     }
 
     let key = make_guild_chan_ordering_key(guild_id);
-    let serialized_ordering = svc.chat_tree.serialize_list_u64_logic(channel_ids.clone());
-    svc.chat_tree.insert(key, serialized_ordering)?;
+    let serialized_ordering = chat_tree.serialize_list_u64_logic(channel_ids.clone());
+    chat_tree.insert(key, serialized_ordering)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

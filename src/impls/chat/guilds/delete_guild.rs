@@ -4,31 +4,30 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<DeleteGuildRequest>,
 ) -> ServerResult<Response<DeleteGuildResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let DeleteGuildRequest { guild_id } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "guild.manage.delete", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    let guild_members = svc.chat_tree.get_guild_members_logic(guild_id)?.members;
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "guild.manage.delete", false)?;
 
-    let guild_data = svc
-        .chat_tree
-        .chat_tree
-        .scan_prefix(&guild_id.to_be_bytes())
-        .try_fold(Vec::new(), |mut all, res| {
-            all.push(res.map_err(ServerError::from)?.0);
-            ServerResult::Ok(all)
-        })?;
+    let guild_members = chat_tree.get_guild_members_logic(guild_id)?.members;
+
+    let guild_data =
+        chat_tree
+            .scan_prefix(&guild_id.to_be_bytes())
+            .try_fold(Vec::new(), |mut all, res| {
+                all.push(res?.0);
+                ServerResult::Ok(all)
+            })?;
 
     let mut batch = Batch::default();
     for key in guild_data {
         batch.remove(key);
     }
-    svc.chat_tree
+    chat_tree
         .chat_tree
         .apply_batch(batch)
         .map_err(ServerError::DbError)?;
@@ -42,7 +41,7 @@ pub async fn handler(
 
     let mut local_ids = Vec::new();
     for member_id in guild_members {
-        match svc.profile_tree.local_to_foreign_id(member_id)? {
+        match svc.deps.profile_tree.local_to_foreign_id(member_id)? {
             Some((foreign_id, target)) => svc.dispatch_event(
                 target,
                 DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -51,8 +50,7 @@ pub async fn handler(
                 }),
             ),
             None => {
-                svc.chat_tree
-                    .remove_guild_from_guild_list(user_id, guild_id, "")?;
+                chat_tree.remove_guild_from_guild_list(user_id, guild_id, "")?;
                 local_ids.push(member_id);
             }
         }

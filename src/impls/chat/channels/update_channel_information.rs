@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<UpdateChannelInformationRequest>,
 ) -> ServerResult<Response<UpdateChannelInformationResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let UpdateChannelInformationRequest {
         guild_id,
@@ -14,8 +13,10 @@ pub async fn handler(
         new_metadata,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree.check_perms(
+    let chat_tree = &svc.deps.chat_tree;
+
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(
         guild_id,
         Some(channel_id),
         user_id,
@@ -24,7 +25,7 @@ pub async fn handler(
     )?;
 
     let key = make_chan_key(guild_id, channel_id);
-    let mut chan_info = if let Some(raw) = svc.chat_tree.get(key)? {
+    let mut chan_info = if let Some(raw) = chat_tree.get(key)? {
         db::deser_chan(raw)
     } else {
         return Err(ServerError::NoSuchChannel {
@@ -42,7 +43,7 @@ pub async fn handler(
     }
 
     let buf = rkyv_ser(&chan_info);
-    svc.chat_tree.insert(key, buf)?;
+    chat_tree.insert(key, buf)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

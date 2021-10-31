@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<KickUserRequest>,
 ) -> ServerResult<Response<KickUserResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let KickUserRequest {
         guild_id,
@@ -16,12 +15,13 @@ pub async fn handler(
         return Err(ServerError::CantKickOrBanYourself.into());
     }
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "user.manage.kick", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    svc.chat_tree.kick_user_logic(guild_id, user_to_kick)?;
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.is_user_in_guild(guild_id, user_to_kick)?;
+    chat_tree.check_perms(guild_id, None, user_id, "user.manage.kick", false)?;
+
+    chat_tree.kick_user_logic(guild_id, user_to_kick)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

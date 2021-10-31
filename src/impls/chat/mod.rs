@@ -1,10 +1,5 @@
 use std::{
-    collections::HashSet,
-    convert::TryInto,
-    io::BufReader,
-    mem::size_of,
-    ops::Not,
-    path::{Path, PathBuf},
+    collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::Path,
     str::FromStr,
 };
 
@@ -47,14 +42,13 @@ use triomphe::Arc;
 use crate::{
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
     impls::{
-        auth, get_time_secs,
+        get_time_secs,
+        prelude::*,
         rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
     set_proto_name,
 };
-
-use super::{prelude::*, profile::ProfileTree, ActionProcesser};
 
 use channels::*;
 use guilds::*;
@@ -149,29 +143,15 @@ pub type EventDispatcher = UnboundedSender<EventDispatch>;
 
 #[derive(Clone)]
 pub struct ChatServer {
-    host: String,
-    media_root: PathBuf,
-    valid_sessions: auth::SessionMap,
-    chat_tree: ChatTree,
-    profile_tree: ProfileTree,
-    pub broadcast_send: EventSender,
-    dispatch_tx: EventDispatcher,
+    deps: Arc<Dependencies>,
     disable_ratelimits: bool,
-    action_processor: ActionProcesser,
 }
 
 impl ChatServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            host: deps.config.host.clone(),
-            media_root: deps.config.media.media_root.clone(),
-            valid_sessions: deps.valid_sessions.clone(),
-            chat_tree: deps.chat_tree.clone(),
-            profile_tree: deps.profile_tree.clone(),
-            broadcast_send: deps.chat_event_sender.clone(),
-            dispatch_tx: deps.fed_event_dispatcher.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            action_processor: deps.action_processor.clone(),
+            deps,
         }
     }
 
@@ -204,8 +184,8 @@ impl ChatServer {
                 )
         }
 
-        let mut rx = self.broadcast_send.subscribe();
-        let chat_tree = self.chat_tree.clone();
+        let mut rx = self.deps.chat_event_sender.subscribe();
+        let chat_tree = self.deps.chat_tree.clone();
 
         tokio::spawn(async move {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
@@ -274,7 +254,7 @@ impl ChatServer {
             context,
         };
 
-        drop(self.broadcast_send.send(Arc::new(broadcast)));
+        drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
     }
 
     #[inline(always)]
@@ -283,11 +263,11 @@ impl ChatServer {
             host: target,
             event: DispatchEvent { kind: Some(event) },
         };
-        drop(self.dispatch_tx.send(dispatch));
+        drop(self.deps.fed_event_dispatcher.send(dispatch));
     }
 
     fn dispatch_guild_leave(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
-        match self.profile_tree.local_to_foreign_id(user_id)? {
+        match self.deps.profile_tree.local_to_foreign_id(user_id)? {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -296,7 +276,8 @@ impl ChatServer {
                 }),
             ),
             None => {
-                self.chat_tree
+                self.deps
+                    .chat_tree
                     .remove_guild_from_guild_list(user_id, guild_id, "")?;
                 self.send_event_through_chan(
                     EventSub::Homeserver,
@@ -313,7 +294,7 @@ impl ChatServer {
     }
 
     fn dispatch_guild_join(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
-        match self.profile_tree.local_to_foreign_id(user_id)? {
+        match self.deps.profile_tree.local_to_foreign_id(user_id)? {
             Some((foreign_id, target)) => self.dispatch_event(
                 target,
                 DispatchKind::UserAddedToGuild(SyncUserAddedToGuild {
@@ -322,7 +303,8 @@ impl ChatServer {
                 }),
             ),
             None => {
-                self.chat_tree
+                self.deps
+                    .chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, "")?;
                 self.send_event_through_chan(
                     EventSub::Homeserver,

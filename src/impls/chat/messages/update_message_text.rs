@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<UpdateMessageTextRequest>,
 ) -> ServerResult<Response<UpdateMessageTextResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let request = request.into_message().await?;
 
@@ -16,18 +15,16 @@ pub async fn handler(
         new_content,
     } = request;
 
-    svc.chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
+    let chat_tree = &svc.deps.chat_tree;
+
+    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
+    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
 
     if new_content.as_ref().map_or(true, |f| f.text.is_empty()) {
         return Err(ServerError::MessageContentCantBeEmpty.into());
     }
 
-    let (mut message, key) = svc
-        .chat_tree
-        .get_message_logic(guild_id, channel_id, message_id)?;
+    let (mut message, key) = chat_tree.get_message_logic(guild_id, channel_id, message_id)?;
 
     let msg_content = if let Some(content) = &mut message.content {
         content
@@ -43,7 +40,7 @@ pub async fn handler(
     message.edited_at = Some(edited_at);
 
     let buf = rkyv_ser(&message);
-    svc.chat_tree.insert(key, buf)?;
+    chat_tree.insert(key, buf)?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

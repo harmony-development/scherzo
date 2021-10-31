@@ -4,11 +4,11 @@ pub async fn handler(
     svc: &mut ProfileServer,
     request: Request<GetAppDataRequest>,
 ) -> ServerResult<Response<GetAppDataResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let GetAppDataRequest { app_id } = request.into_message().await?;
     let app_data = svc
+        .deps
         .profile_tree
         .get(make_user_metadata_key(user_id, &app_id))?
         .unwrap_or_default();

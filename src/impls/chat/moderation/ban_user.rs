@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<BanUserRequest>,
 ) -> ServerResult<Response<BanUserResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let BanUserRequest {
         guild_id,
@@ -16,14 +15,15 @@ pub async fn handler(
         return Err(ServerError::CantKickOrBanYourself.into());
     }
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "user.manage.ban", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    svc.chat_tree.kick_user_logic(guild_id, user_to_ban)?;
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
+    chat_tree.check_perms(guild_id, None, user_id, "user.manage.ban", false)?;
 
-    svc.chat_tree.insert(
+    chat_tree.kick_user_logic(guild_id, user_to_ban)?;
+
+    chat_tree.insert(
         make_banned_member_key(guild_id, user_to_ban),
         get_time_secs().to_be_bytes(),
     )?;

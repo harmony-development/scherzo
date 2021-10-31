@@ -4,12 +4,13 @@ use harmony_rust_sdk::api::{
         hrpc::{
             exports::hyper,
             server::{router::RoutesFinalized, Service},
+            HttpRequest,
         },
         prost::bytes::Bytes,
     },
 };
 use hyper::{header, http::HeaderValue};
-use tower::Service as _;
+use tower::{buffer::Buffer, Service as _};
 
 use super::prelude::*;
 
@@ -27,28 +28,30 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
     !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
 }
 
-pub struct BatchServer<MkRouter: Service + Sync> {
+pub struct BatchServer {
     disable_ratelimits: bool,
-    mk_router: Arc<MkRouter>,
-    router: RoutesFinalized,
+    router: Buffer<RoutesFinalized, HttpRequest>,
 }
 
-impl<MkRouter: Service + Sync> Clone for BatchServer<MkRouter> {
+impl Clone for BatchServer {
     fn clone(&self) -> Self {
         Self {
             disable_ratelimits: self.disable_ratelimits,
-            mk_router: self.mk_router.clone(),
-            router: self.mk_router.make_routes().build(),
+            router: self.router.clone(),
         }
     }
 }
 
-impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
-    pub fn new(deps: &Dependencies, mk_router: MkRouter) -> Self {
+impl BatchServer {
+    pub fn new<MkRouter: Service>(deps: &Dependencies, mk_router: &MkRouter) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            router: mk_router.make_routes().build(),
-            mk_router: Arc::new(mk_router),
+            // TODO(yusdacra): is this really fine? should we try to automatically create
+            // more buffered services if it nears the bound?
+            router: Buffer::new(
+                mk_router.make_routes().build(),
+                deps.config.policy.max_concurrent_requests,
+            ),
         }
     }
 
@@ -62,7 +65,7 @@ impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
             body: Bytes,
             endpoint: &str,
             auth_header: &Option<HeaderValue>,
-            service: &mut RoutesFinalized,
+            service: &mut Buffer<RoutesFinalized, HttpRequest>,
         ) -> Result<Bytes, HrpcServerError> {
             let mut req = http::Request::builder()
                 .header(header::CONTENT_TYPE, unsafe {
@@ -79,7 +82,10 @@ impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
                     .insert(header::AUTHORIZATION, auth.clone());
             }
 
-            let reply = service.call(req).await.unwrap();
+            let reply = service
+                .call(req)
+                .await
+                .map_err(|err| (StatusCode::TOO_MANY_REQUESTS, err.to_string()))?;
             let body = hyper::body::to_bytes(reply.into_body()).await.unwrap();
 
             Ok(body)
@@ -125,7 +131,7 @@ impl<MkRouter: Service + Sync> BatchServer<MkRouter> {
     }
 }
 
-impl<MkRouter: Service + Sync> BatchService for BatchServer<MkRouter> {
+impl BatchService for BatchServer {
     impl_unary_handlers! {
         #[rate(5, 5)]
         batch, BatchRequest, BatchResponse;

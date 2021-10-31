@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<CreateChannelRequest>,
 ) -> ServerResult<Response<CreateChannelResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let CreateChannelRequest {
         guild_id,
@@ -15,11 +14,12 @@ pub async fn handler(
         metadata,
     } = request.into_message().await?;
 
-    svc.chat_tree.check_guild_user(guild_id, user_id)?;
-    svc.chat_tree
-        .check_perms(guild_id, None, user_id, "channels.manage.create", false)?;
+    let chat_tree = &svc.deps.chat_tree;
 
-    let channel_id = svc.chat_tree.create_channel_logic(
+    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_perms(guild_id, None, user_id, "channels.manage.create", false)?;
+
+    let channel_id = chat_tree.create_channel_logic(
         guild_id,
         channel_name.clone(),
         ChannelKind::from_i32(kind).unwrap_or_default(),

@@ -11,15 +11,11 @@ use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
-    config::{FederationConfig, PolicyConfig},
     key::{self as keys, Manager as KeyManager},
     set_proto_name,
 };
 
-use super::{
-    gen_rand_arr, gen_rand_inline_str, gen_rand_u64, get_time_secs, prelude::*,
-    profile::ProfileTree,
-};
+use super::{gen_rand_arr, gen_rand_inline_str, gen_rand_u64, get_time_secs, prelude::*};
 
 use db::{
     auth::*,
@@ -76,20 +72,15 @@ impl AuthExt for DashMap<SmolStr, u64, RandomState> {
 }
 #[derive(Clone)]
 pub struct AuthServer {
-    valid_sessions: SessionMap,
     step_map: Arc<DashMap<SmolStr, Vec<AuthStep>, RandomState>>,
     send_step: Arc<DashMap<SmolStr, Sender<AuthStep>, RandomState>>,
     queued_steps: Arc<DashMap<SmolStr, Vec<AuthStep>, RandomState>>,
-    auth_tree: AuthTree,
-    profile_tree: ProfileTree,
-    keys_manager: Option<Arc<KeyManager>>,
-    federation_config: Option<FederationConfig>,
-    policy_config: PolicyConfig,
     disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl AuthServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
         let att = deps.auth_tree.clone();
         let ptt = deps.profile_tree.clone();
         let vs = deps.valid_sessions.clone();
@@ -173,16 +164,11 @@ impl AuthServer {
         });
 
         Self {
-            valid_sessions: deps.valid_sessions.clone(),
             step_map: DashMap::default().into(),
             send_step: DashMap::default().into(),
             queued_steps: DashMap::default().into(),
-            auth_tree: deps.auth_tree.clone(),
-            profile_tree: deps.profile_tree.clone(),
-            keys_manager: deps.key_manager.clone(),
-            federation_config: deps.config.federation.clone(),
-            policy_config: deps.config.policy.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            deps,
         }
     }
 
@@ -191,7 +177,7 @@ impl AuthServer {
         let mut rng = rand::thread_rng();
         let mut raw = gen_rand_arr::<_, 22>(&mut rng);
         let mut token = unsafe { std::str::from_utf8_unchecked(&raw) };
-        while self.valid_sessions.contains_key(token) {
+        while self.deps.valid_sessions.contains_key(token) {
             raw = gen_rand_arr::<_, 22>(&mut rng);
             token = unsafe { std::str::from_utf8_unchecked(&raw) };
         }
@@ -199,13 +185,16 @@ impl AuthServer {
     }
 
     fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
-        self.keys_manager
+        self.deps
+            .key_manager
             .as_ref()
             .ok_or(ServerError::FederationDisabled)
     }
 
     fn is_host_allowed(&self, host: &str) -> Result<(), ServerError> {
-        self.federation_config
+        self.deps
+            .config
+            .federation
             .as_ref()
             .map_or(Err(ServerError::FederationDisabled), |conf| {
                 conf.is_host_allowed(host)
@@ -243,6 +232,8 @@ pub struct AuthTree {
 }
 
 impl AuthTree {
+    impl_db_methods!(inner);
+
     pub fn new(db: &dyn Db) -> DbResult<Self> {
         Ok(Self {
             inner: db.open_tree(b"auth")?,

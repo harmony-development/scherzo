@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut EmoteServer,
     request: Request<CreateEmotePackRequest>,
 ) -> ServerResult<Response<CreateEmotePackResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let CreateEmotePackRequest { pack_name } = request.into_message().await?;
 
@@ -19,9 +18,11 @@ pub async fn handler(
     };
     let data = rkyv_ser(&emote_pack);
 
-    svc.emote_tree.insert(key, data)?;
+    svc.deps.emote_tree.insert(key, data)?;
 
-    svc.emote_tree.equip_emote_pack_logic(user_id, pack_id)?;
+    svc.deps
+        .emote_tree
+        .equip_emote_pack_logic(user_id, pack_id)?;
     svc.send_event_through_chan(
         EventSub::Homeserver,
         stream_event::Event::EmotePackAdded(EmotePackAdded {

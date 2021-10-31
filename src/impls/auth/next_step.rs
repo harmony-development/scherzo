@@ -67,7 +67,7 @@ pub async fn handler(
                                             r#type: "password".to_string(),
                                         },
                                     ];
-                                    if svc.policy_config.disable_registration {
+                                    if svc.deps.config.policy.disable_registration {
                                         fields.push(auth_step::form::FormField {
                                             name: "token".to_string(),
                                             r#type: "password".to_string(),
@@ -173,11 +173,8 @@ pub async fn handler(
                                 let password_hashed = hash_password(password_raw);
                                 let email = try_get_email(&mut values)?;
 
-                                let user_id = if let Some(user_id) = svc
-                                    .auth_tree
-                                    .inner
-                                    .get(email.as_bytes())
-                                    .map_err(ServerError::DbError)?
+                                let user_id = if let Some(user_id) =
+                                    svc.deps.auth_tree.get(email.as_bytes())?
                                 {
                                     // Safety: this unwrap can never cause UB since we only store u64
                                     u64::from_be_bytes(unsafe {
@@ -191,10 +188,9 @@ pub async fn handler(
                                 };
 
                                 if svc
+                                    .deps
                                     .auth_tree
-                                    .inner
-                                    .get(user_id.to_be_bytes().as_ref())
-                                    .map_err(ServerError::DbError)?
+                                    .get(user_id.to_be_bytes().as_ref())?
                                     .map_or(true, |pass| pass != password_hashed.as_ref())
                                 {
                                     return Err(ServerError::WrongUserOrPassword {
@@ -216,7 +212,8 @@ pub async fn handler(
                                     // [ref:atime_u64_value]
                                     get_time_secs().to_be_bytes().to_vec(),
                                 );
-                                svc.auth_tree
+                                svc.deps
+                                    .auth_tree
                                     .inner
                                     .apply_batch(batch)
                                     .map_err(ServerError::DbError)?;
@@ -232,17 +229,16 @@ pub async fn handler(
                                     })),
                                 };
 
-                                svc.valid_sessions.insert(session_token, user_id);
+                                svc.deps.valid_sessions.insert(session_token, user_id);
                             }
                             "register" => {
-                                if svc.policy_config.disable_registration {
+                                if svc.deps.config.policy.disable_registration {
                                     let token_raw = try_get_token(&mut values)?;
                                     let token_hashed = hash_password(token_raw);
                                     if svc
+                                        .deps
                                         .auth_tree
-                                        .inner
-                                        .get(&reg_token_key(token_hashed.as_ref()))
-                                        .map_err(ServerError::DbError)?
+                                        .get(&reg_token_key(token_hashed.as_ref()))?
                                         .is_none()
                                     {
                                         return Err(ServerError::InvalidRegistrationToken.into());
@@ -253,13 +249,7 @@ pub async fn handler(
                                 let email = try_get_email(&mut values)?;
                                 let username = try_get_username(&mut values)?;
 
-                                if svc
-                                    .auth_tree
-                                    .inner
-                                    .get(email.as_bytes())
-                                    .map_err(ServerError::DbError)?
-                                    .is_some()
-                                {
+                                if svc.deps.auth_tree.get(email.as_bytes())?.is_some() {
                                     return Err(ServerError::UserAlreadyExists.into());
                                 }
 
@@ -283,7 +273,8 @@ pub async fn handler(
                                     // [ref:atime_u64_value]
                                     get_time_secs().to_be_bytes().to_vec(),
                                 );
-                                svc.auth_tree
+                                svc.deps
+                                    .auth_tree
                                     .inner
                                     .apply_batch(batch)
                                     .expect("failed to register into db");
@@ -292,7 +283,8 @@ pub async fn handler(
                                     user_name: username,
                                     ..Default::default()
                                 });
-                                svc.profile_tree
+                                svc.deps
+                                    .profile_tree
                                     .insert(make_user_profile_key(user_id), buf)?;
 
                                 tracing::debug!("new user {} registered", user_id,);
@@ -306,7 +298,7 @@ pub async fn handler(
                                     })),
                                 };
 
-                                svc.valid_sessions.insert(session_token, user_id);
+                                svc.deps.valid_sessions.insert(session_token, user_id);
                             }
                             _ => unreachable!(),
                         }

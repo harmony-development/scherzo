@@ -4,12 +4,12 @@ pub async fn handler(
     svc: &mut EmoteServer,
     request: Request<GetEmotePacksRequest>,
 ) -> ServerResult<Response<GetEmotePacksResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let prefix = make_equipped_emote_prefix(user_id);
     let equipped_packs =
-        svc.emote_tree
+        svc.deps
+            .emote_tree
             .inner
             .scan_prefix(&prefix)
             .try_fold(Vec::new(), |mut all, res| {
@@ -26,6 +26,7 @@ pub async fn handler(
             })?;
 
     let packs = svc
+        .deps
         .emote_tree
         .inner
         .scan_prefix(EMOTEPACK_PREFIX)

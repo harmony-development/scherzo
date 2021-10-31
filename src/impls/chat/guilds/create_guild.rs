@@ -4,8 +4,7 @@ pub async fn handler(
     svc: &mut ChatServer,
     request: Request<CreateGuildRequest>,
 ) -> ServerResult<Response<CreateGuildResponse>> {
-    #[allow(unused_variables)]
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.valid_sessions.auth(&request)?;
 
     let CreateGuildRequest {
         metadata,
@@ -13,7 +12,7 @@ pub async fn handler(
         picture,
     } = request.into_message().await?;
 
-    let guild_id = svc.chat_tree.create_guild_logic(
+    let guild_id = svc.deps.chat_tree.create_guild_logic(
         user_id,
         name,
         picture,

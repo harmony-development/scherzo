@@ -4,7 +4,7 @@ use harmony_rust_sdk::api::{
 };
 
 use super::{
-    chat::{EventBroadcast, EventContext, EventSender, EventSub, PermCheck},
+    chat::{EventBroadcast, EventContext, EventSub, PermCheck},
     gen_rand_u64,
     prelude::*,
 };
@@ -25,19 +25,15 @@ pub mod get_emote_packs;
 
 #[derive(Clone)]
 pub struct EmoteServer {
-    emote_tree: EmoteTree,
-    valid_sessions: SessionMap,
-    pub broadcast_send: EventSender,
     disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl EmoteServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            emote_tree: deps.emote_tree.clone(),
-            valid_sessions: deps.valid_sessions.clone(),
-            broadcast_send: deps.chat_event_sender.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            deps,
         }
     }
 
@@ -51,7 +47,7 @@ impl EmoteServer {
     ) {
         let broadcast = EventBroadcast::new(sub, Event::Emote(event), perm_check, context);
 
-        drop(self.broadcast_send.send(Arc::new(broadcast)));
+        drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
     }
 }
 
