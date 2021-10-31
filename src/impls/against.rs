@@ -16,10 +16,19 @@ pub struct AgainstLayer {
     header_name: HeaderName,
 }
 
-impl Layer<Handler> for AgainstLayer {
+impl<S> Layer<S> for AgainstLayer
+where
+    S: tower::Service<
+            HttpRequest,
+            Response = HttpResponse,
+            Error = Infallible,
+            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
+        > + Send
+        + 'static,
+{
     type Service = Handler;
 
-    fn layer(&self, mut inner: Handler) -> Self::Service {
+    fn layer(&self, mut inner: S) -> Self::Service {
         let http = self.http.clone();
         let header_name = self.header_name.clone();
         let service = service_fn(

@@ -34,6 +34,7 @@ use scherzo::{
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
+        prelude::HrpcLayer,
         profile::ProfileServer,
         rest::RestServer,
         sync::SyncServer,
@@ -301,11 +302,11 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
 
     let server = combine_services!(make_service, batch, rest).layer(
         ServiceBuilder::new()
+            .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
+                deps.config.policy.max_concurrent_requests,
+            )))
             .layer(against::AgainstLayer::default())
             .layer(hrpc_recommended_layers(filter_auth))
-            .layer(tower::limit::ConcurrencyLimitLayer::new(
-                deps.config.policy.max_concurrent_requests,
-            ))
             .into_inner(),
     );
 
