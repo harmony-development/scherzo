@@ -187,6 +187,7 @@ pub struct AdminActionError;
 #[derive(Debug, Clone, Copy)]
 pub enum AdminAction {
     GenerateRegistrationToken,
+    Help,
 }
 
 impl FromStr for AdminAction {
@@ -195,11 +196,18 @@ impl FromStr for AdminAction {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let act = match s.trim_start_matches('/').trim() {
             "generate registration-token" => AdminAction::GenerateRegistrationToken,
+            "help" => AdminAction::Help,
             _ => return Err(AdminActionError),
         };
         Ok(act)
     }
 }
+
+pub const HELP_TEXT: &str = r#"
+commands are:
+`generate registration-token` -> generates a registration token
+`help` -> shows help
+"#;
 
 #[derive(Clone)]
 pub struct ActionProcesser {
@@ -215,6 +223,7 @@ impl ActionProcesser {
                     let token = self.auth_tree.put_rand_reg_token()?;
                     Ok(token.into())
                 }
+                AdminAction::Help => Ok(HELP_TEXT.to_string()),
             },
             Err(_) => Ok(format!("invalid command: `{}`", action)),
         }

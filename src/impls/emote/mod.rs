@@ -37,6 +37,11 @@ impl EmoteServer {
         }
     }
 
+    pub fn batch(mut self) -> Self {
+        self.disable_ratelimits = true;
+        self
+    }
+
     #[inline(always)]
     fn send_event_through_chan(
         &self,

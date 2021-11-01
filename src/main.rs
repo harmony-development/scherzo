@@ -9,7 +9,10 @@ use std::{
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
-    chat::{chat_service_server::ChatServiceServer, guild_kind, ChannelKind, Permission},
+    chat::{
+        chat_service_server::ChatServiceServer, content, guild_kind, ChannelKind, FormattedText,
+        Permission,
+    },
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
         combine_services,
@@ -39,7 +42,7 @@ use scherzo::{
         rest::RestServer,
         sync::SyncServer,
         voice::VoiceServer,
-        Dependencies,
+        Dependencies, HELP_TEXT,
     },
 };
 use tower::ServiceBuilder;
@@ -270,6 +273,15 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         deps.chat_tree
             .set_admin_guild_keys(guild_id, log_id, cmd_id)
             .unwrap();
+        deps.chat_tree
+            .send_with_system(
+                guild_id,
+                cmd_id,
+                content::Content::TextMessage(content::TextContent {
+                    content: Some(FormattedText::new(HELP_TEXT.to_string(), Vec::new())),
+                }),
+            )
+            .unwrap();
         warn!("admin guild created! use the invite {} to join", invite_id);
     }
 
@@ -285,30 +297,38 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
     let voice_server = VoiceServer::new(&deps);
 
-    let profile = ProfileServiceServer::new(profile_server);
-    let emote = EmoteServiceServer::new(emote_server);
-    let auth = AuthServiceServer::new(auth_server);
-    let chat = ChatServiceServer::new(chat_server);
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
+    let profile = ProfileServiceServer::new(profile_server.clone());
+    let emote = EmoteServiceServer::new(emote_server.clone());
+    let auth = AuthServiceServer::new(auth_server.clone());
+    let chat = ChatServiceServer::new(chat_server.clone());
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
     let sync = PostboxServiceServer::new(sync_server);
     let voice = VoiceServiceServer::new(voice_server);
 
-    let make_service = combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice);
+    let batchable_services = {
+        let profile = ProfileServiceServer::new(profile_server.batch());
+        let emote = EmoteServiceServer::new(emote_server.batch());
+        let auth = AuthServiceServer::new(auth_server.batch());
+        let chat = ChatServiceServer::new(chat_server.batch());
+        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
+        combine_services!(profile, emote, auth, chat, mediaproxy)
+    };
 
     let rest = RestServer::new(deps.clone());
 
-    let batch_server = BatchServer::new(&deps, &make_service);
+    let batch_server = BatchServer::new(&deps, batchable_services);
     let batch = BatchServiceServer::new(batch_server);
 
-    let server = combine_services!(make_service, batch, rest).layer(
-        ServiceBuilder::new()
-            .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
-                deps.config.policy.max_concurrent_requests,
-            )))
-            .layer(against::AgainstLayer::default())
-            .layer(hrpc_recommended_layers(filter_auth))
-            .into_inner(),
-    );
+    let server =
+        combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice, batch, rest).layer(
+            ServiceBuilder::new()
+                .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
+                    deps.config.policy.max_concurrent_requests,
+                )))
+                .layer(against::AgainstLayer::default())
+                .layer(hrpc_recommended_layers(filter_auth))
+                .into_inner(),
+        );
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();

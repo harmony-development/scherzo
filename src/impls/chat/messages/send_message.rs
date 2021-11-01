@@ -61,11 +61,9 @@ pub async fn handler(
     );
 
     if let Some(msg) = action_content {
-        let content = Content {
-            content: Some(content::Content::TextMessage(content::TextContent {
-                content: Some(FormattedText::new(msg, Vec::new())),
-            })),
-        };
+        let content = content::Content::TextMessage(content::TextContent {
+            content: Some(FormattedText::new(msg, Vec::new())),
+        });
         let (message_id, message) = chat_tree.send_with_system(guild_id, channel_id, content)?;
         svc.send_event_through_chan(
             EventSub::Guild(guild_id),

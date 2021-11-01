@@ -33,6 +33,7 @@ ahash = { version = "0.7", default-features = false }
 
 tokio = { version = "1.9", features = ["macros", "rt-multi-thread", "fs", "tracing"] }
 tokio-util = "0.6.7"
+deadpool = { version = "0.9.1", features = ["managed"] }
 
 tracing = "0.1"
 tracing-subscriber = "0.3"

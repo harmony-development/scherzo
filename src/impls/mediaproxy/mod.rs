@@ -95,6 +95,11 @@ impl MediaproxyServer {
         }
     }
 
+    pub fn batch(mut self) -> Self {
+        self.disable_ratelimits = true;
+        self
+    }
+
     async fn fetch_metadata(&self, raw_url: String) -> Result<Metadata, ServerError> {
         // Get from cache if available
         if let Some(value) = get_from_cache(&raw_url) {

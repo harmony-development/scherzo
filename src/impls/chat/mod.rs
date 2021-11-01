@@ -155,6 +155,11 @@ impl ChatServer {
         }
     }
 
+    pub fn batch(mut self) -> Self {
+        self.disable_ratelimits = true;
+        self
+    }
+
     fn spawn_event_stream_processor(
         &self,
         user_id: u64,
@@ -1585,12 +1590,14 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        content: Content,
+        content: content::Content,
     ) -> ServerResult<(u64, HarmonyMessage)> {
         let request = SendMessageRequest::default()
             .with_guild_id(guild_id)
             .with_channel_id(channel_id)
-            .with_content(content)
+            .with_content(Content {
+                content: Some(content),
+            })
             .with_overrides(Overrides {
                 username: Some("System".to_string()),
                 reason: Some(overrides::Reason::SystemMessage(Empty {})),
@@ -1741,17 +1748,15 @@ where
                     .format_fields(fields.as_writer(), event)?;
                 let body_text = fields.fields;
 
-                let content = Content {
-                    content: Some(content::Content::EmbedMessage(content::EmbedContent {
-                        embed: Some(Box::new(Embed {
-                            title: format!("{} {}:", metadata.level(), metadata.target()),
-                            body: Some(FormattedText::new(body_text, Vec::new())),
-                            fields: embed_fields,
-                            color,
-                            ..Default::default()
-                        })),
+                let content = content::Content::EmbedMessage(content::EmbedContent {
+                    embed: Some(Box::new(Embed {
+                        title: format!("{} {}:", metadata.level(), metadata.target()),
+                        body: Some(FormattedText::new(body_text, Vec::new())),
+                        fields: embed_fields,
+                        color,
+                        ..Default::default()
                     })),
-                };
+                });
                 let (message_id, message) = chat_tree
                     .send_with_system(guild_id, channel_id, content)
                     .unwrap();

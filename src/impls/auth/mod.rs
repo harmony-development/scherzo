@@ -172,6 +172,11 @@ impl AuthServer {
         }
     }
 
+    pub fn batch(mut self) -> Self {
+        self.disable_ratelimits = true;
+        self
+    }
+
     // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
     fn gen_auth_token(&self) -> SmolStr {
         let mut rng = rand::thread_rng();
