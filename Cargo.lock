@@ -393,7 +393,7 @@ dependencies = [
  "humantime",
  "serde",
  "serde_json",
- "thread_local",
+ "thread_local 1.1.3",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -539,24 +539,6 @@ dependencies = [
  "num_cpus",
  "parking_lot",
 ]
-
-[[package]]
-name = "deadpool"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51dc1e92ba8164da131a4753a26cb1e7ebcfe617e56bb3c2b6136049c8ee5730"
-dependencies = [
- "async-trait",
- "deadpool-runtime",
- "num_cpus",
- "tokio",
-]
-
-[[package]]
-name = "deadpool-runtime"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa37046cc0f6c3cc6090fbdbf73ef0b8ef4cfcc37f6befc0020f63e8cf121e1"
 
 [[package]]
 name = "deflate"
@@ -2138,7 +2120,6 @@ dependencies = [
  "cached",
  "console-subscriber",
  "dashmap",
- "deadpool",
  "ed25519-compact",
  "git-version",
  "harmony_rust_sdk",
@@ -2159,6 +2140,7 @@ dependencies = [
  "sha3",
  "sled",
  "smol_str",
+ "swimmer",
  "tokio",
  "tokio-util",
  "toml",
@@ -2423,6 +2405,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
+name = "swimmer"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "963def60929892c4b13817d852a02ae7516d43e5aa8e0eeb560f580b1ce1e157"
+dependencies = [
+ "thread_local 0.3.6",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2476,6 +2467,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "thread_local"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6b53e329000edc2b34dbe8545fd20e55a333362d0a321909685a19bd28c3f1b"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]
@@ -2784,7 +2784,7 @@ dependencies = [
  "ansi_term",
  "sharded-slab",
  "smallvec",
- "thread_local",
+ "thread_local 1.1.3",
  "tracing-core",
  "tracing-log",
 ]

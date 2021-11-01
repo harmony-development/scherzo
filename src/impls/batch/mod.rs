@@ -1,17 +1,15 @@
-use std::convert::Infallible;
-
-use deadpool::managed::{self, Pool};
 use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
         hrpc::{
             exports::hyper,
-            server::{gen_prelude::BoxFuture, router::RoutesFinalized, Service},
+            server::{router::RoutesFinalized, Service},
         },
         prost::bytes::Bytes,
     },
 };
 use hyper::{header, http::HeaderValue};
+use swimmer::{Pool, PoolBuilder, Recyclable};
 use tower::Service as _;
 
 use super::prelude::*;
@@ -94,6 +92,19 @@ impl BatchReq {
     }
 }
 
+struct RecyclableService(RoutesFinalized);
+
+impl Recyclable for RecyclableService {
+    fn new() -> Self
+    where
+        Self: Sized,
+    {
+        unreachable!("won't panic because we use the supplier function")
+    }
+
+    fn recycle(&mut self) {}
+}
+
 enum Endpoint {
     Same(String),
     Different(Vec<String>),
@@ -105,56 +116,20 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
 }
 
 #[derive(Clone)]
-struct SvcManager<Svc: Service + Sync> {
-    svc: Svc,
-}
-
-impl<Svc: Service + Sync> managed::Manager for SvcManager<Svc> {
-    type Type = RoutesFinalized;
-    type Error = Infallible;
-
-    fn create<'life0, 'async_trait>(
-        &'life0 self,
-    ) -> BoxFuture<'async_trait, Result<Self::Type, Self::Error>>
-    where
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        Box::pin(std::future::ready(Ok(self.svc.make_routes().build())))
-    }
-
-    fn recycle<'life0, 'life1, 'async_trait>(
-        &'life0 self,
-        _obj: &'life1 mut Self::Type,
-    ) -> BoxFuture<'async_trait, managed::RecycleResult<Self::Error>>
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        Box::pin(std::future::ready(Ok(())))
-    }
-}
-
-pub struct BatchServer<Svc: Service + Sync> {
+pub struct BatchServer {
     disable_ratelimits: bool,
-    svc_pool: Pool<SvcManager<Svc>>,
+    svc_pool: Arc<Pool<RecyclableService>>,
 }
 
-impl<Svc: Service + Sync + Clone> Clone for BatchServer<Svc> {
-    fn clone(&self) -> Self {
-        Self {
-            disable_ratelimits: self.disable_ratelimits,
-            svc_pool: self.svc_pool.clone(),
-        }
-    }
-}
-
-impl<Svc: Service + Sync> BatchServer<Svc> {
-    pub fn new(deps: &Dependencies, svc: Svc) -> Self {
+impl BatchServer {
+    pub fn new<Svc: Service + Sync>(deps: &Dependencies, svc: Svc) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
-            svc_pool: Pool::builder(SvcManager { svc }).build().unwrap(),
+            svc_pool: Arc::new(
+                PoolBuilder::default()
+                    .with_supplier(move || RecyclableService(svc.make_routes().build()))
+                    .build(),
+            ),
         }
     }
 
@@ -164,18 +139,18 @@ impl<Svc: Service + Sync> BatchServer<Svc> {
         endpoint: Endpoint,
         auth_header: Option<HeaderValue>,
     ) -> ServerResult<Vec<Bytes>> {
-        let mut service = self.svc_pool.get().await.unwrap();
+        let mut service = self.svc_pool.get();
         (BatchReq {
             bodies,
             endpoint,
             auth_header,
         })
-        .process_req(&mut service)
+        .process_req(&mut service.0)
         .await
     }
 }
 
-impl<Svc: Service + Sync + Clone> BatchService for BatchServer<Svc> {
+impl BatchService for BatchServer {
     impl_unary_handlers! {
         #[rate(5, 5)]
         batch, BatchRequest, BatchResponse;
