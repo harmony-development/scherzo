@@ -29,7 +29,7 @@ with all options available.
     - dynamic auth is implemented (login and register by email)
 - Chat service: (implemented)
 - Mediaproxy service: (implemented)
-- Voice service: (not started)
+- Voice service: (implemented)
 - Rest APIs: (implemented)
 - Federation: (implemented)
 
