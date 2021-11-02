@@ -7,6 +7,7 @@ pub mod mediaproxy;
 pub mod profile;
 pub mod rest;
 pub mod sync;
+#[cfg(feature = "voice")]
 pub mod voice;
 
 use hyper::Uri;

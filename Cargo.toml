@@ -10,6 +10,7 @@ edition = "2021"
 
 [features]
 default = ["sled"]
+voice = ["mediasoup"]
 
 [dependencies]
 scherzo_derive = { path = "./scherzo_derive" }
@@ -61,7 +62,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 rkyv = "0.7"
 
-mediasoup = "0.8"
+mediasoup = { version = "0.8", optional = true }
 
 # migration protocols
 # sdk_migration_two = { package = "harmony_rust_sdk", git = "https://github.com/harmony-development/harmony_rust_sdk.git", rev = "dfcaca4ab04992afd47d21a6610bb8600cbe48b8" }

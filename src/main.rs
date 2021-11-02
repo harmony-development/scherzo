@@ -6,6 +6,12 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "voice")]
+mod voice {
+    pub(super) use harmony_rust_sdk::api::voice::voice_service_server::VoiceServiceServer;
+    pub(super) use scherzo::impls::voice::VoiceServer;
+}
+
 use harmony_rust_sdk::api::{
     auth::auth_service_server::AuthServiceServer,
     batch::batch_service_server::BatchServiceServer,
@@ -21,7 +27,6 @@ use harmony_rust_sdk::api::{
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
-    voice::voice_service_server::VoiceServiceServer,
 };
 use hyper::header::{self, HeaderName};
 use scherzo::{
@@ -41,7 +46,6 @@ use scherzo::{
         profile::ProfileServer,
         rest::RestServer,
         sync::SyncServer,
-        voice::VoiceServer,
         Dependencies, HELP_TEXT,
     },
 };
@@ -295,7 +299,8 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     let chat_server = ChatServer::new(deps.clone());
     let mediaproxy_server = MediaproxyServer::new(deps.clone());
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
-    let voice_server = VoiceServer::new(&deps);
+    #[cfg(feature = "voice")]
+    let voice_server = voice::VoiceServer::new(&deps);
 
     let profile = ProfileServiceServer::new(profile_server.clone());
     let emote = EmoteServiceServer::new(emote_server.clone());
@@ -303,7 +308,8 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     let chat = ChatServiceServer::new(chat_server.clone());
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
     let sync = PostboxServiceServer::new(sync_server);
-    let voice = VoiceServiceServer::new(voice_server);
+    #[cfg(feature = "voice")]
+    let voice = voice::VoiceServiceServer::new(voice_server);
 
     let batchable_services = {
         let profile = ProfileServiceServer::new(profile_server.batch());
@@ -319,16 +325,27 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     let batch_server = BatchServer::new(&deps, batchable_services);
     let batch = BatchServiceServer::new(batch_server);
 
-    let server =
-        combine_services!(profile, emote, auth, chat, mediaproxy, sync, voice, batch, rest).layer(
-            ServiceBuilder::new()
-                .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
-                    deps.config.policy.max_concurrent_requests,
-                )))
-                .layer(against::AgainstLayer::default())
-                .layer(hrpc_recommended_layers(filter_auth))
-                .into_inner(),
-        );
+    let server = combine_services!(
+        profile,
+        emote,
+        auth,
+        chat,
+        mediaproxy,
+        sync,
+        #[cfg(feature = "voice")]
+        voice,
+        batch,
+        rest
+    )
+    .layer(
+        ServiceBuilder::new()
+            .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
+                deps.config.policy.max_concurrent_requests,
+            )))
+            .layer(against::AgainstLayer::default())
+            .layer(hrpc_recommended_layers(filter_auth))
+            .into_inner(),
+    );
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
