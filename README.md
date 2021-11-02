@@ -2,7 +2,8 @@
 
 Harmony server implemented in Rust.
 
-It uses [warp](https://github.com/seanmonstar/warp) for serving HTTP via [hrpc-rs](https://github.com/harmony-development/hrpc-rs), and currently supports [sled](https://github.com/spacejam/sled) as a database backend.
+It uses [hyper] for serving HTTP via [hrpc-rs], and currently supports [sled]
+as a database backend.
 
 ## Deploy
 
@@ -19,7 +20,8 @@ mkdir scherzo && cd scherzo && curl -L https://git.io/Jn9Lo > scherzo && chmod +
 
 ## Configuration
 
-See the [example config](./example_config.toml) for a commented config file with all options available.
+See the [example config](./example_config.toml) for a commented config file
+with all options available.
 
 ## Roadmap
 
@@ -44,3 +46,7 @@ If you have Nix, you can just do:
 - Non-flakes: `nix-build` to build, `nix-shell shell.nix` for development shell
 
 You can also get an executable binary from the latest `Continous build` release.
+
+[hyper]: https://github.com/tokio-rs/hyper
+[hrpc-rs]: https://github.com/harmony-development/hrpc-rs
+[sled]: https://github.com/spacejam/sled
