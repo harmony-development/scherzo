@@ -69,6 +69,7 @@ ignore = [
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
 # The lint level for crates which do not have a detectable license
+# TODO: make PR to tokio-console to add the license identifiers so we can set this to deny again
 unlicensed = "warn"
 # List of explictly allowed licenses
 # See https://spdx.org/licenses/ for list of possible licenses
