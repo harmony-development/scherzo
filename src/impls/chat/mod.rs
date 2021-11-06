@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::Path,
-    str::FromStr,
+    str::FromStr, time::Duration,
 };
 
 use harmony_rust_sdk::api::{
@@ -11,7 +11,6 @@ use harmony_rust_sdk::api::{
     emote::Emote,
     exports::hrpc::{
         bail_result,
-        body::BoxBody,
         server::{error::ServerError as HrpcServerError, socket::Socket},
         Request,
     },
@@ -37,6 +36,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tower::limit::RateLimitLayer;
 use triomphe::Arc;
 
 use crate::{
@@ -47,7 +47,7 @@ use crate::{
         rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
-    set_proto_name,
+    set_proto_name_layer,
 };
 
 use channels::*;
@@ -452,8 +452,23 @@ impl chat_service_server::ChatService for ChatServer {
     }
 
     impl_ws_handlers! {
-        #[rate(1, 10)]
-        stream_events, stream_events_on_upgrade, StreamEventsRequest, StreamEventsResponse;
+        stream_events, StreamEventsRequest, StreamEventsResponse;
+    }
+
+    fn stream_events_middleware(&self, _endpoint: &'static str) -> Option<HrpcLayer> {
+        let rate = self
+            .disable_ratelimits
+            .then(|| RateLimitLayer::new(1, Duration::from_secs(10)));
+
+        rate.map(|r| {
+            HrpcLayer::new(
+                tower::ServiceBuilder::new()
+                    .layer(set_proto_name_layer())
+                    .layer(r)
+                    .into_inner(),
+            )
+        })
+        .or_else(|| Some(HrpcLayer::new(set_proto_name_layer())))
     }
 }
 

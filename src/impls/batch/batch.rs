@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut BatchServer,
+    svc: &BatchServer,
     mut request: Request<BatchRequest>,
 ) -> ServerResult<Response<BatchResponse>> {
     let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);

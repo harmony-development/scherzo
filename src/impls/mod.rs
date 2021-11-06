@@ -238,7 +238,7 @@ macro_rules! impl_unary_handlers {
     )+) => {
         $(
             $( #[$attr] )*
-            fn $handler(&mut self, request: Request<$req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<Response<$resp>>> {
+            fn $handler(&self, request: Request<$req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<Response<$resp>>> {
                 Box::pin($handler::handler(self, request))
             }
         )+
@@ -248,16 +248,12 @@ macro_rules! impl_unary_handlers {
 macro_rules! impl_ws_handlers {
     ($(
         $( #[$attr:meta] )*
-        $handler:ident, $handler_on_upgrade:ident, $req:ty, $resp:ty;
+        $handler:ident, $req:ty, $resp:ty;
     )+) => {
         $(
             $( #[$attr] )*
-            fn $handler(&mut self, request: Request<()>, socket: Socket<$req, $resp>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
+            fn $handler(&self, request: Request<()>, socket: Socket<$req, $resp>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
                 Box::pin($handler::handler(self, request, socket))
-            }
-
-            fn $handler_on_upgrade(&mut self, response: HttpResponse) -> HttpResponse {
-                $handler::on_upgrade(self, response)
             }
         )+
     };

@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut EmoteServer,
+    svc: &EmoteServer,
     request: Request<AddEmoteToPackRequest>,
 ) -> ServerResult<Response<AddEmoteToPackResponse>> {
     let user_id = svc.deps.valid_sessions.auth(&request)?;

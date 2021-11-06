@@ -12,7 +12,6 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            body::BoxBody,
             exports::http::{self, uri::InvalidUri as UrlParseError, StatusCode},
             server::error::CustomError,
         },
@@ -23,6 +22,7 @@ use harmony_rust_sdk::api::{
 use hyper::Uri;
 use parking_lot::Mutex;
 use smol_str::SmolStr;
+use tower_http::set_header::SetResponseHeaderLayer;
 use triomphe::Arc;
 
 pub mod config;
@@ -36,13 +36,10 @@ pub const SCHERZO_VERSION: &str = git_version::git_version!(
     fallback = "unknown"
 );
 
-pub fn set_proto_name(mut response: http::Response<BoxBody>) -> http::Response<BoxBody> {
-    response
-        .headers_mut()
-        .insert(http::header::SEC_WEBSOCKET_PROTOCOL, unsafe {
-            http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"harmony"))
-        });
-    response
+pub fn set_proto_name_layer() -> SetResponseHeaderLayer<http::header::HeaderValue, ()> {
+    let val =
+        unsafe { http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"harmony")) };
+    SetResponseHeaderLayer::appending(http::header::SEC_WEBSOCKET_PROTOCOL, val)
 }
 
 pub type ServerResult<T> = Result<T, ServerError>;

@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     _request: Request<()>,
     socket: Socket<StreamStepsRequest, StreamStepsResponse>,
 ) -> Result<(), HrpcServerError> {
@@ -77,8 +77,4 @@ pub async fn handler(
     tracing::debug!("removing stream for id {}", auth_id);
 
     Ok(())
-}
-
-pub fn on_upgrade(_svc: &mut AuthServer, response: HttpResponse) -> HttpResponse {
-    set_proto_name(response)
 }

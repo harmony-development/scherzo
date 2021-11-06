@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     request: Request<LoginFederatedRequest>,
 ) -> Result<Response<LoginFederatedResponse>, HrpcServerError> {
     let LoginFederatedRequest {

@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut MediaproxyServer,
+    svc: &MediaproxyServer,
     request: Request<InstantViewRequest>,
 ) -> ServerResult<Response<InstantViewResponse>> {
     svc.deps.valid_sessions.auth(&request)?;

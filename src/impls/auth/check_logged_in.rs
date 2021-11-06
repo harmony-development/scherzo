@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     request: Request<CheckLoggedInRequest>,
 ) -> Result<Response<CheckLoggedInResponse>, HrpcServerError> {
     svc.deps.valid_sessions.auth(&request)?;

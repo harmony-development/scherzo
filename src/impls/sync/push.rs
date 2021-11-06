@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut SyncServer,
+    svc: &SyncServer,
     request: Request<PushRequest>,
 ) -> ServerResult<Response<PushResponse>> {
     let host = svc.auth(&request).await?;

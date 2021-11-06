@@ -3,7 +3,7 @@ use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             exports::hyper,
-            server::{router::RoutesFinalized, Service},
+            server::{router::RoutesFinalized, MakeRoutes},
         },
         prost::bytes::Bytes,
     },
@@ -122,7 +122,7 @@ pub struct BatchServer {
 }
 
 impl BatchServer {
-    pub fn new<Svc: Service + Sync>(deps: &Dependencies, svc: Svc) -> Self {
+    pub fn new<Svc: MakeRoutes + Sync>(deps: &Dependencies, svc: Svc) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
             svc_pool: Arc::new(

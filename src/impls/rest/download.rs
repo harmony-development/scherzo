@@ -1,8 +1,8 @@
-use harmony_rust_sdk::api::exports::hrpc::server::handler::Handler;
+use harmony_rust_sdk::api::exports::hrpc::server::service::HrpcService;
 
 use super::*;
 
-pub fn handler(deps: Arc<Dependencies>) -> Handler {
+pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
     let download = service_fn(move |request: HttpRequest| {
         async fn make_request(
             http_client: &HttpClient,
@@ -135,7 +135,7 @@ pub fn handler(deps: Arc<Dependencies>) -> Handler {
                 .unwrap())
         }
     });
-    Handler::new(
+    HrpcService::new(
         ServiceBuilder::new()
             .rate_limit(10, Duration::from_secs(5))
             .service(download),

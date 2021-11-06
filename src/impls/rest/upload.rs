@@ -1,8 +1,8 @@
-use harmony_rust_sdk::api::exports::hrpc::server::handler::Handler;
+use harmony_rust_sdk::api::exports::hrpc::server::service::HrpcService;
 
 use super::*;
 
-pub fn handler(deps: Arc<Dependencies>) -> Handler {
+pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
     let upload = service_fn(move |request: HttpRequest| {
         let deps = deps.clone();
 
@@ -53,7 +53,7 @@ pub fn handler(deps: Arc<Dependencies>) -> Handler {
             }
         }
     });
-    Handler::new(
+    HrpcService::new(
         ServiceBuilder::new()
             .rate_limit(3, Duration::from_secs(5))
             .service(upload),

@@ -9,10 +9,11 @@ use harmony_rust_sdk::api::{
 use hyper::HeaderMap;
 use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
+use tower::limit::RateLimitLayer;
 
 use crate::{
     key::{self as keys, Manager as KeyManager},
-    set_proto_name,
+    set_proto_name_layer,
 };
 
 use super::{gen_rand_arr, gen_rand_inline_str, gen_rand_u64, get_time_secs, prelude::*};
@@ -226,8 +227,23 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     impl_ws_handlers! {
-        #[rate(2, 5)]
-        stream_steps, stream_steps_on_upgrade, StreamStepsRequest, StreamStepsResponse;
+        stream_steps, StreamStepsRequest, StreamStepsResponse;
+    }
+
+    fn stream_steps_middleware(&self, _endpoint: &'static str) -> Option<HrpcLayer> {
+        let rate = self
+            .disable_ratelimits
+            .then(|| RateLimitLayer::new(1, Duration::from_secs(5)));
+
+        rate.map(|r| {
+            HrpcLayer::new(
+                tower::ServiceBuilder::new()
+                    .layer(set_proto_name_layer())
+                    .layer(r)
+                    .into_inner(),
+            )
+        })
+        .or_else(|| Some(HrpcLayer::new(set_proto_name_layer())))
     }
 }
 

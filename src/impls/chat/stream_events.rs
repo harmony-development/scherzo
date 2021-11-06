@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<()>,
     socket: Socket<StreamEventsRequest, StreamEventsResponse>,
 ) -> Result<(), HrpcServerError> {
@@ -55,11 +55,4 @@ pub async fn handler(
     tracing::debug!("stream events ended for user {}", user_id);
 
     Ok(())
-}
-
-pub fn on_upgrade(
-    _svc: &mut ChatServer,
-    response: http::Response<BoxBody>,
-) -> http::Response<BoxBody> {
-    set_proto_name(response)
 }

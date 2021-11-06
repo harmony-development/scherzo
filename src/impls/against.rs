@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use harmony_rust_sdk::api::exports::hrpc::{
     body::box_body,
     exports::futures_util::FutureExt,
-    server::{gen_prelude::BoxFuture, handler::Handler, prelude::CustomError},
+    server::{gen_prelude::BoxFuture, prelude::CustomError, service::HrpcService},
 };
 use hyper::header::HeaderName;
 use tower::Layer;
@@ -26,7 +26,7 @@ where
         > + Send
         + 'static,
 {
-    type Service = Handler;
+    type Service = HrpcService;
 
     fn layer(&self, mut inner: S) -> Self::Service {
         let http = self.http.clone();
@@ -66,7 +66,7 @@ where
                 }
             },
         );
-        Handler::new(service)
+        HrpcService::new(service)
     }
 }
 

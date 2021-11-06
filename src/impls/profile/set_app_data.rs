@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ProfileServer,
+    svc: &ProfileServer,
     request: Request<SetAppDataRequest>,
 ) -> ServerResult<Response<SetAppDataResponse>> {
     let user_id = svc.deps.valid_sessions.auth(&request)?;

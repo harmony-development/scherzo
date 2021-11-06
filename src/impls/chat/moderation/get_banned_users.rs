@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<GetBannedUsersRequest>,
 ) -> ServerResult<Response<GetBannedUsersResponse>> {
     svc.deps.valid_sessions.auth(&request)?;

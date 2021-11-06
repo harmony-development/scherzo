@@ -24,7 +24,7 @@ use harmony_rust_sdk::api::{
                 future::{self, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
-            server::{prelude::CustomError, router::Routes, Service},
+            server::{prelude::CustomError, router::Routes, MakeRoutes},
             HttpRequest,
         },
         prost::bytes::{Bytes, BytesMut},
@@ -57,7 +57,7 @@ impl RestServer {
     }
 }
 
-impl Service for RestServer {
+impl MakeRoutes for RestServer {
     fn make_routes(&self) -> Routes {
         let deps = self.deps.clone();
         let download = download::handler(deps);

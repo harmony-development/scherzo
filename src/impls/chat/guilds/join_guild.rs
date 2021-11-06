@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<JoinGuildRequest>,
 ) -> ServerResult<Response<JoinGuildResponse>> {
     let user_id = svc.deps.valid_sessions.auth(&request)?;

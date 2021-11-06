@@ -24,6 +24,7 @@ hyper-rustls = { version = "0.22", default-features = false, features = [
     "native-tokio",
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit", "buffer"] }
+tower-http = { version = "0.1", default-features = false, features = ["set-header"] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
 
@@ -105,6 +106,6 @@ dashmap = { git = "https://github.com/jackthomson2/dashmap.git", branch = "maste
 markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
-hrpc = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "test/matchit_values" }
-hrpc-build = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "test/matchit_values" }
-hrpc-proc-macro = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "test/matchit_values" }
+hrpc = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "master" }
+hrpc-build = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "master" }
+hrpc-proc-macro = { git = "https://github.com/harmony-development/hrpc-rs.git", branch = "master" }

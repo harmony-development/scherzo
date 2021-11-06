@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ProfileServer,
+    svc: &ProfileServer,
     request: Request<GetProfileRequest>,
 ) -> ServerResult<Response<GetProfileResponse>> {
     svc.deps.valid_sessions.auth(&request)?;

@@ -22,7 +22,11 @@ use harmony_rust_sdk::api::{
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
         combine_services,
-        server::{utils::recommended_layers as hrpc_recommended_layers, Service},
+        server::{
+            transport::{Hyper, Transport},
+            utils::recommended_layers as hrpc_recommended_layers,
+            MakeRoutes,
+        },
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
@@ -381,10 +385,13 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
+    let transport = Hyper::new(addr);
     let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
     } else {
-        server.serve(addr).instrument(info_span!("scherzo::serve"))
+        transport
+            .serve(server)
+            .instrument(info_span!("scherzo::serve"))
     };
 
     tokio::task::Builder::new()

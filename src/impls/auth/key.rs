@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     _: Request<KeyRequest>,
 ) -> ServerResult<Response<KeyResponse>> {
     let keys_manager = svc.keys_manager()?;

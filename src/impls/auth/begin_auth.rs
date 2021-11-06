@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     _: Request<BeginAuthRequest>,
 ) -> ServerResult<Response<BeginAuthResponse>> {
     let initial_step = AuthStep {

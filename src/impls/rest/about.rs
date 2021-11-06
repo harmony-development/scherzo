@@ -1,10 +1,10 @@
 use crate::SCHERZO_VERSION;
 
 use super::*;
-use harmony_rust_sdk::api::{exports::hrpc::server::handler::Handler, rest::About};
+use harmony_rust_sdk::api::{exports::hrpc::server::service::HrpcService, rest::About};
 use tower::limit::RateLimitLayer;
 
-pub fn handler(deps: Arc<Dependencies>) -> Handler {
+pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
     let service = service_fn(move |_: HttpRequest| {
         let deps = deps.clone();
         async move {
@@ -22,7 +22,7 @@ pub fn handler(deps: Arc<Dependencies>) -> Handler {
                 .unwrap())
         }
     });
-    Handler::new(
+    HrpcService::new(
         ServiceBuilder::new()
             .layer(RateLimitLayer::new(3, Duration::from_secs(5)))
             .service(service),

@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<UnbanUserRequest>,
 ) -> ServerResult<Response<UnbanUserResponse>> {
     let user_id = svc.deps.valid_sessions.auth(&request)?;

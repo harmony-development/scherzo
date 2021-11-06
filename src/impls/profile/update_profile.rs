@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ProfileServer,
+    svc: &ProfileServer,
     request: Request<UpdateProfileRequest>,
 ) -> ServerResult<Response<UpdateProfileResponse>> {
     #[allow(unused_variables)]

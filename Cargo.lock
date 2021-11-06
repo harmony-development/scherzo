@@ -45,9 +45,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61604a8f862e1d5c3229fdd78f8b02c68dcf73a4c4b05fd636d12240aaa242c1"
+checksum = "ee10e43ae4a853c0a3591d4e2ada1719e553be18199d9da9d4a83f5927c2f5c7"
 
 [[package]]
 name = "async-channel"
@@ -373,7 +373,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#c1111bc72a616f17c67e546a035d513214dd52e4"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#c5e9b375540bdb9a08370fe5d305d77efe0a63a7"
 dependencies = [
  "prost 0.8.0",
  "prost-types 0.8.0",
@@ -385,7 +385,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#c1111bc72a616f17c67e546a035d513214dd52e4"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#c5e9b375540bdb9a08370fe5d305d77efe0a63a7"
 dependencies = [
  "console-api",
  "futures",
@@ -906,7 +906,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.2"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#5639e39bce7f5ffa0467fc26161b6466afb9da1b"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#49e1e55bcd0543b2116b0cb02152a7fbbc584148"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -916,7 +916,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.6.1"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#5639e39bce7f5ffa0467fc26161b6466afb9da1b"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#49e1e55bcd0543b2116b0cb02152a7fbbc584148"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -975,8 +975,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.26.0"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#b6cedaa7bb472d4dab07cbc0bf6645206c576d51"
+version = "0.27.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=master#c5586995e097cf44dad9d10658ef80d5e894457e"
 dependencies = [
  "ahash",
  "base64",
@@ -1006,8 +1006,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.26.0"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#b6cedaa7bb472d4dab07cbc0bf6645206c576d51"
+version = "0.27.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=master#c5586995e097cf44dad9d10658ef80d5e894457e"
 dependencies = [
  "proc-macro2",
  "prost-build 0.9.0",
@@ -1017,8 +1017,8 @@ dependencies = [
 
 [[package]]
 name = "hrpc-proc-macro"
-version = "0.26.0"
-source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=test/matchit_values#b6cedaa7bb472d4dab07cbc0bf6645206c576d51"
+version = "0.27.0"
+source = "git+https://github.com/harmony-development/hrpc-rs.git?branch=master#c5586995e097cf44dad9d10658ef80d5e894457e"
 
 [[package]]
 name = "html5ever"
@@ -1313,7 +1313,8 @@ checksum = "a3e378b66a060d48947b590737b30a1be76706c8dd7b8ba0f2fe3989c68a853f"
 [[package]]
 name = "matchit"
 version = "0.4.4"
-source = "git+https://github.com/yusdacra/matchit.git?branch=feat/values#253421dacef7cb57703b88c6d7d6c242c91fed94"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b6f41fdfbec185dd3dff58b51e323f5bc61692c0de38419a957b0dcfccca3c"
 
 [[package]]
 name = "mediasoup"
@@ -1376,9 +1377,9 @@ checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 
 [[package]]
 name = "minimal-lexical"
-version = "0.1.4"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c64630dcdd71f1a64c435f54885086a0de5d6a12d104d69b165fb7d5286d677"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
@@ -1464,9 +1465,9 @@ checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 
 [[package]]
 name = "nom"
-version = "7.0.0"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ffd9d26838a953b4af82cbeb9f1592c6798916983959be223a7124e992742c1"
+checksum = "1b1d11e1ef389c76fe5b81bcaf2ea32cf88b62bc494e19f493d0b30e7a930109"
 dependencies = [
  "memchr",
  "minimal-lexical",
@@ -2145,6 +2146,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tower",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "triomphe",
@@ -2343,9 +2345,9 @@ checksum = "1ecab6c735a6bb4139c0caafd0cc3635748bbb3acf4550e8138122099251f309"
 
 [[package]]
 name = "smol_str"
-version = "0.1.20"
+version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "559b173452ec4061933b0c0e22d7d429c90ecdc1b3ae1c6e64238e7c15c3ee15"
+checksum = "61d15c83e300cce35b7c8cd39ff567c1ef42dde6d4a1a38dbdbf9a59902261bd"
 dependencies = [
  "serde",
 ]

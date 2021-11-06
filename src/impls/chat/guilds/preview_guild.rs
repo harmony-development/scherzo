@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<PreviewGuildRequest>,
 ) -> ServerResult<Response<PreviewGuildResponse>> {
     let PreviewGuildRequest { invite_id } = request.into_message().await?;

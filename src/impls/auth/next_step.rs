@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     req: Request<NextStepRequest>,
 ) -> ServerResult<Response<NextStepResponse>> {
     let NextStepRequest {

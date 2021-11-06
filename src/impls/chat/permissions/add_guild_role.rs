@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut ChatServer,
+    svc: &ChatServer,
     request: Request<AddGuildRoleRequest>,
 ) -> ServerResult<Response<AddGuildRoleResponse>> {
     #[allow(unused_variables)]

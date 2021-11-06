@@ -6,7 +6,7 @@ pub fn on_upgrade(_svc: &mut VoiceServer, response: HttpResponse) -> HttpRespons
 }
 
 pub async fn handler(
-    svc: &mut VoiceServer,
+    svc: &VoiceServer,
     request: Request<()>,
     socket: Socket<StreamMessageRequest, StreamMessageResponse>,
 ) -> Result<(), HrpcServerError> {

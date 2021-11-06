@@ -1,7 +1,7 @@
 use super::*;
 
 pub async fn handler(
-    svc: &mut AuthServer,
+    svc: &AuthServer,
     req: Request<StepBackRequest>,
 ) -> ServerResult<Response<StepBackResponse>> {
     let req = req.into_message().await?;
