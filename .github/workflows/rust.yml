@@ -47,15 +47,15 @@ jobs:
     - name: Clippy
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--target x86_64-unknown-linux-musl --no-default-features --features sled"
+        args: "--target x86_64-unknown-linux-musl --no-default-features --features 'sled voice'"
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
     - name: Test
-      run: cargo test --target x86_64-unknown-linux-musl --no-default-features --features sled
+      run: cargo test --target x86_64-unknown-linux-musl --no-default-features --features "sled voice"
 
     - name: Build
-      run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features sled
+      run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features "sled voice"
     
     - name: Upload release
       if: github.event_name == 'push'
