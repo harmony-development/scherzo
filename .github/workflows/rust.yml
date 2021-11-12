@@ -47,15 +47,15 @@ jobs:
     - name: Clippy
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--target x86_64-unknown-linux-musl --no-default-features --features 'sled voice'"
+        args: "--no-default-features --features 'sled voice'"
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
     - name: Test
-      run: cargo test --target x86_64-unknown-linux-musl --no-default-features --features "sled voice"
+      run: cargo test --no-default-features --features "sled voice"
 
     - name: Build
-      run: cargo build --release --target x86_64-unknown-linux-musl --no-default-features --features "sled voice"
+      run: cargo build --release --no-default-features --features "sled voice"
     
     - name: Upload release
       if: github.event_name == 'push'
@@ -64,7 +64,7 @@ jobs:
       run: |
           wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
           chmod +x pyuploadtool-x86_64.AppImage
-          ./pyuploadtool-x86_64.AppImage target/x86_64-unknown-linux-musl/release/scherzo
+          ./pyuploadtool-x86_64.AppImage target/release/scherzo
 
   update:
     needs: build
