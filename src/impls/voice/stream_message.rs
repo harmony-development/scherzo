@@ -1,9 +1,4 @@
 use super::*;
-use crate::set_proto_name;
-
-pub fn on_upgrade(_svc: &mut VoiceServer, response: HttpResponse) -> HttpResponse {
-    set_proto_name(response)
-}
 
 pub async fn handler(
     svc: &VoiceServer,

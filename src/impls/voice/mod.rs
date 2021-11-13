@@ -4,6 +4,7 @@ use std::{
 };
 
 use super::{chat::ChatTree, prelude::*};
+use crate::set_proto_name_layer;
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -40,6 +41,7 @@ use tokio::{
     sync::broadcast::{self, Receiver, Sender},
     time::timeout,
 };
+use tower::limit::RateLimitLayer;
 
 pub mod stream_message;
 
@@ -75,8 +77,23 @@ impl VoiceServer {
 
 impl VoiceService for VoiceServer {
     impl_ws_handlers! {
-        #[rate(1, 5)]
-        stream_message, stream_message_on_upgrade, StreamMessageRequest, StreamMessageResponse;
+        stream_message, StreamMessageRequest, StreamMessageResponse;
+    }
+
+    fn stream_message_middleware(&self, _endpoint: &'static str) -> Option<HrpcLayer> {
+        let rate = self
+            .disable_ratelimits
+            .then(|| RateLimitLayer::new(1, Duration::from_secs(10)));
+
+        rate.map(|r| {
+            HrpcLayer::new(
+                tower::ServiceBuilder::new()
+                    .layer(set_proto_name_layer())
+                    .layer(r)
+                    .into_inner(),
+            )
+        })
+        .or_else(|| Some(HrpcLayer::new(set_proto_name_layer())))
     }
 }
 
