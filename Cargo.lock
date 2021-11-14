@@ -598,9 +598,9 @@ dependencies = [
 
 [[package]]
 name = "ed25519-compact"
-version = "0.1.11"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1f45ef578ef75efffba301628066d951042f6e988f21f8b548928468ba5877b"
+checksum = "3ef48e534dc9c84a7194ee4831546acb5517bf52b23d29f31d6a143f49c2685d"
 dependencies = [
  "getrandom",
 ]
