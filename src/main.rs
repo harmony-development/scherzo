@@ -53,7 +53,7 @@ use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
-    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
+    trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
     LatencyUnit,
 };
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
@@ -377,7 +377,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let transport = Hyper::new(addr)
+    let mut transport = Hyper::new(addr)
         .unwrap()
         .layer(MapResponseBodyLayer::new(box_body))
         .layer(ConcurrencyLimitLayer::new(
@@ -386,6 +386,8 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                .on_failure(DefaultOnFailure::new().latency_unit(LatencyUnit::Micros))
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
                 .on_response(
                     DefaultOnResponse::new()
                         .include_headers(true)
@@ -399,13 +401,14 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         .layer(rest)
         .layer(against::AgainstLayer);
 
-    let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
-        todo!("impl tls again")
-    } else {
-        transport
-            .serve(server)
-            .instrument(info_span!("scherzo::serve"))
-    };
+    if let Some(tls_config) = deps.config.tls.as_ref() {
+        transport = transport
+            .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+    }
+
+    let serve = transport
+        .serve(server)
+        .instrument(info_span!("scherzo::serve"));
 
     tokio::task::Builder::new()
         .name("scherzo::serve")
