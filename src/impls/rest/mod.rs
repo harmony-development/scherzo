@@ -31,10 +31,7 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use hrpc::{
-    common::transport::http::HttpResponse,
-    server::{gen_prelude::BoxFuture, transport::http::utils::HrpcServiceToHttp},
-};
+use hrpc::{common::transport::http::HttpResponse, server::gen_prelude::BoxFuture};
 use http::{header, HeaderValue, Method, StatusCode, Uri};
 use hyper::Body;
 use tokio::{
@@ -62,10 +59,19 @@ impl RestServiceLayer {
     }
 }
 
-impl Layer<HrpcServiceToHttp> for RestServiceLayer {
-    type Service = RestService;
+impl<S> Layer<S> for RestServiceLayer
+where
+    S: tower::Service<
+            HttpRequest,
+            Response = HttpResponse,
+            Error = Infallible,
+            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
+        > + Send
+        + 'static,
+{
+    type Service = RestService<S>;
 
-    fn layer(&self, inner: HrpcServiceToHttp) -> Self::Service {
+    fn layer(&self, inner: S) -> Self::Service {
         RestService {
             download: download::handler(self.deps.clone()),
             upload: upload::handler(self.deps.clone()),
@@ -75,14 +81,23 @@ impl Layer<HrpcServiceToHttp> for RestServiceLayer {
     }
 }
 
-pub struct RestService {
+pub struct RestService<S> {
     download: RateLimit<DownloadService>,
     upload: RateLimit<UploadService>,
     about: RateLimit<AboutService>,
-    inner: HrpcServiceToHttp,
+    inner: S,
 }
 
-impl Service<HttpRequest> for RestService {
+impl<S> Service<HttpRequest> for RestService<S>
+where
+    S: tower::Service<
+            HttpRequest,
+            Response = HttpResponse,
+            Error = Infallible,
+            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
+        > + Send
+        + 'static,
+{
     type Response = HttpResponse;
 
     type Error = Infallible;

@@ -49,7 +49,7 @@ use scherzo::{
         Dependencies, HELP_TEXT,
     },
 };
-use tower::{limit::ConcurrencyLimitLayer, ServiceBuilder};
+use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
@@ -377,28 +377,27 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let transport = Hyper::new(addr).unwrap().layer(
-        ServiceBuilder::new()
-            .layer(MapResponseBodyLayer::new(box_body))
-            .layer(ConcurrencyLimitLayer::new(
-                deps.config.policy.max_concurrent_requests,
-            ))
-            .layer(
-                TraceLayer::new_for_http()
-                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
-                    .on_response(
-                        DefaultOnResponse::new()
-                            .include_headers(true)
-                            .latency_unit(LatencyUnit::Micros),
-                    ),
-            )
-            .layer(SetSensitiveRequestHeadersLayer::new([
-                header::AUTHORIZATION,
-                header::SEC_WEBSOCKET_EXTENSIONS,
-            ]))
-            .layer(against::AgainstLayer)
-            .layer(rest),
-    );
+    let transport = Hyper::new(addr)
+        .unwrap()
+        .layer(MapResponseBodyLayer::new(box_body))
+        .layer(ConcurrencyLimitLayer::new(
+            deps.config.policy.max_concurrent_requests,
+        ))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                .on_response(
+                    DefaultOnResponse::new()
+                        .include_headers(true)
+                        .latency_unit(LatencyUnit::Micros),
+                ),
+        )
+        .layer(SetSensitiveRequestHeadersLayer::new([
+            header::AUTHORIZATION,
+            header::SEC_WEBSOCKET_EXTENSIONS,
+        ]))
+        .layer(rest)
+        .layer(against::AgainstLayer);
 
     let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
