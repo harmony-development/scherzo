@@ -22,15 +22,14 @@ use harmony_rust_sdk::api::{
     emote::emote_service_server::EmoteServiceServer,
     exports::hrpc::{
         combine_services,
-        server::{
-            transport::{http::Hyper, Transport},
-            MakeRoutes,
-        },
+        server::transport::{http::Hyper, Transport},
     },
     mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
+use hrpc::common::transport::http::box_body;
+use hyper::header;
 use scherzo::{
     config::DbConfig,
     db::{
@@ -44,14 +43,19 @@ use scherzo::{
         chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
-        prelude::HrpcLayer,
         profile::ProfileServer,
         rest::RestServiceLayer,
         sync::SyncServer,
         Dependencies, HELP_TEXT,
     },
 };
-use tower::ServiceBuilder;
+use tower::{limit::ConcurrencyLimitLayer, ServiceBuilder};
+use tower_http::{
+    map_response_body::MapResponseBodyLayer,
+    sensitive_headers::SetSensitiveRequestHeadersLayer,
+    trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
+    LatencyUnit,
+};
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
@@ -337,13 +341,6 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         #[cfg(feature = "voice")]
         voice,
         batch
-    )
-    .layer(
-        ServiceBuilder::new()
-            .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
-                deps.config.policy.max_concurrent_requests,
-            )))
-            .into_inner(),
     );
 
     let ctt = deps.chat_tree.clone();
@@ -380,10 +377,28 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let transport = Hyper::new(addr)
-        .unwrap()
-        .layer(against::AgainstLayer)
-        .layer(rest);
+    let transport = Hyper::new(addr).unwrap().layer(
+        ServiceBuilder::new()
+            .layer(MapResponseBodyLayer::new(box_body))
+            .layer(ConcurrencyLimitLayer::new(
+                deps.config.policy.max_concurrent_requests,
+            ))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                    .on_response(
+                        DefaultOnResponse::new()
+                            .include_headers(true)
+                            .latency_unit(LatencyUnit::Micros),
+                    ),
+            )
+            .layer(SetSensitiveRequestHeadersLayer::new([
+                header::AUTHORIZATION,
+                header::SEC_WEBSOCKET_EXTENSIONS,
+            ]))
+            .layer(against::AgainstLayer)
+            .layer(rest),
+    );
 
     let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")

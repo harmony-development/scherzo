@@ -24,12 +24,11 @@ hyper = { version = "0.14", features = ["http1", "http2", "runtime", "stream"] }
 hyper-rustls = { version = "0.22", default-features = false, features = [
     "native-tokio",
 ] }
-tower = { version = "0.4", default-features = false, features = [
-    "limit",
-    "buffer",
-] }
+tower = { version = "0.4", default-features = false, features = ["limit"] }
 tower-http = { version = "0.1", default-features = false, features = [
-    "set-header",
+    "trace",
+    "sensitive-headers",
+    "map-response-body",
 ] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
