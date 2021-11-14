@@ -5,9 +5,10 @@ use dashmap::{mapref::one::RefMut, DashMap};
 use ed25519_compact::{KeyPair, PublicKey, Seed};
 use harmony_rust_sdk::api::{
     auth::{auth_service_client::AuthServiceClient, KeyRequest},
-    exports::{hrpc::encode_protobuf_message, prost::Message},
+    exports::{hrpc::encode::encode_protobuf_message, prost::Message},
     harmonytypes::Token,
 };
+use hrpc::client::transport::http::Hyper;
 use hyper::Uri;
 use smol_str::SmolStr;
 
@@ -29,7 +30,7 @@ pub fn verify_token(token: &Token, pubkey: &PublicKey) -> Result<(), ServerError
 #[derive(Debug)]
 pub struct Manager {
     keys: DashMap<SmolStr, PublicKey, RandomState>,
-    clients: DashMap<SmolStr, AuthServiceClient, RandomState>,
+    clients: DashMap<SmolStr, AuthServiceClient<Hyper>, RandomState>,
     federation_key: PathBuf,
 }
 
@@ -43,7 +44,7 @@ impl Manager {
     }
 
     pub async fn generate_token(&self, data: impl Message) -> Result<Token, ServerError> {
-        let buf = encode_protobuf_message(data);
+        let buf = encode_protobuf_message(&data);
         let data = buf.to_vec();
 
         let key = self.get_own_key().await?;
@@ -88,6 +89,8 @@ impl Manager {
                 .key(KeyRequest {})
                 .await
                 .map_err(|_| ServerError::CantGetHostKey(host.clone()))?
+                .into_message()
+                .await?
                 .key;
             let key = ed25519_compact::PublicKey::from_slice(key.as_slice())
                 .map_err(|_| ServerError::CantGetHostKey(host.clone()))?;
@@ -98,11 +101,14 @@ impl Manager {
         Ok(key)
     }
 
-    fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, AuthServiceClient, RandomState> {
+    fn get_client(
+        &self,
+        host: SmolStr,
+    ) -> RefMut<'_, SmolStr, AuthServiceClient<Hyper>, RandomState> {
         self.clients.entry(host.clone()).or_insert_with(|| {
             let host_url: Uri = host.parse().unwrap();
 
-            AuthServiceClient::new(host_url).unwrap()
+            AuthServiceClient::new_transport(Hyper::new(host_url).unwrap())
         })
     }
 }

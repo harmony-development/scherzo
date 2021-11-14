@@ -41,7 +41,7 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
     let func_name = quote::format_ident!("{}_middleware", func.sig.ident);
 
     (quote! {
-        fn #func_name (&self, _: &'static str) -> Option<harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer> {
+        fn #func_name (&self) -> Option<harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer> {
             use harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer;
 
             (!self.disable_ratelimits)

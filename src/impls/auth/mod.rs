@@ -6,15 +6,11 @@ use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
     profile::{Profile, UserStatus},
 };
-use hyper::HeaderMap;
+use hyper::{http, HeaderMap};
 use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
-use tower::limit::RateLimitLayer;
 
-use crate::{
-    key::{self as keys, Manager as KeyManager},
-    set_proto_name_layer,
-};
+use crate::key::{self as keys, Manager as KeyManager};
 
 use super::{gen_rand_arr, gen_rand_inline_str, gen_rand_u64, get_time_secs, prelude::*};
 
@@ -39,26 +35,30 @@ const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
 
 pub trait AuthExt {
-    fn auth_header_map(&self, headers: &HeaderMap) -> ServerResult<u64>;
-    fn auth<T>(&self, request: &Request<T>) -> ServerResult<u64> {
-        let headers = request.header_map();
-        self.auth_header_map(headers)
+    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError>;
+    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
+        request
+            .header_map()
+            .map_or(Err(ServerError::Unauthenticated), |h| {
+                self.auth_header_map(h)
+            })
     }
 }
 
 impl AuthExt for DashMap<SmolStr, u64, RandomState> {
-    fn auth_header_map(&self, headers: &HeaderMap) -> ServerResult<u64> {
+    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError> {
         let auth_id = headers
-            .get(&http::header::AUTHORIZATION)
+            .get(http::header::AUTHORIZATION)
             .map_or_else(
                 || {
                     // Specific handling for web clients
                     headers
-                        .get(&http::header::SEC_WEBSOCKET_PROTOCOL)
-                        .and_then(|val| {
-                            val.to_str()
-                                .ok()
-                                .and_then(|v| v.split(',').nth(1).map(str::trim))
+                        .get(http::header::SEC_WEBSOCKET_EXTENSIONS)
+                        .and_then(|h| h.to_str().ok())
+                        .and_then(|v| {
+                            v.split(|c| matches!(c, ';' | ','))
+                                .map(str::trim)
+                                .find_map(|v| v.strip_prefix("harmony-auth="))
                         })
                 },
                 |val| val.to_str().ok(),
@@ -68,7 +68,7 @@ impl AuthExt for DashMap<SmolStr, u64, RandomState> {
         self.get(auth_id)
             .as_deref()
             .copied()
-            .map_or(Err(ServerError::Unauthenticated.into()), Ok)
+            .map_or(Err(ServerError::Unauthenticated), Ok)
     }
 }
 #[derive(Clone)]
@@ -227,23 +227,8 @@ impl auth_service_server::AuthService for AuthServer {
     }
 
     impl_ws_handlers! {
+        #[rate(1, 5)]
         stream_steps, StreamStepsRequest, StreamStepsResponse;
-    }
-
-    fn stream_steps_middleware(&self, _endpoint: &'static str) -> Option<HrpcLayer> {
-        let rate = self
-            .disable_ratelimits
-            .then(|| RateLimitLayer::new(1, Duration::from_secs(5)));
-
-        rate.map(|r| {
-            HrpcLayer::new(
-                tower::ServiceBuilder::new()
-                    .layer(set_proto_name_layer())
-                    .layer(r)
-                    .into_inner(),
-            )
-        })
-        .or_else(|| Some(HrpcLayer::new(set_proto_name_layer())))
     }
 }
 

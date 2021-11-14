@@ -27,5 +27,5 @@ pub async fn handler(
             direction.map(|val| Direction::from_i32(val).unwrap_or_default()),
             count,
         )
-        .map(Response::new)
+        .map(IntoResponse::into_response)
 }

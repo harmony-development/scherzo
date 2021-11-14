@@ -9,6 +9,7 @@ use harmony_rust_sdk::api::{
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
+use hrpc::client::transport::http::Hyper;
 use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -26,15 +27,18 @@ pub struct EventDispatch {
     pub event: Event,
 }
 
-struct Clients(DashMap<SmolStr, PostboxServiceClient, RandomState>);
+struct Clients(DashMap<SmolStr, PostboxServiceClient<Hyper>, RandomState>);
 
 impl Clients {
-    fn get_client(&self, host: SmolStr) -> RefMut<'_, SmolStr, PostboxServiceClient, RandomState> {
+    fn get_client(
+        &self,
+        host: SmolStr,
+    ) -> RefMut<'_, SmolStr, PostboxServiceClient<Hyper>, RandomState> {
         self.0.entry(host.clone()).or_insert_with(|| {
             // TODO: Handle url parsing error
             let host_url: Uri = host.parse().unwrap();
 
-            PostboxServiceClient::new(host_url).unwrap()
+            PostboxServiceClient::new_transport(Hyper::new(host_url).unwrap())
         })
     }
 }
@@ -76,6 +80,8 @@ impl SyncServer {
                                     .map_err(|_| ())
                                     .and_then(|req| {
                                         client.pull(req).map_err(|_| ())
+                                    }).and_then(|resp| {
+                                        resp.into_message().map_err(|_| ())
                                     })
                                     .await
                                 {
@@ -149,8 +155,8 @@ impl SyncServer {
         let token = self.keys_manager()?.generate_token(data).await?;
         let token = rkyv_ser(&token);
 
-        let mut req = Request::new(msg);
-        req.header_map_mut()
+        let mut req = Request::new(&msg);
+        req.get_or_insert_header_map()
             .insert(http::header::AUTHORIZATION, unsafe {
                 HeaderValue::from_maybe_shared_unchecked(token)
             });
@@ -176,7 +182,9 @@ impl SyncServer {
     }
 
     async fn auth<T>(&self, request: &Request<T>) -> Result<SmolStr, ServerError> {
-        let maybe_auth = request.header_map().get(&http::header::AUTHORIZATION);
+        let maybe_auth = request
+            .header_map()
+            .and_then(|h| h.get(http::header::AUTHORIZATION));
 
         if let Some(auth) = maybe_auth.map(|h| h.as_bytes()) {
             let token = Token::decode(auth).map_err(|_| ServerError::InvalidToken)?;

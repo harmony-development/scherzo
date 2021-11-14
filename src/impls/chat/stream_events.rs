@@ -3,7 +3,7 @@ use super::*;
 pub async fn handler(
     svc: &ChatServer,
     request: Request<()>,
-    socket: Socket<StreamEventsRequest, StreamEventsResponse>,
+    socket: Socket<StreamEventsResponse, StreamEventsRequest>,
 ) -> Result<(), HrpcServerError> {
     let user_id = svc.deps.valid_sessions.auth(&request)?;
     tracing::debug!("stream events validated for user {}", user_id);

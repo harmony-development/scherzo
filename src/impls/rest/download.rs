@@ -1,9 +1,28 @@
-use harmony_rust_sdk::api::exports::hrpc::server::service::HrpcService;
+use std::convert::Infallible;
+
+use hrpc::{common::transport::http::HttpResponse, server::gen_prelude::BoxFuture};
+use tower::{limit::RateLimit, Service};
+
+use crate::rest_error_response;
 
 use super::*;
 
-pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
-    let download = service_fn(move |request: HttpRequest| {
+pub struct DownloadService {
+    deps: Arc<Dependencies>,
+}
+
+impl Service<HttpRequest> for DownloadService {
+    type Response = HttpResponse;
+
+    type Error = Infallible;
+
+    type Future = BoxFuture<'static, Result<HttpResponse, Infallible>>;
+
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
+    }
+
+    fn call(&mut self, request: HttpRequest) -> Self::Future {
         async fn make_request(
             http_client: &HttpClient,
             url: Uri,
@@ -23,7 +42,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
             }
         }
 
-        let deps = deps.clone();
+        let deps = self.deps.clone();
         let maybe_file_id = request
             .uri()
             .path()
@@ -31,16 +50,17 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
             .map(|id| urlencoding::decode(id).unwrap_or(Cow::Borrowed(id)))
             .and_then(|id| FileId::from_str(&id).ok());
 
-        async move {
+        let fut = async move {
             if request.method() != Method::GET {
-                return Ok(
-                    (StatusCode::METHOD_NOT_ALLOWED, "method must be get").as_error_response()
-                );
+                return Ok(rest_error_response(
+                    "method must be GET".to_string(),
+                    StatusCode::METHOD_NOT_ALLOWED,
+                ));
             }
 
             let file_id = match maybe_file_id {
                 Some(file_id) => file_id,
-                _ => return Ok(ServerError::InvalidFileId.as_error_response()),
+                _ => return Ok(ServerError::InvalidFileId.into_rest_http_response()),
             };
 
             let media_root = deps.config.media.media_root.as_path();
@@ -54,7 +74,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                     let disposition = unsafe { disposition_header(filename) };
                     let resp = match make_request(http_client, url).await {
                         Ok(resp) => resp,
-                        Err(err) => return Ok(err.as_error_response()),
+                        Err(err) => return Ok(err.into_rest_http_response()),
                     };
                     let content_type =
                         resp.headers()
@@ -76,7 +96,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                         let len = get_content_length(&resp);
                         (disposition, content_type, resp.into_body(), len)
                     } else {
-                        return Ok(ServerError::NotMedia.as_error_response());
+                        return Ok(ServerError::NotMedia.into_rest_http_response());
                     }
                 }
                 FileId::Hmc(hmc) => {
@@ -85,7 +105,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                         info!("Serving local media with id {}", hmc.id());
                         match get_file(media_root, hmc.id()).await {
                             Ok(data) => data,
-                            Err(err) => return Ok(err.as_error_response()),
+                            Err(err) => return Ok(err.into_rest_http_response()),
                         }
                     } else {
                         // Safety: this is always valid, since HMC is a valid URL
@@ -101,7 +121,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                         };
                         let resp = match make_request(http_client, url).await {
                             Ok(resp) => resp,
-                            Err(err) => return Ok(err.as_error_response()),
+                            Err(err) => return Ok(err.into_rest_http_response()),
                         };
 
                         let extract_result =
@@ -112,7 +132,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                                 .map_err(|e| ServerError::FileExtractUnexpected(e.into()));
                         let (disposition, mimetype) = match extract_result {
                             Ok(data) => data,
-                            Err(err) => return Ok(err.as_error_response()),
+                            Err(err) => return Ok(err.into_rest_http_response()),
                         };
                         let len = get_content_length(&resp);
                         (disposition, mimetype, resp.into_body(), len)
@@ -122,7 +142,7 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                     info!("Serving local media with id {}", id);
                     match get_file(media_root, &id).await {
                         Ok(data) => data,
-                        Err(err) => return Ok(err.as_error_response()),
+                        Err(err) => return Ok(err.into_rest_http_response()),
                     }
                 }
             };
@@ -133,13 +153,16 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
                 .header(header::CONTENT_LENGTH, content_length)
                 .body(box_body(content_body))
                 .unwrap())
-        }
-    });
-    HrpcService::new(
-        ServiceBuilder::new()
-            .rate_limit(10, Duration::from_secs(5))
-            .service(download),
-    )
+        };
+
+        Box::pin(fut)
+    }
+}
+
+pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
+    ServiceBuilder::new()
+        .rate_limit(10, Duration::from_secs(5))
+        .service(DownloadService { deps })
 }
 
 // Safety: the `name` argument MUST ONLY contain ASCII characters.

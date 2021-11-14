@@ -2,7 +2,6 @@
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::{
-    borrow::Cow,
     error::Error as StdError,
     fmt::{self, Display, Formatter, Write},
     io::Error as IoError,
@@ -10,19 +9,24 @@ use std::{
 };
 
 use harmony_rust_sdk::api::{
-    exports::{
-        hrpc::{
-            exports::http::{self, uri::InvalidUri as UrlParseError, StatusCode},
-            server::error::CustomError,
-        },
-        prost::bytes::Bytes,
+    exports::hrpc::{
+        exports::http::{self, uri::InvalidUri as UrlParseError, StatusCode},
+        server::error::HrpcError,
     },
     HomeserverIdParseError,
 };
-use hyper::Uri;
+use hrpc::{
+    body::Body,
+    common::transport::http::{
+        box_body, content_header_value, version_header_name, version_header_value, HttpResponse,
+    },
+    decode::DecodeBodyError,
+    encode::encode_protobuf_message,
+    proto::HrpcErrorIdentifier,
+};
+use hyper::{http::HeaderValue, Uri};
 use parking_lot::Mutex;
 use smol_str::SmolStr;
-use tower_http::set_header::SetResponseHeaderLayer;
 use triomphe::Arc;
 
 pub mod config;
@@ -35,12 +39,6 @@ pub const SCHERZO_VERSION: &str = git_version::git_version!(
     cargo_prefix = "cargo:",
     fallback = "unknown"
 );
-
-pub fn set_proto_name_layer() -> SetResponseHeaderLayer<http::header::HeaderValue, ()> {
-    let val =
-        unsafe { http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"harmony")) };
-    SetResponseHeaderLayer::appending(http::header::SEC_WEBSOCKET_PROTOCOL, val)
-}
 
 pub type ServerResult<T> = Result<T, ServerError>;
 
@@ -148,11 +146,13 @@ pub enum ServerError {
     MultipartError(multer::Error),
     MustNotBeLastOwner,
     ContentCantBeSentByUser,
+    InvalidProtoMessage(DecodeBodyError),
 }
 
 impl StdError for ServerError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
+            ServerError::InvalidProtoMessage(err) => Some(err),
             ServerError::InvalidAgainst(err) => Some(err),
             ServerError::InvalidUrl(err) => Some(err),
             ServerError::IoError(err) => Some(err),
@@ -168,6 +168,9 @@ impl StdError for ServerError {
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ServerError::InvalidProtoMessage(err) => {
+                write!(f, "couldn't decode a response body: {}", err)
+            }
             ServerError::InviteExpired => write!(f, "invite expired"),
             ServerError::InvalidUrl(err) => write!(f, "invalid URL: {}", err),
             ServerError::TooFast(rem) => write!(f, "too fast, try again in {}", rem.as_secs_f64()),
@@ -320,8 +323,8 @@ impl Display for ServerError {
     }
 }
 
-impl CustomError for ServerError {
-    fn status(&self) -> StatusCode {
+impl ServerError {
+    pub const fn status(&self) -> StatusCode {
         match self {
             ServerError::InvalidAuthId
             | ServerError::NoFieldSpecified
@@ -386,19 +389,16 @@ impl CustomError for ServerError {
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
-            | ServerError::MultipartError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::MultipartError(_)
+            | ServerError::InvalidProtoMessage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
         }
     }
 
-    fn error_message(&self) -> std::borrow::Cow<'_, str> {
-        self.to_string().into()
-    }
-
-    fn identifier(&self) -> std::borrow::Cow<'_, str> {
-        let identifier = match self {
+    pub const fn identifier(&self) -> &'static str {
+        match self {
             ServerError::InternalServerError
             | ServerError::IoError(_)
             | ServerError::HttpError(_)
@@ -407,7 +407,10 @@ impl CustomError for ServerError {
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
-            | ServerError::MultipartError(_) => "h.internal-server-error",
+            | ServerError::MultipartError(_)
+            | ServerError::InvalidProtoMessage(_) => {
+                HrpcErrorIdentifier::InternalServerError.as_id()
+            }
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",
@@ -450,7 +453,9 @@ impl CustomError for ServerError {
             ServerError::TooFast(_) => "h.rate-limited",
             ServerError::NotAnImage => "h.not-an-image",
             ServerError::NotMedia => "not-media",
-            ServerError::MediaNotFound | ServerError::LinkNotFound(_) => "not-found",
+            ServerError::MediaNotFound | ServerError::LinkNotFound(_) => {
+                HrpcErrorIdentifier::NotFound.as_id()
+            }
             ServerError::InvalidUrl(_) => "h.bad-url",
             ServerError::InviteExpired => "h.bad-invite-id",
             ServerError::FailedToAuthSync => "h.bad-auth",
@@ -472,9 +477,48 @@ impl CustomError for ServerError {
             ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
             ServerError::MustNotBeLastOwner => "h.last-owner-in-guild",
             ServerError::ContentCantBeSentByUser => "h.content-not-allowed-for-user",
-        };
+        }
+    }
 
-        Cow::Borrowed(identifier)
+    pub fn into_http_response(self) -> HttpResponse {
+        let status = self.status();
+        let err = HrpcError::from(self);
+
+        http::Response::builder()
+            .status(status)
+            .header(version_header_name(), version_header_value())
+            .header(http::header::CONTENT_TYPE, content_header_value())
+            .body(box_body(Body::full(encode_protobuf_message(&err).freeze())))
+            .unwrap()
+    }
+
+    pub fn into_rest_http_response(self) -> HttpResponse {
+        let status = self.status();
+        let msg = self.to_string();
+
+        rest_error_response(msg, status)
+    }
+}
+
+pub fn rest_error_response(mut msg: String, status: StatusCode) -> HttpResponse {
+    msg.insert_str(0, "{ message: \"");
+    msg.push_str("\" }");
+
+    http::Response::builder()
+        .status(status)
+        .header(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_static("text/json"),
+        )
+        .body(box_body(Body::full(msg.into_bytes())))
+        .unwrap()
+}
+
+impl From<ServerError> for HrpcError {
+    fn from(err: ServerError) -> Self {
+        HrpcError::default()
+            .with_identifier(err.identifier())
+            .with_message(err.to_string())
     }
 }
 
@@ -499,6 +543,12 @@ impl From<hyper::Error> for ServerError {
 impl From<db::DbError> for ServerError {
     fn from(err: db::DbError) -> Self {
         ServerError::DbError(err)
+    }
+}
+
+impl From<DecodeBodyError> for ServerError {
+    fn from(err: DecodeBodyError) -> Self {
+        ServerError::InvalidProtoMessage(err)
     }
 }
 

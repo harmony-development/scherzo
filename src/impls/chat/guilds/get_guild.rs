@@ -14,5 +14,5 @@ pub async fn handler(
 
     chat_tree
         .get_guild_logic(guild_id)
-        .map(|g| Response::new(GetGuildResponse { guild: Some(g) }))
+        .map(|g| (GetGuildResponse { guild: Some(g) }).into_response())
 }

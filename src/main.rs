@@ -23,8 +23,7 @@ use harmony_rust_sdk::api::{
     exports::hrpc::{
         combine_services,
         server::{
-            transport::{Hyper, Transport},
-            utils::recommended_layers as hrpc_recommended_layers,
+            transport::{http::Hyper, Transport},
             MakeRoutes,
         },
     },
@@ -32,7 +31,6 @@ use harmony_rust_sdk::api::{
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
-use hyper::header::{self, HeaderName};
 use scherzo::{
     config::DbConfig,
     db::{
@@ -48,7 +46,7 @@ use scherzo::{
         mediaproxy::MediaproxyServer,
         prelude::HrpcLayer,
         profile::ProfileServer,
-        rest::RestServer,
+        rest::RestServiceLayer,
         sync::SyncServer,
         Dependencies, HELP_TEXT,
     },
@@ -324,7 +322,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         combine_services!(profile, emote, auth, chat, mediaproxy)
     };
 
-    let rest = RestServer::new(deps.clone());
+    let rest = RestServiceLayer::new(deps.clone());
 
     let batch_server = BatchServer::new(&deps, batchable_services);
     let batch = BatchServiceServer::new(batch_server);
@@ -338,16 +336,13 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         sync,
         #[cfg(feature = "voice")]
         voice,
-        batch,
-        rest
+        batch
     )
     .layer(
         ServiceBuilder::new()
             .layer(HrpcLayer::new(tower::limit::ConcurrencyLimitLayer::new(
                 deps.config.policy.max_concurrent_requests,
             )))
-            .layer(against::AgainstLayer::default())
-            .layer(hrpc_recommended_layers(filter_auth))
             .into_inner(),
     );
 
@@ -385,7 +380,11 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let transport = Hyper::new(addr);
+    let transport = Hyper::new(addr)
+        .unwrap()
+        .layer(against::AgainstLayer)
+        .layer(rest);
+
     let serve = if let Some(_tls_config) = deps.config.tls.as_ref() {
         todo!("impl tls again")
     } else {
@@ -418,8 +417,4 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::
         }
         Ok(())
     })
-}
-
-fn filter_auth(h: &HeaderName) -> bool {
-    h != header::AUTHORIZATION
 }

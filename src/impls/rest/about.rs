@@ -1,30 +1,62 @@
-use crate::SCHERZO_VERSION;
+use std::convert::Infallible;
+
+use crate::{rest_error_response, SCHERZO_VERSION};
 
 use super::*;
-use harmony_rust_sdk::api::{exports::hrpc::server::service::HrpcService, rest::About};
-use tower::limit::RateLimitLayer;
+use harmony_rust_sdk::api::rest::About;
+use hrpc::common::{
+    future::{ready, Ready},
+    transport::http::HttpResponse,
+};
+use tower::{
+    limit::{RateLimit, RateLimitLayer},
+    Service,
+};
 
-pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
-    let service = service_fn(move |_: HttpRequest| {
-        let deps = deps.clone();
-        async move {
-            let json = serde_json::to_string(&About {
-                server_name: "Scherzo".to_string(),
-                version: SCHERZO_VERSION.to_string(),
-                about_server: deps.config.server_description.clone(),
-                message_of_the_day: deps.runtime_config.lock().motd.clone(),
-            })
-            .unwrap();
+pub fn handler(deps: Arc<Dependencies>) -> RateLimit<AboutService> {
+    ServiceBuilder::new()
+        .layer(RateLimitLayer::new(3, Duration::from_secs(5)))
+        .service(AboutService { deps })
+}
 
-            Ok(http::Response::builder()
-                .status(StatusCode::OK)
-                .body(full_box_body(json.into_bytes().into()))
-                .unwrap())
+pub struct AboutService {
+    deps: Arc<Dependencies>,
+}
+
+impl Service<HttpRequest> for AboutService {
+    type Response = HttpResponse;
+
+    type Error = Infallible;
+
+    type Future = Ready<Result<HttpResponse, Infallible>>;
+
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
+    }
+
+    fn call(&mut self, req: HttpRequest) -> Self::Future {
+        if req.method() != Method::GET {
+            return ready(Ok(rest_error_response(
+                "method must be GET".to_string(),
+                StatusCode::METHOD_NOT_ALLOWED,
+            )));
         }
-    });
-    HrpcService::new(
-        ServiceBuilder::new()
-            .layer(RateLimitLayer::new(3, Duration::from_secs(5)))
-            .service(service),
-    )
+
+        let json = serde_json::to_vec(&About {
+            server_name: "Scherzo".to_string(),
+            version: SCHERZO_VERSION.to_string(),
+            about_server: self.deps.config.server_description.clone(),
+            message_of_the_day: self.deps.runtime_config.lock().motd.clone(),
+        })
+        .unwrap();
+
+        ready(Ok(http::Response::builder()
+            .status(StatusCode::OK)
+            .header(
+                http::header::CONTENT_TYPE,
+                HeaderValue::from_static("text/json"),
+            )
+            .body(box_body(Body::from(json)))
+            .unwrap()))
+    }
 }

@@ -12,6 +12,6 @@ pub async fn handler(
         .profile_tree
         .get_profile_logic(user_id)
         .map(|p| GetProfileResponse { profile: Some(p) })
-        .map(Response::new)
+        .map(IntoResponse::into_response)
         .map_err(Into::into)
 }

@@ -3,7 +3,7 @@ use super::*;
 pub async fn handler(
     svc: &AuthServer,
     _request: Request<()>,
-    socket: Socket<StreamStepsRequest, StreamStepsResponse>,
+    socket: Socket<StreamStepsResponse, StreamStepsRequest>,
 ) -> Result<(), HrpcServerError> {
     let msg = socket.receive_message().await?;
 

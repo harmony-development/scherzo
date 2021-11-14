@@ -9,5 +9,5 @@ pub async fn handler(
     svc.deps
         .chat_tree
         .query_has_permission_request(user_id, request.into_message().await?)
-        .map(Response::new)
+        .map(IntoResponse::into_response)
 }

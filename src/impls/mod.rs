@@ -10,24 +10,14 @@ pub mod sync;
 #[cfg(feature = "voice")]
 pub mod voice;
 
-use hyper::Uri;
+use hrpc::client::transport::http::{http_client, HttpClient};
+use hyper::{http, Uri};
 use prelude::*;
-use tower::service_fn;
 
 use std::{str::FromStr, time::UNIX_EPOCH};
 
 use dashmap::DashMap;
-use harmony_rust_sdk::api::{
-    exports::{
-        hrpc::{
-            client::{http_client, HttpClient},
-            exports::http,
-            HttpRequest,
-        },
-        prost::bytes::Bytes,
-    },
-    HomeserverIdentifier,
-};
+use harmony_rust_sdk::api::{exports::prost::bytes::Bytes, HomeserverIdentifier};
 use parking_lot::Mutex;
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc};
@@ -48,13 +38,13 @@ pub mod prelude {
 
     pub use harmony_rust_sdk::api::exports::{
         hrpc::{
-            exports::http,
+            response::IntoResponse,
             server::{
-                error::{ServerError as HrpcServerError, ServerResult},
+                error::{HrpcError as HrpcServerError, ServerResult},
                 prelude::*,
                 socket::Socket,
             },
-            HttpResponse, IntoResponse, Request, Response,
+            Request, Response,
         },
         prost::Message,
     };
@@ -252,7 +242,7 @@ macro_rules! impl_ws_handlers {
     )+) => {
         $(
             $( #[$attr] )*
-            fn $handler(&self, request: Request<()>, socket: Socket<$req, $resp>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
+            fn $handler(&self, request: Request<()>, socket: Socket<$resp, $req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
                 Box::pin($handler::handler(self, request, socket))
             }
         )+

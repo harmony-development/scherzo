@@ -14,5 +14,5 @@ pub async fn handler(
 
     chat_tree
         .get_guild_channels_logic(guild_id, user_id)
-        .map(Response::new)
+        .map(IntoResponse::into_response)
 }

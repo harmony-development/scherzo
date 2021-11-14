@@ -2,12 +2,13 @@ use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
         hrpc::{
-            exports::hyper,
+            response,
             server::{router::RoutesFinalized, MakeRoutes},
         },
         prost::bytes::Bytes,
     },
 };
+use hrpc::{body::Body, exports::futures_util::StreamExt};
 use hyper::{header, http::HeaderValue};
 use swimmer::{Pool, PoolBuilder, Recyclable};
 use tower::Service as _;
@@ -35,25 +36,19 @@ impl BatchReq {
             auth_header: &Option<HeaderValue>,
             service: &mut RoutesFinalized,
         ) -> Result<Bytes, HrpcServerError> {
-            let mut req = http::Request::builder()
-                .header(header::CONTENT_TYPE, unsafe {
-                    HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(
-                        b"application/hrpc",
-                    ))
-                })
-                .method(http::Method::POST)
-                .uri(endpoint)
-                .body(hyper::Body::from(body))
-                .unwrap();
+            let mut req = Request::new_with_body(Body::full(body));
+            *req.endpoint_mut() = endpoint.to_string().into();
+
             if let Some(auth) = auth_header {
-                req.headers_mut()
+                req.get_or_insert_header_map()
                     .insert(header::AUTHORIZATION, auth.clone());
             }
 
             let reply = service.call(req).await.unwrap();
-            let body = hyper::body::to_bytes(reply.into_body()).await.unwrap();
 
-            Ok(body)
+            // This should be safe since we know we insert a message into responses
+            // as whole chunks
+            Ok(response::Parts::from(reply).body.next().await.unwrap()?)
         }
 
         if self.bodies.len() > 64 {

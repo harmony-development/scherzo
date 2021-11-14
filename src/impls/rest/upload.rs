@@ -1,27 +1,56 @@
-use harmony_rust_sdk::api::exports::hrpc::server::service::HrpcService;
+use std::convert::Infallible;
+
+use hrpc::{common::transport::http::HttpResponse, server::gen_prelude::BoxFuture};
+use tower::Service;
+
+use crate::rest_error_response;
 
 use super::*;
 
-pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
-    let upload = service_fn(move |request: HttpRequest| {
-        let deps = deps.clone();
+pub fn handler(deps: Arc<Dependencies>) -> RateLimit<UploadService> {
+    ServiceBuilder::new()
+        .rate_limit(3, Duration::from_secs(5))
+        .service(UploadService { deps })
+}
+
+pub struct UploadService {
+    deps: Arc<Dependencies>,
+}
+
+impl Service<HttpRequest> for UploadService {
+    type Response = HttpResponse;
+
+    type Error = Infallible;
+
+    type Future = BoxFuture<'static, Result<HttpResponse, Infallible>>;
+
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
+    }
+
+    fn call(&mut self, request: HttpRequest) -> Self::Future {
+        let deps = self.deps.clone();
 
         let auth_res = deps.valid_sessions.auth_header_map(request.headers());
 
-        async move {
+        let fut = async move {
             if let Err(err) = auth_res {
-                return Ok(err.as_error_response());
+                return Ok(err.into_rest_http_response());
             }
             let boundary_res = request
                 .headers()
                 .get(&header::CONTENT_TYPE)
                 .and_then(|h| h.to_str().ok())
-                .and_then(|v| multer::parse_boundary(v).ok())
-                .ok_or((
-                    StatusCode::BAD_REQUEST,
-                    "content_type header not found or was invalid",
-                ));
-            let boundary = bail_result_as_response!(boundary_res);
+                .and_then(|v| multer::parse_boundary(v).ok());
+            let boundary = match boundary_res {
+                Some(b) => b,
+                None => {
+                    return Ok(rest_error_response(
+                        "content_type header not found or was invalid".to_string(),
+                        StatusCode::BAD_REQUEST,
+                    ))
+                }
+            };
             let mut multipart = multer::Multipart::with_constraints(
                 request.into_body(),
                 boundary,
@@ -36,28 +65,29 @@ pub fn handler(deps: Arc<Dependencies>) -> HrpcService {
             match multipart.next_field().await {
                 Ok(maybe_field) => match maybe_field {
                     Some(field) => {
-                        let id = bail_result_as_response!(
-                            write_file(deps.config.media.media_root.as_path(), field, None).await
-                        );
+                        let id =
+                            match write_file(deps.config.media.media_root.as_path(), field, None)
+                                .await
+                            {
+                                Ok(id) => id,
+                                Err(err) => return Ok(err.into_rest_http_response()),
+                            };
 
                         Ok(http::Response::builder()
                             .status(StatusCode::OK)
-                            .body(full_box_body(
-                                format!(r#"{{ "id": "{}" }}"#, id).into_bytes().into(),
-                            ))
+                            .body(box_body(Body::from(
+                                format!(r#"{{ "id": "{}" }}"#, id).into_bytes(),
+                            )))
                             .unwrap())
                     }
-                    None => Ok(ServerError::MissingFiles.as_error_response()),
+                    None => Ok(ServerError::MissingFiles.into_rest_http_response()),
                 },
-                Err(err) => Ok(ServerError::from(err).as_error_response()),
+                Err(err) => Ok(ServerError::from(err).into_rest_http_response()),
             }
-        }
-    });
-    HrpcService::new(
-        ServiceBuilder::new()
-            .rate_limit(3, Duration::from_secs(5))
-            .service(upload),
-    )
+        };
+
+        Box::pin(fut)
+    }
 }
 
 pub async fn write_file(

@@ -4,7 +4,9 @@ pub async fn handler(
     svc: &BatchServer,
     mut request: Request<BatchRequest>,
 ) -> ServerResult<Response<BatchResponse>> {
-    let auth_header = request.header_map_mut().remove(&header::AUTHORIZATION);
+    let auth_header = request
+        .header_map_mut()
+        .and_then(|h| h.remove(header::AUTHORIZATION));
     let BatchRequest { requests } = request.into_message().await?;
 
     let request_len = requests.len();

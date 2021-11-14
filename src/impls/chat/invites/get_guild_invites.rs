@@ -15,5 +15,5 @@ pub async fn handler(
 
     chat_tree
         .get_guild_invites_logic(guild_id)
-        .map(Response::new)
+        .map(IntoResponse::into_response)
 }
