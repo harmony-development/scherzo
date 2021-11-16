@@ -13,7 +13,7 @@
 
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
     root = ./.;
-    buildPlatform = "crate2nix";
+    buildPlatform = "naersk";
     overrides = {
       crateOverrides = common: _: {
         mediasoup-sys = prev: {
@@ -23,19 +23,15 @@
       shell = common: prev: {
         packages = prev.packages ++ [
           common.pkgs.musl.dev
-          /*(common.lib.buildCrate {
+          (common.lib.buildCrate {
             memberName = "tokio-console";
-            defaultCrateOverrides = (common.lib.removePropagatedEnv common.crateOverrides) // {
-              tokio-console = _: {
-                CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
-              };
-            };
+            CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
             root = builtins.fetchGit {
               url = "https://github.com/tokio-rs/console.git";
-              rev = "3d80c4b68b97db9c20cb496a2e3df0ccc1336b38";
+              rev = "a30264e0b5469ea596430b846b05e6e3541915d1";
               ref = "main";
             };
-          })*/
+          })
         ];
         commands = prev.commands ++ [
           {
