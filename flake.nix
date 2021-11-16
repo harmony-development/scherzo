@@ -25,12 +25,15 @@
           common.pkgs.musl.dev
           (common.lib.buildCrate {
             memberName = "tokio-console";
-            CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
+
             root = builtins.fetchGit {
               url = "https://github.com/tokio-rs/console.git";
               rev = "a30264e0b5469ea596430b846b05e6e3541915d1";
               ref = "main";
             };
+
+            inherit (common) nativeBuildInputs buildInputs;
+            CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
           })
         ];
         commands = prev.commands ++ [
