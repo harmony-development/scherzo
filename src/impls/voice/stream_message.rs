@@ -1,3 +1,5 @@
+use tracing::field;
+
 use super::*;
 
 pub async fn handler(
@@ -8,7 +10,12 @@ pub async fn handler(
     #[allow(unused_variables)]
     let user_id = svc.valid_sessions.auth(&request)?;
 
-    let span = tracing::info_span!("voice_messages", participant = %user_id);
+    let span = tracing::info_span!(
+        "voice_messages",
+        guild = field::Empty,
+        channel = field::Empty,
+        participant = %user_id
+    );
     let _guard = span.enter();
 
     let wait_for_initialize = async {
@@ -40,7 +47,7 @@ pub async fn handler(
         }
     };
     let chan_id = (guild_id, channel_id);
-    span.record("guiid", &guild_id);
+    span.record("guild", &guild_id);
     span.record("channel", &channel_id);
 
     if let Err(err) = svc
@@ -246,7 +253,7 @@ pub async fn handler(
     }
 
     if let Err((user_id, err)) = channel.add_user(user_id, user.clone()).await {
-        tracing::error!("could not create consumer: {}", err);
+        tracing::error!({ for_participant = %user_id }, "could not create consumer: {}", err);
         return Ok(());
     } else {
         tracing::info!("user added to voice channel successfully");
