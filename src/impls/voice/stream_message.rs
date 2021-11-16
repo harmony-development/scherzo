@@ -206,9 +206,7 @@ pub async fn handler(
     match user.create_producer(producer_options).await {
         Ok(producer) => {
             tracing::info!(
-                {
-                    producer_id = %producer.id(),
-                },
+                { producer_id = %producer.id() },
                 "created producer",
             );
             *user.inner.producer.lock().await = Some(producer);
@@ -231,9 +229,7 @@ pub async fn handler(
             match user.create_consumer(consumer_options).await {
                 Ok(consumer) => {
                     tracing::info!(
-                        {
-                            for_producer = %user_producer_id,
-                        },
+                        { for_producer = %user_producer_id },
                         "created consumer",
                     );
                     other_users.push(UserConsumerOptions {
@@ -245,7 +241,10 @@ pub async fn handler(
                     user.inner.consumers.insert(consumer.id(), consumer);
                 }
                 Err(err) => {
-                    tracing::error!("could not create consumer: {}", err,);
+                    tracing::error!(
+                        { for_producer = %user_producer_id },
+                        "could not create consumer: {}", err,
+                    );
                     return Ok(());
                 }
             }
@@ -261,9 +260,9 @@ pub async fn handler(
 
     socket
         .send_message(StreamMessageResponse {
-            message: Some(ResponseMessage::JoinedChannel(JoinedChannel {
+            message: Some(ResponseMessage::JoinedChannel(JoinedChannel::new(
                 other_users,
-            })),
+            ))),
         })
         .await?;
 
@@ -276,9 +275,7 @@ pub async fn handler(
 
             bail_result!(
                 socket
-                    .send_message(StreamMessageResponse {
-                        message: Some(message)
-                    })
+                    .send_message(StreamMessageResponse::new(Some(message)))
                     .await
             );
         }
@@ -287,27 +284,15 @@ pub async fn handler(
 
     let process_client_messages = async {
         loop {
-            let message = bail_result!(socket.receive_message().await);
-            if let StreamMessageRequest {
-                message: Some(RequestMessage::ResumeConsumer(resume)),
-            } = message
-            {
+            let req = bail_result!(socket.receive_message().await);
+            if let Some(RequestMessage::ResumeConsumer(resume)) = req.message {
                 if let Ok(consumer_id) = from_json(resume.consumer_id) {
+                    let span = tracing::info_span!("process_consumer", consumer = %consumer_id);
+                    let _guard = span.enter();
                     if let Err(err) = user.resume_consumer(consumer_id).await {
-                        tracing::error!(
-                            {
-                                consumer_id = %consumer_id,
-                            },
-                            "could not resume consumer: {}",
-                            err,
-                        );
+                        tracing::error!("could not resume consumer: {}", err);
                     } else {
-                        tracing::info!(
-                            {
-                                consumer_id = %consumer_id,
-                            },
-                            "resumed consumer",
-                        );
+                        tracing::info!("resumed consumer");
                     }
                 }
             }
