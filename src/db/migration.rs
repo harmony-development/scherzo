@@ -16,6 +16,10 @@ pub fn get_db_version(db: &dyn Db) -> DbResult<(usize, bool)> {
 }
 
 pub fn apply_migrations(db: &dyn Db, current_version: usize) -> DbResult<()> {
+    let _guard =
+        tracing::info_span!("apply_migrations", before_migration_version = %current_version)
+            .entered();
+
     if current_version == 0 {
         initial_db_version(db)
     } else {
