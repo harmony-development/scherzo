@@ -8,6 +8,9 @@ pub async fn handler(
     #[allow(unused_variables)]
     let user_id = svc.valid_sessions.auth(&request)?;
 
+    let span = tracing::info_span!("voice_messages", participant = %user_id);
+    let _guard = span.enter();
+
     let wait_for_initialize = async {
         match socket.receive_message().await {
             Ok(StreamMessageRequest {
@@ -18,13 +21,7 @@ pub async fn handler(
                     })),
             }) => Ok((guild_id, channel_id)),
             Err(err) => {
-                tracing::error!(
-                    {
-                        participant = %user_id,
-                    },
-                    "socket error while initializing: {}",
-                    err,
-                );
+                tracing::error!("socket error while initializing: {}", err);
                 Err(())
             }
             _ => Err(()),
@@ -34,46 +31,30 @@ pub async fn handler(
     let (guild_id, channel_id) = match timeout(Duration::from_secs(5), wait_for_initialize).await {
         Ok(Ok(id)) => id,
         Err(_) => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                },
-                "timeouted while waiting for initialization message"
-            );
+            tracing::error!("timeouted while waiting for initialization message");
             return Ok(());
         }
         _ => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                },
-                "error occured while waiting for initialization message"
-            );
+            tracing::error!("error occured while waiting for initialization message",);
             return Ok(());
         }
     };
     let chan_id = (guild_id, channel_id);
+    span.record("guiid", &guild_id);
+    span.record("channel", &channel_id);
 
     if let Err(err) = svc
         .chat_tree
         .check_guild_user_channel(guild_id, user_id, channel_id)
     {
-        tracing::error!("{}", err);
+        tracing::error!("error validating IDs: {}", err);
         return Ok(());
     }
 
     let mut channel = match svc.channels.get(&svc.worker_pool, chan_id).await {
         Ok(channel) => channel,
         Err(err) => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                    guild = %guild_id,
-                    channel = %channel_id,
-                },
-                "error while creating voice channel: {}",
-                err,
-            );
+            tracing::error!("error while creating voice channel: {}", err,);
             return Ok(());
         }
     };
@@ -98,25 +79,11 @@ pub async fn handler(
     let client_capabilities = match timeout(Duration::from_secs(5), wait_for_prepare).await {
         Ok(Ok(rtp_cap)) => rtp_cap,
         Err(_) => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                    guild = %guild_id,
-                    channel = %channel_id,
-                },
-                "timeouted while waiting for prepare message"
-            );
+            tracing::error!("timeouted while waiting for prepare message");
             return Ok(());
         }
         _ => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                    guild = %guild_id,
-                    channel = %channel_id,
-                },
-                "error occured while waiting for prepare message"
-            );
+            tracing::error!("error occured while waiting for prepare message");
             return Ok(());
         }
     };
@@ -174,15 +141,7 @@ pub async fn handler(
                 ))
             }
             Err(err) => {
-                tracing::error!(
-                    {
-                        participant = %user_id,
-                        guild = %guild_id,
-                        channel = %channel_id,
-                    },
-                    "socket error while waiting for join channel: {}",
-                    err,
-                );
+                tracing::error!("socket error while waiting for join channel: {}", err,);
                 Err(())
             }
             _ => Err(()),
@@ -193,25 +152,11 @@ pub async fn handler(
         match timeout(Duration::from_secs(8), wait_for_join).await {
             Ok(Ok(val)) => val,
             Err(_) => {
-                tracing::error!(
-                    {
-                        participant = %user_id,
-                        guild = %guild_id,
-                        channel = %channel_id,
-                    },
-                    "timeouted while waiting for join channel message"
-                );
+                tracing::error!("timeouted while waiting for join channel message");
                 return Ok(());
             }
             _ => {
-                tracing::error!(
-                    {
-                        participant = %user_id,
-                        guild = %guild_id,
-                        channel = %channel_id,
-                    },
-                    "error occured while waiting for join channel message"
-                );
+                tracing::error!("error occured while waiting for join channel message");
                 return Ok(());
             }
         };
@@ -227,25 +172,10 @@ pub async fn handler(
         })
         .await
     {
-        tracing::error!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "could not connect producer transport: {}",
-            err,
-        );
+        tracing::error!("could not connect producer transport: {}", err,);
         return Ok(());
     } else {
-        tracing::info!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "connected producer transport",
-        );
+        tracing::info!("connected producer transport",);
     }
     if let Err(err) = user
         .inner
@@ -258,25 +188,10 @@ pub async fn handler(
         })
         .await
     {
-        tracing::error!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "could not connect consumer transport: {}",
-            err,
-        );
+        tracing::error!("could not connect consumer transport: {}", err,);
         return Ok(());
     } else {
-        tracing::info!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "connected consumer transport",
-        );
+        tracing::info!("connected consumer transport",);
     }
 
     let producer_options = ProducerOptions::new(MediaKind::Audio, rtp_parameters);
@@ -285,9 +200,6 @@ pub async fn handler(
         Ok(producer) => {
             tracing::info!(
                 {
-                    participant = %user_id,
-                    guild = %guild_id,
-                    channel = %channel_id,
                     producer_id = %producer.id(),
                 },
                 "created producer",
@@ -295,15 +207,7 @@ pub async fn handler(
             *user.inner.producer.lock().await = Some(producer);
         }
         Err(err) => {
-            tracing::error!(
-                {
-                    participant = %user_id,
-                    guild = %guild_id,
-                    channel = %channel_id,
-                },
-                "could not create producer: {}",
-                err,
-            );
+            tracing::error!("could not create producer: {}", err,);
             return Ok(());
         }
     }
@@ -321,9 +225,6 @@ pub async fn handler(
                 Ok(consumer) => {
                     tracing::info!(
                         {
-                            participant = %user_id,
-                            guild = %guild_id,
-                            channel = %channel_id,
                             for_producer = %user_producer_id,
                         },
                         "created consumer",
@@ -337,15 +238,7 @@ pub async fn handler(
                     user.inner.consumers.insert(consumer.id(), consumer);
                 }
                 Err(err) => {
-                    tracing::error!(
-                        {
-                            participant = %user_id,
-                            guild = %guild_id,
-                            channel = %channel_id,
-                        },
-                        "could not create consumer: {}",
-                        err,
-                    );
+                    tracing::error!("could not create consumer: {}", err,);
                     return Ok(());
                 }
             }
@@ -353,25 +246,10 @@ pub async fn handler(
     }
 
     if let Err((user_id, err)) = channel.add_user(user_id, user.clone()).await {
-        tracing::error!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "could not create consumer: {}",
-            err,
-        );
+        tracing::error!("could not create consumer: {}", err);
         return Ok(());
     } else {
-        tracing::info!(
-            {
-                participant = %user_id,
-                guild = %guild_id,
-                channel = %channel_id,
-            },
-            "user added to voice channel successfully"
-        );
+        tracing::info!("user added to voice channel successfully");
     }
 
     socket
@@ -411,9 +289,6 @@ pub async fn handler(
                     if let Err(err) = user.resume_consumer(consumer_id).await {
                         tracing::error!(
                             {
-                                participant = %user_id,
-                                guild = %guild_id,
-                                channel = %channel_id,
                                 consumer_id = %consumer_id,
                             },
                             "could not resume consumer: {}",
@@ -422,9 +297,6 @@ pub async fn handler(
                     } else {
                         tracing::info!(
                             {
-                                participant = %user_id,
-                                guild = %guild_id,
-                                channel = %channel_id,
                                 consumer_id = %consumer_id,
                             },
                             "resumed consumer",
