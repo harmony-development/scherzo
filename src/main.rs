@@ -152,7 +152,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
                         ("hyper", Level::ERROR),
                         ("tokio", Level::DEBUG),
                         ("runtime", Level::DEBUG),
-                        ("console_subscriber::aggregator", Level::DEBUG),
+                        ("console_subscriber", Level::ERROR),
                     ])
                     .with_default(level_filter),
             ),
