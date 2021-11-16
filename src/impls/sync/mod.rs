@@ -9,9 +9,10 @@ use harmony_rust_sdk::api::{
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use hrpc::client::transport::http::Hyper;
+use hrpc::{client::transport::http::Hyper, encode::encode_protobuf_message};
 use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracing::error;
 
 use crate::key::{self, Manager as KeyManager};
 
@@ -55,6 +56,8 @@ impl SyncServer {
         let clients = Clients(DashMap::default());
 
         tokio::spawn(async move {
+            let span = tracing::info_span!("federation_sync_task");
+            let _guard = span.enter();
             loop {
                 tokio::select! {
                     _ = async {
@@ -63,7 +66,7 @@ impl SyncServer {
                                 Ok((key, _)) => key,
                                 Err(err) => {
                                     let err = ServerError::DbError(err);
-                                    tracing::error!("error occured while getting hosts for sync: {}", err);
+                                    error!("error occured while getting hosts for sync: {}", err);
                                     return None;
                                 }
                             };
@@ -87,7 +90,7 @@ impl SyncServer {
                                 {
                                     for event in queue.event_queue {
                                         if let Err(err) = sync2.push_logic(&host, event) {
-                                            tracing::error!("error while executing sync event: {}", err);
+                                            error!("error while executing sync event: {}", err);
                                         }
                                     }
                                 }
@@ -99,18 +102,23 @@ impl SyncServer {
                     _ = async {
                         while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
                             if sync2.is_host_allowed(&host).is_ok() {
-                                match sync2.get_event_queue(&host) {
-                                    Ok(queue) => {
-                                        if !queue.event_queue.is_empty() {
+                                match sync2.get_event_queue_raw(&host) {
+                                    Ok(raw_queue) => {
+                                        let maybe_arch_queue = raw_queue.as_ref().map(|raw_queue| rkyv_arch::<PullResponse>(raw_queue));
+                                        if !maybe_arch_queue.map_or(false, |v| v.event_queue.is_empty()) {
+                                            let queue = maybe_arch_queue.map_or_else(
+                                                PullResponse::default,
+                                                |v| v.deserialize(&mut rkyv::Infallible).unwrap()
+                                            );
                                             if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
-                                                tracing::error!("error while pushing to event queue: {}", err);
+                                                error!("error while pushing to event queue: {}", err);
                                             }
                                             continue;
                                         }
 
                                         let mut client = clients.get_client(host.clone());
                                         let mut push_result = sync2
-                                            .generate_request(PushRequest { event: Some(event.clone()) })
+                                            .generate_request(PushRequest::new(Some(event.clone())))
                                             .map_err(|_| ())
                                             .and_then(|req| {
                                                 client.push(req).map_err(|_| ())
@@ -119,7 +127,7 @@ impl SyncServer {
                                         let mut try_count = 0;
                                         while try_count < 5 && push_result.is_err() {
                                             push_result = sync2
-                                                .generate_request(PushRequest { event: Some(event.clone()) })
+                                                .generate_request(PushRequest::new(Some(event.clone())))
                                                 .map_err(|_| ())
                                                 .and_then(|req| {
                                                     client.push(req).map_err(|_| ())
@@ -129,12 +137,16 @@ impl SyncServer {
                                         }
 
                                         if push_result.is_err() {
+                                            let queue = maybe_arch_queue.map_or_else(
+                                                PullResponse::default,
+                                                |v| v.deserialize(&mut rkyv::Infallible).unwrap()
+                                            );
                                             if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
-                                                tracing::error!("error while pushing to event queue: {}", err);
+                                                error!("error while pushing to event queue: {}", err);
                                             }
                                         }
                                     }
-                                    Err(err) => tracing::error!("error occured while getting event queue: {}", err),
+                                    Err(err) => error!("error occured while getting event queue: {}", err),
                                 }
                             }
                         }
@@ -153,7 +165,7 @@ impl SyncServer {
         };
 
         let token = self.keys_manager()?.generate_token(data).await?;
-        let token = rkyv_ser(&token);
+        let token = encode_protobuf_message(&token).freeze();
 
         let mut req = Request::new(&msg);
         req.get_or_insert_header_map()
@@ -237,19 +249,21 @@ impl SyncServer {
         Ok(())
     }
 
-    fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
+    fn get_event_queue_raw(&self, host: &str) -> Result<Option<Vec<u8>>, ServerError> {
         let key = make_host_key(host);
-        let queue = self
-            .deps
-            .sync_tree
-            .get(&key)?
-            .map_or_else(PullResponse::default, |val| {
+        let queue = self.deps.sync_tree.get(&key)?;
+        self.deps.sync_tree.remove(&key)?;
+        Ok(queue)
+    }
+
+    fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
+        self.get_event_queue_raw(host).map(|val| {
+            val.map_or_else(PullResponse::default, |val| {
                 rkyv_arch::<PullResponse>(&val)
                     .deserialize(&mut rkyv::Infallible)
                     .unwrap()
-            });
-        self.deps.sync_tree.remove(&key)?;
-        Ok(queue)
+            })
+        })
     }
 
     fn push_to_event_queue(
