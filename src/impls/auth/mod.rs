@@ -53,13 +53,9 @@ impl AuthExt for DashMap<SmolStr, u64, RandomState> {
                 || {
                     // Specific handling for web clients
                     headers
-                        .get(http::header::SEC_WEBSOCKET_EXTENSIONS)
+                        .get(http::header::SEC_WEBSOCKET_PROTOCOL)
                         .and_then(|h| h.to_str().ok())
-                        .and_then(|v| {
-                            v.split(|c| matches!(c, ';' | ','))
-                                .map(str::trim)
-                                .find_map(|v| v.strip_prefix("harmony-auth="))
-                        })
+                        .and_then(|v| v.split(',').map(str::trim).last())
                 },
                 |val| val.to_str().ok(),
             )
