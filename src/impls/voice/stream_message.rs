@@ -266,6 +266,8 @@ pub async fn handler(
         })
         .await?;
 
+    let (mut tx, mut rx) = socket.split();
+
     let process_server_events = async {
         while let Some(event) = channel.get_event().await {
             let message = match event {
@@ -274,17 +276,16 @@ pub async fn handler(
             };
 
             bail_result!(
-                socket
-                    .send_message(StreamMessageResponse::new(Some(message)))
+                tx.send_message(StreamMessageResponse::new(Some(message)))
                     .await
             );
         }
-        Ok(())
+        ServerResult::Ok(())
     };
 
     let process_client_messages = async {
         loop {
-            let req = bail_result!(socket.receive_message().await);
+            let req = bail_result!(rx.receive_message().await);
             if let Some(RequestMessage::ResumeConsumer(resume)) = req.message {
                 if let Ok(consumer_id) = from_json(resume.consumer_id) {
                     let span = tracing::info_span!("process_consumer", consumer = %consumer_id);
@@ -297,6 +298,7 @@ pub async fn handler(
                 }
             }
         }
+        ServerResult::Ok(())
     };
 
     tokio::select! {
