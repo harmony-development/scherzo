@@ -1,7 +1,7 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use harmony_rust_sdk::api::{
-    exports::hrpc::client::transport::http::http_client,
+    exports::hrpc::client::transport::http::hyper::http_client,
     mediaproxy::{fetch_link_metadata_response::Data, *},
 };
 use hyper::{body::Buf, StatusCode, Uri};
@@ -89,7 +89,7 @@ pub struct MediaproxyServer {
 impl MediaproxyServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            http: http_client(),
+            http: http_client(&mut hyper::Client::builder()),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
             deps,
         }

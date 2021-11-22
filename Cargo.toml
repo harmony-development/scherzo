@@ -19,10 +19,10 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "gen_client",
     "rkyv",
 ] }
-hrpc = { version = "0.29", features = ["recommended", "client", "server"] }
+hrpc = { version = "0.30", features = ["http_server", "http_hyper_client", "client", "server"] }
 hyper = { version = "0.14", features = ["http1", "http2", "runtime", "stream"] }
-hyper-rustls = { version = "0.22", default-features = false, features = [
-    "native-tokio",
+hyper-rustls = { version = "0.23", default-features = false, features = [
+    "native-tokio", "http1", "http2"
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
 tower-http = { version = "0.1", default-features = false, features = [

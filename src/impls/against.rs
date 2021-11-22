@@ -1,10 +1,9 @@
 use std::convert::Infallible;
 
 use harmony_rust_sdk::api::exports::hrpc::{
-    common::transport::http::box_body,
     exports::futures_util::{future::BoxFuture, FutureExt},
+    server::transport::http::{box_body, HttpRequest, HttpResponse},
 };
-use hrpc::common::transport::http::{HttpRequest, HttpResponse};
 use hyper::header::HeaderName;
 use tower::{Layer, Service};
 
@@ -27,7 +26,7 @@ where
 
     fn layer(&self, inner: S) -> Self::Service {
         AgainstService {
-            http: http_client(),
+            http: http_client(&mut hyper::Client::builder()),
             header_name: HeaderName::from_static("against"),
             inner,
         }

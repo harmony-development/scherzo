@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use hrpc::{common::transport::http::HttpResponse, server::gen_prelude::BoxFuture};
+use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
 use tower::Service;
 
 use crate::rest_error_response;

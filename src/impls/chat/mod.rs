@@ -21,6 +21,7 @@ use harmony_rust_sdk::api::{
     },
     Hmc,
 };
+use hrpc::server::socket::WriteSocket;
 use image::GenericImageView;
 use rand::Rng;
 use scherzo_derive::*;
@@ -158,10 +159,10 @@ impl ChatServer {
         &self,
         user_id: u64,
         mut sub_rx: Receiver<EventSub>,
-        socket: Socket<StreamEventsResponse, StreamEventsRequest>,
+        mut tx: WriteSocket<StreamEventsResponse>,
     ) -> JoinHandle<()> {
         async fn send_event(
-            socket: &Socket<StreamEventsResponse, StreamEventsRequest>,
+            socket: &mut WriteSocket<StreamEventsResponse>,
             broadcast: &EventBroadcast,
             user_id: u64,
         ) -> bool {
@@ -221,12 +222,12 @@ impl ChatServer {
                             if !broadcast.context.user_ids.is_empty() {
                                 if broadcast.context.user_ids.contains(&user_id)
                                     && check_perms()
-                                    && send_event(&socket, broadcast.as_ref(), user_id).await
+                                    && send_event(&mut tx, broadcast.as_ref(), user_id).await
                                 {
                                     return;
                                 }
                             } else if check_perms()
-                                && send_event(&socket, broadcast.as_ref(), user_id).await
+                                && send_event(&mut tx, broadcast.as_ref(), user_id).await
                             {
                                 return;
                             }
@@ -765,7 +766,7 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        message_id: u64,
+        message_id: Option<u64>,
         direction: Option<Direction>,
         count: Option<u32>,
     ) -> ServerResult<GetChannelMessagesResponse> {
@@ -845,8 +846,8 @@ impl ChatTree {
             })
         };
 
-        (message_id == 0)
-            .then(|| {
+        message_id.map_or_else(
+            || {
                 get_last_message_id()?.map_or_else(
                     || {
                         Ok(GetChannelMessagesResponse {
@@ -857,8 +858,9 @@ impl ChatTree {
                     },
                     |last| get_messages(last + 1),
                 )
-            })
-            .unwrap_or_else(|| get_messages(message_id))
+            },
+            |message_id| get_messages(message_id),
+        )
     }
 
     pub fn get_user_roles_logic(&self, guild_id: u64, user_id: u64) -> ServerResult<Vec<u64>> {
@@ -1532,7 +1534,7 @@ impl ChatTree {
                     content::Content::AttachmentMessage(files)
                 }
                 content::Content::EmbedMessage(embed) => {
-                    if embed.embed.is_none() {
+                    if embed.embeds.is_empty() {
                         return Err(ServerError::MessageContentCantBeEmpty);
                     }
                     content::Content::EmbedMessage(embed)
@@ -1743,13 +1745,13 @@ where
                 let body_text = fields.fields;
 
                 let content = content::Content::EmbedMessage(content::EmbedContent {
-                    embed: Some(Box::new(Embed {
+                    embeds: vec![Embed {
                         title: format!("{} {}:", metadata.level(), metadata.target()),
                         body: Some(FormattedText::new(body_text, Vec::new())),
                         fields: embed_fields,
                         color,
                         ..Default::default()
-                    })),
+                    }],
                 });
                 let (message_id, message) = chat_tree
                     .send_with_system(guild_id, channel_id, content)

@@ -5,7 +5,7 @@ use super::*;
 pub async fn handler(
     svc: &VoiceServer,
     request: Request<()>,
-    socket: Socket<StreamMessageResponse, StreamMessageRequest>,
+    mut socket: Socket<StreamMessageResponse, StreamMessageRequest>,
 ) -> Result<(), HrpcServerError> {
     #[allow(unused_variables)]
     let user_id = svc.valid_sessions.auth(&request)?;

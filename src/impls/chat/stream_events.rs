@@ -12,10 +12,11 @@ pub async fn handler(
     let (sub_tx, sub_rx) = mpsc::channel(64);
     let chat_tree = svc.deps.chat_tree.clone();
 
-    let send_loop = svc.spawn_event_stream_processor(user_id, sub_rx, socket.clone());
+    let (tx, mut rx) = socket.split();
+    let send_loop = svc.spawn_event_stream_processor(user_id, sub_rx, tx);
     let recv_loop = async move {
         loop {
-            let req = bail_result!(socket.receive_message().await);
+            let req = bail_result!(rx.receive_message().await);
             if let Some(req) = req.request {
                 use stream_events_request::*;
 

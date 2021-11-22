@@ -20,18 +20,17 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            client::transport::http::HttpClient,
-            common::transport::http::{box_body, HttpRequest},
+            client::transport::http::hyper::HttpClient,
             exports::futures_util::{
-                future::{self, Either},
+                future::{self, BoxFuture, Either},
                 ready, stream, FutureExt, Stream, StreamExt,
             },
+            server::transport::http::{box_body, HttpRequest, HttpResponse},
         },
         prost::bytes::{Bytes, BytesMut},
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
-use hrpc::{common::transport::http::HttpResponse, server::gen_prelude::BoxFuture};
 use http::{header, HeaderValue, Method, StatusCode, Uri};
 use hyper::Body;
 use tokio::{

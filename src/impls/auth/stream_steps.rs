@@ -3,7 +3,7 @@ use super::*;
 pub async fn handler(
     svc: &AuthServer,
     _request: Request<()>,
-    socket: Socket<StreamStepsResponse, StreamStepsRequest>,
+    mut socket: Socket<StreamStepsResponse, StreamStepsRequest>,
 ) -> Result<(), HrpcServerError> {
     let msg = socket.receive_message().await?;
 
@@ -31,7 +31,7 @@ pub async fn handler(
                 );
 
                 // Return from func since we errored
-                return Err(err);
+                return Err(err.into());
             }
         }
     }
@@ -68,7 +68,7 @@ pub async fn handler(
         // Break if we authed
         if end_stream {
             // Close the socket
-            socket.close().await;
+            socket.close().await?;
             break;
         }
     }

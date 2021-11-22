@@ -17,12 +17,11 @@ use harmony_rust_sdk::api::{
 };
 use hrpc::{
     body::Body,
-    common::transport::http::{
-        box_body, content_header_value, version_header_name, version_header_value, HttpResponse,
-    },
+    common::transport::http::{content_header_value, version_header_name, version_header_value},
     decode::DecodeBodyError,
     encode::encode_protobuf_message,
     proto::HrpcErrorIdentifier,
+    server::transport::http::{box_body, HttpResponse},
 };
 use hyper::{http::HeaderValue, Uri};
 use parking_lot::Mutex;

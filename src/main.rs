@@ -28,7 +28,7 @@ use harmony_rust_sdk::api::{
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
-use hrpc::common::transport::http::box_body;
+use hrpc::server::transport::http::box_body;
 use hyper::header;
 use scherzo::{
     config::DbConfig,

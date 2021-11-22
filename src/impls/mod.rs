@@ -10,7 +10,7 @@ pub mod sync;
 #[cfg(feature = "voice")]
 pub mod voice;
 
-use hrpc::client::transport::http::{http_client, HttpClient};
+use hrpc::client::transport::http::hyper::{http_client, HttpClient};
 use hyper::{http, Uri};
 use prelude::*;
 
@@ -103,7 +103,7 @@ impl Dependencies {
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
             action_processor: ActionProcesser { auth_tree },
-            http: http_client(),
+            http: http_client(&mut hyper::Client::builder()),
 
             config,
             runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),

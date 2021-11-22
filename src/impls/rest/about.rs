@@ -4,9 +4,9 @@ use crate::{rest_error_response, SCHERZO_VERSION};
 
 use super::*;
 use harmony_rust_sdk::api::rest::About;
-use hrpc::common::{
-    future::{ready, Ready},
-    transport::http::HttpResponse,
+use hrpc::{
+    common::future::{ready, Ready},
+    server::transport::http::HttpResponse,
 };
 use tower::{
     limit::{RateLimit, RateLimitLayer},
