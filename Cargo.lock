@@ -959,9 +959,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.30.1"
+version = "0.30.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "386ba844ff68ef7e4bdc50f4c42e3d119e42b7b9377e97de457d7248bbb00311"
+checksum = "ec7a15ee319418d2d65130dd2ae00bcb42fab78cf1eb4ebfeac4d11c7c98c088"
 dependencies = [
  "axum-server",
  "base64",
@@ -1970,9 +1970,9 @@ dependencies = [
 
 [[package]]
 name = "rend"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7794728d3f8b47e950081ac9b7457a1cc3f81a8ce57a1ec18ae5f96c789d086d"
+checksum = "d0a97e3d54c72a2837a552c9ca99e7163ed7892f0f70cc5372a0aec9e9b7c152"
 dependencies = [
  "bytecheck",
 ]
@@ -1994,9 +1994,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.22"
+version = "0.7.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4a148a71d5ce547f2ded9dec695514e4381431bb6bd5960a5640722d51a083"
+checksum = "4dbc526a74f93284945b99d3031274f20478f4373d4bffe94fa33443ccd86553"
 dependencies = [
  "bytecheck",
  "hashbrown",
