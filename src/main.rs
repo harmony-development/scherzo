@@ -28,7 +28,7 @@ use harmony_rust_sdk::api::{
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
-use hrpc::server::transport::http::box_body;
+use hrpc::server::transport::http::{box_body, HttpConfig};
 use hyper::header;
 use scherzo::{
     config::DbConfig,
@@ -407,6 +407,12 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     }
 
     let serve = transport
+        .configure_hyper(
+            HttpConfig::new()
+                .http1_keep_alive(true)
+                .http2_keep_alive_interval(Some(Duration::from_secs(10)))
+                .build(),
+        )
         .serve(server)
         .instrument(info_span!("scherzo::serve"));
 
