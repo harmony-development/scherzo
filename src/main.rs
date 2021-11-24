@@ -383,6 +383,10 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         .layer(ConcurrencyLimitLayer::new(
             deps.config.policy.max_concurrent_requests,
         ))
+        .layer(SetSensitiveRequestHeadersLayer::new([
+            header::AUTHORIZATION,
+            header::SEC_WEBSOCKET_PROTOCOL,
+        ]))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().include_headers(true))
@@ -394,10 +398,6 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
                         .latency_unit(LatencyUnit::Micros),
                 ),
         )
-        .layer(SetSensitiveRequestHeadersLayer::new([
-            header::AUTHORIZATION,
-            header::SEC_WEBSOCKET_EXTENSIONS,
-        ]))
         .layer(rest)
         .layer(against::AgainstLayer);
 
