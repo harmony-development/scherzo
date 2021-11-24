@@ -298,6 +298,7 @@ pub async fn handler(
                 }
             }
         }
+        #[allow(unreachable_code)]
         ServerResult::Ok(())
     };
 

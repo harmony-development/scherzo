@@ -859,7 +859,7 @@ impl ChatTree {
                     |last| get_messages(last + 1),
                 )
             },
-            |message_id| get_messages(message_id),
+            get_messages,
         )
     }
 
