@@ -53,16 +53,16 @@ use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
-    trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
+    trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer},
     LatencyUnit,
 };
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
 // in seconds
-// do once 24 hours
-// this is very expensive on sled (on small DBs it can quadruple memory usage, and full out one core)
-const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60 * 24;
+// do once per hour
+// this is expensive if you have big DBs (>500mb uncompressed)
+const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 
 #[tokio::main]
 async fn main() {
@@ -145,16 +145,21 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         );
         let term_logger = fmt::layer();
 
+        let level_extra = if level_filter == Level::TRACE {
+            Level::DEBUG
+        } else {
+            Level::ERROR
+        };
         (
             term_logger.and_then(admin_logger).with_filter(
                 Targets::default()
                     .with_targets([
-                        ("rustyline", Level::ERROR),
-                        ("sled", Level::ERROR),
-                        ("hyper", Level::ERROR),
-                        ("tokio", Level::DEBUG),
-                        ("runtime", Level::DEBUG),
+                        ("sled", level_extra),
+                        ("hyper", level_extra),
+                        ("tokio", level_extra),
+                        ("runtime", level_extra),
                         ("console_subscriber", Level::ERROR),
+                        ("h2", level_extra),
                     ])
                     .with_default(level_filter),
             ),
@@ -393,7 +398,6 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().include_headers(true))
                 .on_failure(DefaultOnFailure::new().latency_unit(LatencyUnit::Micros))
-                .on_request(DefaultOnRequest::new().level(Level::INFO))
                 .on_response(
                     DefaultOnResponse::new()
                         .include_headers(true)
