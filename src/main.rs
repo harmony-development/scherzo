@@ -59,8 +59,10 @@ use tower_http::{
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
 
-// TODO: benchmark how long integrity verification takes on big `Tree`s and adjust value accordingly
-const INTEGRITY_VERIFICATION_PERIOD: u64 = 60;
+// in seconds
+// do once 24 hours
+// this is very expensive on sled (on small DBs it can quadruple memory usage, and full out one core)
+const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60 * 24;
 
 #[tokio::main]
 async fn main() {
