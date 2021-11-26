@@ -158,12 +158,12 @@ pub async fn handler(
     let (consumer_dtls_paramaters, producer_dtls_paramaters, rtp_parameters) =
         match timeout(Duration::from_secs(8), wait_for_join).await {
             Ok(Ok(val)) => val,
-            Err(_) => {
-                tracing::error!("timeouted while waiting for join channel message");
+            Err(err) => {
+                tracing::error!("timeouted while waiting for join channel message: {:?}", err);
                 return Ok(());
             }
-            _ => {
-                tracing::error!("error occured while waiting for join channel message");
+            err => {
+                tracing::error!("error occured while waiting for join channel message: {:?}", err);
                 return Ok(());
             }
         };
