@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::Path,
-    str::FromStr,
+    str::FromStr, sync::atomic::AtomicU64,
 };
 
 use harmony_rust_sdk::api::{
@@ -1670,14 +1670,19 @@ use tracing_subscriber::fmt::{
 use tracing_subscriber::registry::LookupSpan;
 
 pub struct AdminLogChannelLogger {
-    inner: Option<(ChatTree, EventSender)>,
+    inner: Option<(EventSender, (u64, u64), AtomicU64)>,
 }
 
 impl AdminLogChannelLogger {
-    pub fn new(deps: &Dependencies) -> Self {
-        Self {
-            inner: Some((deps.chat_tree.clone(), deps.chat_event_sender.clone())),
-        }
+    pub fn new(deps: &Dependencies) -> ServerResult<Self> {
+        let (guild_id, log_chan_id, _) = deps.chat_tree.get_admin_guild_keys()?.unwrap();
+        Ok(Self {
+            inner: Some((
+                deps.chat_event_sender.clone(),
+                (guild_id, log_chan_id),
+                AtomicU64::new(1),
+            )),
+        })
     }
 
     pub fn empty() -> Self {
@@ -1703,80 +1708,100 @@ where
             return Ok(());
         }
 
-        if let Some((chat_tree, chat_event_sender)) = &self.inner {
-            if let Some((guild_id, channel_id, _)) = chat_tree.get_admin_guild_keys().unwrap() {
-                let color = match *metadata.level() {
-                    Level::DEBUG => Some(color::encode_rgb([0, 0, 220])),
-                    Level::INFO => Some(color::encode_rgb([0, 220, 0])),
-                    Level::WARN => Some(color::encode_rgb([220, 220, 0])),
-                    Level::ERROR => Some(color::encode_rgb([220, 0, 0])),
-                    _ => None,
-                };
+        if let Some((chat_event_sender, (guild_id, channel_id), msg_id)) = self
+            .inner
+            .as_ref()
+            .map(|(s, ids, msg_id)| (s, *ids, msg_id))
+        {
+            let color = match *metadata.level() {
+                Level::DEBUG => Some(color::encode_rgb([0, 0, 220])),
+                Level::INFO => Some(color::encode_rgb([0, 220, 0])),
+                Level::WARN => Some(color::encode_rgb([220, 220, 0])),
+                Level::ERROR => Some(color::encode_rgb([220, 0, 0])),
+                _ => None,
+            };
 
-                let mut embed_fields = Vec::new();
-                ctx.visit_spans(|span| {
-                    let ext = span.extensions();
-                    let fields = ext.get::<FormattedFields<N>>().unwrap();
-                    if !fields.is_empty() {
-                        let split = fields.split(' ').collect::<Vec<_>>();
-                        let split_len = split.len();
-                        let fields = split.into_iter().enumerate().fold(
-                            String::new(),
-                            |mut tot, (index, item)| {
-                                tot.push_str(item);
-                                if index + 1 != split_len {
-                                    tot.push('\n');
-                                }
-                                tot
-                            },
-                        );
-                        embed_fields.push(embed::EmbedField {
-                            title: format!("{}:", span.name()),
-                            body: Some(FormattedText::new(fields, Vec::new())),
-                            ..Default::default()
-                        });
-                    }
-                    Ok(())
-                })?;
-
-                let mut fields = FormattedFields::<N>::new(String::new());
-                ctx.field_format()
-                    .format_fields(fields.as_writer(), event)?;
-                let body_text = fields.fields;
-
-                let content = content::Content::EmbedMessage(content::EmbedContent {
-                    embeds: vec![Embed {
-                        title: format!("{} {}:", metadata.level(), metadata.target()),
-                        body: Some(FormattedText::new(body_text, Vec::new())),
-                        fields: embed_fields,
-                        color,
-                        ..Default::default()
-                    }],
-                });
-                let (message_id, message) = chat_tree
-                    .send_with_system(guild_id, channel_id, content)
-                    .unwrap();
-
-                let _ = chat_event_sender.send(Arc::new(EventBroadcast::new(
-                    EventSub::Guild(guild_id),
-                    Event::Chat(stream_event::Event::SentMessage(Box::new(
-                        stream_event::MessageSent {
-                            echo_id: None,
-                            guild_id,
-                            channel_id,
-                            message_id,
-                            message: Some(message),
+            let mut embed_fields = Vec::new();
+            ctx.visit_spans(|span| {
+                let ext = span.extensions();
+                let fields = ext.get::<FormattedFields<N>>().unwrap();
+                if !fields.is_empty() {
+                    let split = fields.split(' ').collect::<Vec<_>>();
+                    let split_len = split.len();
+                    let fields = split.into_iter().enumerate().fold(
+                        String::new(),
+                        |mut tot, (index, item)| {
+                            tot.push_str(item);
+                            if index + 1 != split_len {
+                                tot.push('\n');
+                            }
+                            tot
                         },
-                    ))),
-                    Some(PermCheck::new(
+                    );
+                    embed_fields.push(embed::EmbedField {
+                        title: format!("{}:", span.name()),
+                        body: Some(FormattedText::new(fields, Vec::new())),
+                        ..Default::default()
+                    });
+                }
+                Ok(())
+            })?;
+
+            let mut fields = FormattedFields::<N>::new(String::new());
+            ctx.field_format()
+                .format_fields(fields.as_writer(), event)?;
+            let body_text = fields.fields;
+
+            let content = content::Content::EmbedMessage(content::EmbedContent {
+                embeds: vec![Embed {
+                    title: format!("{} {}:", metadata.level(), metadata.target()),
+                    body: Some(FormattedText::new(body_text, Vec::new())),
+                    fields: embed_fields,
+                    color,
+                    ..Default::default()
+                }],
+            });
+
+            let message_id = msg_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let created_at = get_time_secs();
+            let edited_at = None;
+
+            let message = HarmonyMessage {
+                metadata: None,
+                author_id: 0,
+                created_at,
+                edited_at,
+                content: Some(Content {
+                    content: Some(content),
+                }),
+                in_reply_to: None,
+                overrides: Some(Overrides {
+                    username: Some("System".to_string()),
+                    reason: Some(overrides::Reason::SystemMessage(Empty {})),
+                    avatar: None,
+                }),
+                reactions: Vec::new(),
+            };
+
+            let _ = chat_event_sender.send(Arc::new(EventBroadcast::new(
+                EventSub::Guild(guild_id),
+                Event::Chat(stream_event::Event::SentMessage(Box::new(
+                    stream_event::MessageSent {
+                        echo_id: None,
                         guild_id,
-                        Some(channel_id),
-                        "messages.view",
-                        false,
-                    )),
-                    EventContext::empty(),
-                )));
-            }
+                        channel_id,
+                        message_id,
+                        message: Some(message),
+                    },
+                ))),
+                Some(PermCheck::new(
+                    guild_id,
+                    Some(channel_id),
+                    "messages.view",
+                    false,
+                )),
+                EventContext::empty(),
+            )));
         }
 
         Ok(())

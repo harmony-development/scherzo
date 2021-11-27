@@ -303,7 +303,9 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
     }
 
     admin_logger_handle
-        .reload(fmt::layer().event_format(AdminLogChannelLogger::new(&deps)))
+        .reload(fmt::layer().event_format(
+            AdminLogChannelLogger::new(&deps).expect("failed to create admin logger"),
+        ))
         .unwrap();
 
     let profile_server = ProfileServer::new(deps.clone());
