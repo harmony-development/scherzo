@@ -38,11 +38,17 @@ pub async fn handler(
     let (guild_id, channel_id) = match timeout(Duration::from_secs(5), wait_for_initialize).await {
         Ok(Ok(id)) => id,
         Err(err) => {
-            tracing::error!("timeouted while waiting for initialization message: {:?}", err);
+            tracing::error!(
+                "timeouted while waiting for initialization message: {:?}",
+                err
+            );
             return Ok(());
         }
         err => {
-            tracing::error!("error occured while waiting for initialization message: {:?}", err);
+            tracing::error!(
+                "error occured while waiting for initialization message: {:?}",
+                err
+            );
             return Ok(());
         }
     };
@@ -159,11 +165,17 @@ pub async fn handler(
         match timeout(Duration::from_secs(8), wait_for_join).await {
             Ok(Ok(val)) => val,
             Err(err) => {
-                tracing::error!("timeouted while waiting for join channel message: {:?}", err);
+                tracing::error!(
+                    "timeouted while waiting for join channel message: {:?}",
+                    err
+                );
                 return Ok(());
             }
             err => {
-                tracing::error!("error occured while waiting for join channel message: {:?}", err);
+                tracing::error!(
+                    "error occured while waiting for join channel message: {:?}",
+                    err
+                );
                 return Ok(());
             }
         };

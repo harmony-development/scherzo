@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &SyncServer,
     request: Request<PushRequest>,
 ) -> ServerResult<Response<PushResponse>> {
-    /*let host = svc.auth(&request).await?;
+    let host = svc.auth(&request).await?;
     let key = make_host_key(&host);
     if !svc
         .deps
@@ -20,6 +20,5 @@ pub async fn handler(
     if let Some(event) = request.into_message().await?.event {
         svc.push_logic(&host, event)?;
     }
-    Ok((PushResponse {}).into_response())*/
-    Err(ServerError::NotImplemented.into())
+    Ok((PushResponse {}).into_response())
 }
