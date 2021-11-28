@@ -216,10 +216,14 @@ impl SyncServer {
                 let mut pubkey = get_key().await?;
 
                 let verify = |pubkey| key::verify_token(&token, &pubkey).map(|_| host.clone());
+
+                let first_verify_result = verify(pubkey);
                 // Fetch pubkey if the verification fails, it might have changed
-                if matches!(verify(pubkey), Err(ServerError::CouldntVerifyTokenData)) {
+                if let Err(ServerError::CouldntVerifyTokenData) = first_verify_result {
                     keys_manager.invalidate_key(&host);
                     pubkey = get_key().await?;
+                } else {
+                    return first_verify_result;
                 }
 
                 return verify(pubkey);
