@@ -78,7 +78,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
 rkyv = "0.7"
 
-mediasoup = { version = "0.8", optional = true }
+mediasoup = { version = "0.9", optional = true }
 
 tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
 
