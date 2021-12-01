@@ -67,7 +67,7 @@ const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 #[tokio::main]
 async fn main() {
     let mut db_path = "db".to_string();
-    let mut console = true;
+    let mut console = false;
     let mut level_filter = Level::INFO;
 
     for (index, arg) in std::env::args().enumerate() {
@@ -77,8 +77,8 @@ async fn main() {
                     db_path = path;
                 }
             }
-            "--disable-console" => {
-                console = false;
+            "--enable-tokio-console" => {
+                console = true;
             }
             "-d" | "--debug" => level_filter = Level::DEBUG,
             "-v" | "--verbose" => level_filter = Level::TRACE,
