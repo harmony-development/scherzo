@@ -35,11 +35,7 @@ use harmony_rust_sdk::api::{
 use hrpc::server::transport::http::{box_body, HttpConfig};
 use hyper::header;
 use scherzo::{
-    config::DbConfig,
-    db::{
-        migration::{apply_migrations, get_db_version},
-        Db,
-    },
+    db::migration::{apply_migrations, get_db_version},
     impls::{
         against,
         auth::AuthServer,
@@ -92,54 +88,6 @@ async fn main() {
     }
 
     run(db_path, console, level_filter).await
-}
-
-#[cfg(feature = "sled")]
-fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
-    db_path: P,
-    db_config: DbConfig,
-) -> Result<Box<dyn Db>, String> {
-    let result = sled::Config::new()
-        .use_compression(true)
-        .path(db_path)
-        .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
-        .mode(
-            db_config
-                .sled_throughput_at_storage_cost
-                .then(|| sled::Mode::HighThroughput)
-                .unwrap_or(sled::Mode::LowSpace),
-        )
-        .open()
-        .and_then(|db| db.verify_integrity().map(|_| db));
-
-    match result {
-        Ok(db) => Ok(Box::new(db)),
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
-    _db_path: P,
-    _db_config: DbConfig,
-) -> Box<dyn Db> {
-    let span = info_span!("scherzo::db", path = %_db_path);
-    span.in_scope(|| {
-        info!("initializing database");
-
-        #[cfg(feature = "sled")]
-        let db_result = open_sled(_db_path, _db_config);
-        #[cfg(not(any(feature = "sled")))]
-        let db_result = Ok(Box::new(scherzo::db::noop::NoopDb));
-
-        match db_result {
-            Ok(db) => db,
-            Err(err) => {
-                error!("cannot open database: {}; aborting", err);
-
-                std::process::exit(1);
-            }
-        }
-    })
 }
 
 pub async fn run(db_path: String, console: bool, level_filter: Level) {
@@ -221,7 +169,7 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         warn!("rate limits are disabled, please take care!");
     }
 
-    let db = open_db(&db_path, config.db.clone());
+    let db = scherzo::db::open_db(&db_path, config.db.clone());
     let (current_db_version, needs_migration) = get_db_version(db.as_ref())
         .expect("something went wrong while checking if the db needs migrations!!!");
     if needs_migration {

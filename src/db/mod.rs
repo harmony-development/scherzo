@@ -7,7 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::travel_error;
+use crate::{config::DbConfig, travel_error};
 use cached::proc_macro::cached;
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
@@ -19,6 +19,30 @@ pub mod migration;
 pub mod noop;
 #[cfg(feature = "sled")]
 pub mod sled;
+
+pub fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
+    _db_path: P,
+    _db_config: DbConfig,
+) -> Box<dyn Db> {
+    let span = tracing::info_span!("scherzo::db", path = %_db_path);
+    span.in_scope(|| {
+        tracing::info!("initializing database");
+
+        #[cfg(feature = "sled")]
+        let db_result = sled::open_sled(_db_path, _db_config);
+        #[cfg(not(any(feature = "sled")))]
+        let db_result = Ok(Box::new(noop::NoopDb));
+
+        match db_result {
+            Ok(db) => db,
+            Err(err) => {
+                tracing::error!("cannot open database: {}; aborting", err);
+
+                std::process::exit(1);
+            }
+        }
+    })
+}
 
 #[must_use]
 #[derive(Default)]

@@ -1,6 +1,31 @@
 use std::ops::RangeInclusive;
 
+use crate::config::DbConfig;
+
 use super::{ArcTree, Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
+
+pub fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
+    db_path: P,
+    db_config: DbConfig,
+) -> Result<Box<dyn Db>, String> {
+    let result = sled::Config::new()
+        .use_compression(true)
+        .path(db_path)
+        .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
+        .mode(
+            db_config
+                .sled_throughput_at_storage_cost
+                .then(|| sled::Mode::HighThroughput)
+                .unwrap_or(sled::Mode::LowSpace),
+        )
+        .open()
+        .and_then(|db| db.verify_integrity().map(|_| db));
+
+    match result {
+        Ok(db) => Ok(Box::new(db)),
+        Err(err) => Err(err.to_string()),
+    }
+}
 
 impl Db for sled::Db {
     fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree> {

@@ -8,6 +8,10 @@ version = "0.1.0"
 authors = ["Yusuf Bera Ertan <y.bera003.06@protonmail.com>"]
 edition = "2021"
 
+[[bin]]
+name = "scherzo_cmd"
+path = "src/bin/cmd.rs"
+
 [features]
 default = ["sled"]
 voice = ["mediasoup"]
