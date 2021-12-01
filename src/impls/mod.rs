@@ -38,6 +38,7 @@ pub mod prelude {
 
     pub use harmony_rust_sdk::api::exports::{
         hrpc::{
+            bail,
             response::IntoResponse,
             server::{
                 error::{HrpcError as HrpcServerError, ServerResult},
