@@ -21,6 +21,26 @@ fn federation_config_default() -> Option<FederationConfig> {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OAuthConfig {
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: String,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl Default for OAuthConfig {
+    fn default() -> Self {
+        OAuthConfig {
+            client_id: "".to_string(),
+            client_secret: "".to_string(),
+            enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
     pub host: String,
@@ -70,6 +90,12 @@ pub struct PolicyConfig {
     pub disable_registration: bool,
     #[serde(default = "max_concurrent_requests_default")]
     pub max_concurrent_requests: usize,
+    #[serde(default = "oauth_config_default")]
+    pub google_sso: OAuthConfig,
+}
+
+fn oauth_config_default() -> OAuthConfig {
+    OAuthConfig::default()
 }
 
 impl Default for PolicyConfig {
@@ -78,6 +104,7 @@ impl Default for PolicyConfig {
             disable_ratelimits: false,
             disable_registration: false,
             max_concurrent_requests: max_concurrent_requests_default(),
+            google_sso: oauth_config_default(),
         }
     }
 }

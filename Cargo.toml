@@ -12,6 +12,7 @@ edition = "2021"
 default = ["sled"]
 voice = ["mediasoup"]
 jemalloc = ["tikv-jemallocator"]
+sso = ["oauth2"]
 
 [dependencies]
 scherzo_derive = { path = "./scherzo_derive" }
@@ -77,6 +78,8 @@ rkyv = "0.7"
 mediasoup = { version = "0.8", optional = true }
 
 tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
+
+oauth2 = { version = "4.1", optional = true }
 
 # migration protocols
 # sdk_migration_two = { package = "harmony_rust_sdk", git = "https://github.com/harmony-development/harmony_rust_sdk.git", rev = "dfcaca4ab04992afd47d21a6610bb8600cbe48b8" }

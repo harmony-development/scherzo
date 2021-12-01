@@ -4,12 +4,17 @@ pub async fn handler(
     svc: &AuthServer,
     _: Request<BeginAuthRequest>,
 ) -> ServerResult<Response<BeginAuthResponse>> {
+    let mut options = vec!["login", "register"];
+    if cfg!(sso) && svc.deps.config.policy.google_sso.enabled {
+        options.push("sso-google");
+    }
+
     let initial_step = AuthStep {
         can_go_back: false,
         fallback_url: String::default(),
         step: Some(auth_step::Step::Choice(auth_step::Choice {
             title: "initial".to_string(),
-            options: ["login", "register"]
+            options: options
                 .iter()
                 .map(ToString::to_string)
                 .collect(),
