@@ -448,9 +448,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.2.2"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3825b1e8580894917dc4468cb634a1b4e9745fddc854edad72d9c04644c0319f"
+checksum = "738c290dfaea84fc1ca15ad9c168d083b05a714e1efddd8edaab678dc28d2836"
 dependencies = [
  "cfg-if",
 ]
@@ -890,7 +890,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#f8b15f4019bf327c3e4d267ac162434b94476d37"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c0691bc36390cec7e99550eab07f970194cbf6b1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -900,7 +900,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.7.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#f8b15f4019bf327c3e4d267ac162434b94476d37"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#c0691bc36390cec7e99550eab07f970194cbf6b1"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -958,9 +958,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.31.3"
+version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c66dc82e158cba056d46aebe71b606f063b7a5c31cba73e5bbf33886e28b6d65"
+checksum = "7b146beaba7b5a3ea8fd6551354ce2e0e6183e9ab5c9b8f3a23249f9bd4a1284"
 dependencies = [
  "axum-server",
  "base64",
@@ -985,9 +985,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc-build"
-version = "0.31.0"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5195d64a8470b798001a157068ff5bd12325a8323f78ac493bc9a3ad2f85c252"
+checksum = "6ab249e138740687305da5d7ca28a43822950ca94ac1991bcc2bd221da08a9d7"
 dependencies = [
  "proc-macro2",
  "prost-build",
@@ -997,9 +997,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc-proc-macro"
-version = "0.31.0"
+version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27fdc089af87902295fa04c5c93ff34ba8bc1d69e7e8fbea00a76032148f8f3f"
+checksum = "137c39df4fdf4ae5ca610b0fe44153f874676f04010f6d74ea72a1174347af50"
 
 [[package]]
 name = "html5ever"

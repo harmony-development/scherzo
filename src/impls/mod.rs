@@ -36,18 +36,16 @@ pub mod prelude {
         ServerError,
     };
 
-    pub use harmony_rust_sdk::api::exports::{
-        hrpc::{
-            bail,
-            response::IntoResponse,
-            server::{
-                error::{HrpcError as HrpcServerError, ServerResult},
-                prelude::*,
-                socket::Socket,
-            },
-            Request, Response,
+    pub use harmony_rust_sdk::api::exports::prost::Message;
+    pub use hrpc::{
+        bail,
+        response::IntoResponse,
+        server::{
+            error::{HrpcError as HrpcServerError, ServerResult},
+            prelude::*,
+            socket::Socket,
         },
-        prost::Message,
+        Request, Response,
     };
     pub use rkyv::Deserialize;
     pub use scherzo_derive::*;
@@ -229,7 +227,7 @@ macro_rules! impl_unary_handlers {
     )+) => {
         $(
             $( #[$attr] )*
-            fn $handler(&self, request: Request<$req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<Response<$resp>>> {
+            fn $handler(&self, request: Request<$req>) -> hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<Response<$resp>>> {
                 Box::pin($handler::handler(self, request))
             }
         )+
@@ -243,7 +241,7 @@ macro_rules! impl_ws_handlers {
     )+) => {
         $(
             $( #[$attr] )*
-            fn $handler(&self, request: Request<()>, socket: Socket<$resp, $req>) -> harmony_rust_sdk::api::exports::hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
+            fn $handler(&self, request: Request<()>, socket: Socket<$resp, $req>) -> hrpc::exports::futures_util::future::BoxFuture<'_, ServerResult<()>> {
                 Box::pin($handler::handler(self, request, socket))
             }
         )+

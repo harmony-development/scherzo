@@ -166,12 +166,16 @@ pub async fn handler(
                             let email = try_get_email(&mut values)?;
 
                             let user_id = svc.deps.auth_tree.get(email.as_bytes())?.map_or_else(
-                                || Err(ServerError::WrongUserOrPassword {
-                                    email: email.as_str().into(),
-                                }),
+                                || {
+                                    Err(ServerError::WrongUserOrPassword {
+                                        email: email.as_str().into(),
+                                    })
+                                },
                                 |raw| {
                                     // Safety: this unwrap can never cause UB since we only store u64
-                                    Ok(u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+                                    Ok(u64::from_be_bytes(unsafe {
+                                        raw.try_into().unwrap_unchecked()
+                                    }))
                                 },
                             )?;
 

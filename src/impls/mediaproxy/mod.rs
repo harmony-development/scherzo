@@ -1,9 +1,7 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
-use harmony_rust_sdk::api::{
-    exports::hrpc::client::transport::http::hyper::http_client,
-    mediaproxy::{fetch_link_metadata_response::Data, *},
-};
+use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
+use hrpc::client::transport::http::hyper::http_client;
 use hyper::{body::Buf, StatusCode, Uri};
 use webpage::HTML;
 
