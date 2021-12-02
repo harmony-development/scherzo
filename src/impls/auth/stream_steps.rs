@@ -40,41 +40,51 @@ pub async fn handler(
     svc.send_step.insert(auth_id.clone(), tx);
     tracing::debug!("pushed stream tx for id {}", auth_id);
 
-    let mut end_stream;
-    while let Some(step) = rx.recv().await {
-        tracing::debug!("received auth step to send to id {}", auth_id);
-        end_stream = matches!(
-            step,
-            AuthStep {
-                step: Some(auth_step::Step::Session(_)),
-                ..
+    let mut error = None;
+    loop {
+        tokio::select! {
+            biased;
+            Some(step) = rx.recv() => {
+                tracing::debug!("received auth step to send to id {}", auth_id);
+                let end_stream = matches!(
+                    step,
+                    AuthStep {
+                        step: Some(auth_step::Step::Session(_)),
+                        ..
+                    }
+                );
+
+                if let Err(err) = socket
+                    .send_message(StreamStepsResponse { step: Some(step) })
+                    .await
+                {
+                    tracing::error!(
+                        "error occured while sending step to id {}: {}",
+                        auth_id,
+                        err
+                    );
+
+                    // Break from loop since we errored
+                    break;
+                }
+
+                // Break if we authed
+                if end_stream {
+                    // Close the socket
+                    socket.close().await?;
+                    break;
+                }
             }
-        );
-
-        if let Err(err) = socket
-            .send_message(StreamStepsResponse { step: Some(step) })
-            .await
-        {
-            tracing::error!(
-                "error occured while sending step to id {}: {}",
-                auth_id,
-                err
-            );
-
-            // Break from loop since we errored
-            break;
-        }
-
-        // Break if we authed
-        if end_stream {
-            // Close the socket
-            socket.close().await?;
-            break;
+            Err(err) = socket.receive_message() => {
+                error = Some(err);
+                break;
+            }
+            else => tokio::task::yield_now().await,
         }
     }
 
     svc.send_step.remove(&auth_id);
     tracing::debug!("removing stream for id {}", auth_id);
 
-    Ok(())
+    error.map_or(Ok(()), |err| Err(err.into()))
 }
