@@ -2068,6 +2068,7 @@ dependencies = [
  "opentelemetry-jaeger",
  "parking_lot",
  "paste 1.0.6",
+ "pin-project",
  "rand",
  "rkyv",
  "scherzo_derive",

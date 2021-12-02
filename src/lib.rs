@@ -33,6 +33,7 @@ pub mod config;
 pub mod db;
 pub mod impls;
 pub mod key;
+pub mod utils;
 
 pub const SCHERZO_VERSION: &str = git_version::git_version!(
     prefix = "git:",

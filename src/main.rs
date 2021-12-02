@@ -48,6 +48,7 @@ use scherzo::{
         sync::SyncServer,
         Dependencies, HELP_TEXT,
     },
+    utils,
 };
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
@@ -358,11 +359,7 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let cors = if deps.config.cors_dev {
-        CorsLayer::permissive()
-    } else {
-        CorsLayer::new()
-    };
+    let cors = utils::option_layer(deps.config.cors_dev.then(CorsLayer::permissive));
 
     let mut transport = Hyper::new(addr)
         .expect("failed to create transport")
