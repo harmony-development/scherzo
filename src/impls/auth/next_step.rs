@@ -15,10 +15,9 @@ pub async fn handler(
 
     let next_step;
 
-    let mut step_stack = svc
-        .step_map
-        .get_mut(auth_id.as_str())
-        .ok_or(ServerError::InvalidAuthId)?;
+    let Some(mut step_stack) = svc.step_map.get_mut(auth_id.as_str()) else {
+        return Err(ServerError::InvalidAuthId.into());
+    };
 
     if let Some(step) = maybe_step {
         // Safety: step stack can never be empty, and our steps always have an
@@ -37,16 +36,18 @@ pub async fn handler(
         match step {
             next_step_request::Step::Choice(next_step_request::Choice { choice }) => {
                 let auth_step::Step::Choice(auth_step::Choice { options, .. }) = current_step else {
-                    bail!(ServerError::WrongStep {
+                    return Err(ServerError::WrongStep {
                         expected: SmolStr::new_inline("form"),
                         got: SmolStr::new_inline("choice"),
-                    });
+                    }
+                    .into());
                 };
                 if !options.contains(&choice) {
-                    bail!(ServerError::NoSuchChoice {
+                    return Err(ServerError::NoSuchChoice {
                         choice: choice.into(),
                         expected_any_of: options.into_iter().map(Into::into).collect(),
-                    });
+                    }
+                    .into());
                 }
 
                 next_step = match choice.as_str() {
@@ -100,6 +101,7 @@ pub async fn handler(
                     _ => unreachable!(),
                 };
                 step_stack.push(next_step.clone());
+
             }
             next_step_request::Step::Form(next_step_request::Form { fields }) => {
                 if let auth_step::Step::Form(auth_step::Form {
@@ -110,38 +112,45 @@ pub async fn handler(
                     let mut values = Vec::with_capacity(fields.len());
 
                     for (index, field) in fields.into_iter().enumerate() {
-                        let afield = auth_fields.get(index).ok_or(ServerError::NoSuchField)?;
-                        let field = field.field.ok_or(ServerError::NoFieldSpecified)?;
+                        let Some(afield) = auth_fields.get(index) else {
+                            return Err(ServerError::NoSuchField.into());
+                        };
+                        let Some(field) = field.field else {
+                            return Err(ServerError::NoFieldSpecified.into());
+                        };
 
                         match afield.r#type.as_str() {
                             "password" | "new-password" => {
                                 if matches!(field, Field::Bytes(_)) {
                                     values.push(field);
                                 } else {
-                                    bail!(ServerError::WrongTypeForField {
+                                    return Err(ServerError::WrongTypeForField {
                                         name: afield.name.as_str().into(),
                                         expected: SmolStr::new_inline("bytes"),
-                                    });
+                                    }
+                                    .into());
                                 }
                             }
                             "text" => {
                                 if matches!(field, Field::String(_)) {
                                     values.push(field);
                                 } else {
-                                    bail!(ServerError::WrongTypeForField {
+                                    return Err(ServerError::WrongTypeForField {
                                         name: afield.name.as_str().into(),
                                         expected: SmolStr::new_inline("text"),
-                                    });
+                                    }
+                                    .into());
                                 }
                             }
                             "number" => {
                                 if matches!(field, Field::Number(_)) {
                                     values.push(field);
                                 } else {
-                                    bail!(ServerError::WrongTypeForField {
+                                    return Err(ServerError::WrongTypeForField {
                                         name: afield.name.as_str().into(),
                                         expected: SmolStr::new_inline("number"),
-                                    });
+                                    }
+                                    .into());
                                 }
                             }
                             "email" => {
@@ -149,10 +158,11 @@ pub async fn handler(
                                     // TODO: validate email here and return error if invalid
                                     values.push(field);
                                 } else {
-                                    bail!(ServerError::WrongTypeForField {
+                                    return Err(ServerError::WrongTypeForField {
                                         name: afield.name.as_str().into(),
                                         expected: SmolStr::new_inline("email"),
-                                    });
+                                    }
+                                    .into());
                                 }
                             }
                             _ => unreachable!(),
@@ -165,19 +175,19 @@ pub async fn handler(
                             let password_hashed = hash_password(password_raw);
                             let email = try_get_email(&mut values)?;
 
-                            let user_id = svc.deps.auth_tree.get(email.as_bytes())?.map_or_else(
-                                || {
-                                    Err(ServerError::WrongUserOrPassword {
-                                        email: email.as_str().into(),
-                                    })
-                                },
-                                |raw| {
-                                    // Safety: this unwrap can never cause UB since we only store u64
-                                    Ok(u64::from_be_bytes(unsafe {
-                                        raw.try_into().unwrap_unchecked()
-                                    }))
-                                },
-                            )?;
+                            let user_id = if let Some(user_id) =
+                                svc.deps.auth_tree.get(email.as_bytes())?
+                            {
+                                // Safety: this unwrap can never cause UB since we only store u64
+                                u64::from_be_bytes(unsafe {
+                                    user_id.try_into().unwrap_unchecked()
+                                })
+                            } else {
+                                return Err(ServerError::WrongUserOrPassword {
+                                    email: email.into(),
+                                }
+                                .into());
+                            };
 
                             if svc
                                 .deps
