@@ -23,6 +23,8 @@ fn federation_config_default() -> Option<FederationConfig> {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
+    pub cors_dev: bool,
+    #[serde(default)]
     pub host: String,
     #[serde(default)]
     pub server_description: String,
@@ -45,6 +47,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            cors_dev: false,
             host: String::new(),
             server_description: String::new(),
             listen_on_localhost: listen_on_localhost_default(),

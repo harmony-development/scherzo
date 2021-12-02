@@ -51,6 +51,7 @@ use scherzo::{
 };
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
+    cors::CorsLayer,
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
     trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer},
@@ -357,8 +358,15 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
+    let cors = if deps.config.cors_dev {
+        CorsLayer::permissive()
+    } else {
+        CorsLayer::new()
+    };
+
     let mut transport = Hyper::new(addr)
-        .unwrap()
+        .expect("failed to create transport")
+        .layer(cors)
         .layer(MapResponseBodyLayer::new(box_body))
         .layer(ConcurrencyLimitLayer::new(
             deps.config.policy.max_concurrent_requests,
