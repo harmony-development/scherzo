@@ -1,3 +1,5 @@
+use tokio::sync::oneshot;
+
 use super::*;
 
 pub async fn handler(
@@ -13,44 +15,62 @@ pub async fn handler(
     let chat_tree = svc.deps.chat_tree.clone();
 
     let (tx, mut rx) = socket.split();
-    let send_loop = svc.spawn_event_stream_processor(user_id, sub_rx, tx);
-    let recv_loop = async move {
+
+    let (close_by_send_tx, mut close_by_send_rx) = oneshot::channel();
+    let (close_by_recv_tx, close_by_recv_rx) = oneshot::channel();
+
+    let send_loop = svc.spawn_event_stream_processor(user_id, sub_rx, tx, close_by_recv_rx);
+    let recv_loop = tokio::spawn(async move {
         loop {
-            let req = bail_result!(rx.receive_message().await);
-            if let Some(req) = req.request {
-                use stream_events_request::*;
+            tokio::select! {
+                res = rx.receive_message() => {
+                    let req = bail_result!(res);
+                    if let Some(req) = req.request {
+                        use stream_events_request::*;
 
-                tracing::debug!("got new stream events request for user {}", user_id);
+                        tracing::debug!("got new stream events request for user {}", user_id);
 
-                let sub = match req {
-                    Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
-                        match chat_tree.check_guild_user(guild_id, user_id) {
-                            Ok(_) => EventSub::Guild(guild_id),
-                            Err(err) => {
-                                tracing::error!("{}", err);
-                                continue;
+                        let sub = match req {
+                            Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
+                                match chat_tree.check_guild_user(guild_id, user_id) {
+                                    Ok(_) => EventSub::Guild(guild_id),
+                                    Err(err) => {
+                                        tracing::error!("{}", err);
+                                        continue;
+                                    }
+                                }
                             }
-                        }
-                    }
-                    Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
-                    Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
-                        EventSub::Homeserver
-                    }
-                };
+                            Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
+                            Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
+                                EventSub::Homeserver
+                            }
+                        };
 
-                drop(sub_tx.send(sub).await);
+                        drop(sub_tx.send(sub).await);
+                    }
+                }
+                _ = &mut close_by_send_rx => {
+                    break;
+                }
             }
         }
         #[allow(unreachable_code)]
         ServerResult::Ok(())
-    };
+    });
 
     tokio::select!(
         res = send_loop => {
-            res.unwrap();
+            drop(close_by_send_tx.send(()));
+            if let Err(err) = res {
+                panic!("stream events send loop task panicked: {}, aborting", err);
+            }
         }
-        res = tokio::spawn(recv_loop) => {
-            res.unwrap()?;
+        res = recv_loop => {
+            drop(close_by_recv_tx.send(()));
+            match res {
+                Ok(res) => res?,
+                Err(err) => panic!("stream events recv loop task panicked: {}, aborting", err),
+            }
         }
     );
     tracing::debug!("stream events ended for user {}", user_id);

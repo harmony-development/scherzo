@@ -30,6 +30,7 @@ use tokio::{
     sync::{
         broadcast::Sender as BroadcastSend,
         mpsc::{self, Receiver, UnboundedSender},
+        oneshot,
     },
     task::JoinHandle,
 };
@@ -160,6 +161,7 @@ impl ChatServer {
         user_id: u64,
         mut sub_rx: Receiver<EventSub>,
         mut tx: WriteSocket<StreamEventsResponse>,
+        mut close_by_recv_rx: oneshot::Receiver<()>,
     ) -> JoinHandle<()> {
         async fn send_event(
             socket: &mut WriteSocket<StreamEventsResponse>,
@@ -232,6 +234,7 @@ impl ChatServer {
                             }
                         }
                     }
+                    _ = &mut close_by_recv_rx => return,
                     else => tokio::task::yield_now().await,
                 }
             }
