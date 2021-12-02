@@ -213,8 +213,7 @@ impl ChatServer {
                                     must_be_guild_owner,
                                 );
 
-                                // TODO: fix this trolley
-                                matches!(perm, Ok(_) /*| Err(ServerError::EmptyPermissionQuery)*/)
+                                matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
                             })
                         };
 
@@ -498,18 +497,17 @@ impl ChatTree {
 
     pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
         self.contains_key(&make_banned_member_key(guild_id, user_id))
-    }
-
-    pub fn get_guild_owners(&self, guild_id: u64) -> ServerResult<Vec<u64>> {
-        self.get(guild_id.to_be_bytes().as_ref())?
-            .map_or_else(
-                || Err(ServerError::NoSuchGuild(guild_id)),
-                |raw| Ok(db::deser_guild(raw).owner_ids),
-            )
             .map_err(Into::into)
     }
 
-    pub fn is_user_guild_owner(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
+    pub fn get_guild_owners(&self, guild_id: u64) -> Result<Vec<u64>, ServerError> {
+        self.get(guild_id.to_be_bytes().as_ref())?.map_or_else(
+            || Err(ServerError::NoSuchGuild(guild_id)),
+            |raw| Ok(db::deser_guild(raw).owner_ids),
+        )
+    }
+
+    pub fn is_user_guild_owner(&self, guild_id: u64, user_id: u64) -> Result<bool, ServerError> {
         Ok(self
             .get_guild_owners(guild_id)?
             .into_iter()
@@ -570,7 +568,9 @@ impl ChatTree {
 
     pub fn put_guild_logic(&self, guild_id: u64, guild: Guild) -> ServerResult<()> {
         let buf = rkyv_ser(&guild);
-        self.insert(guild_id.to_be_bytes(), buf).map(|_| ())
+        self.insert(guild_id.to_be_bytes(), buf)
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     pub fn get_guild_invites_logic(&self, guild_id: u64) -> ServerResult<GetGuildInvitesResponse> {
@@ -665,7 +665,7 @@ impl ChatTree {
     }
 
     #[inline(always)]
-    pub fn get_list_u64_logic(&self, key: &[u8]) -> ServerResult<Vec<u64>> {
+    pub fn get_list_u64_logic(&self, key: &[u8]) -> Result<Vec<u64>, ServerError> {
         Ok(db::make_u64_iter_logic(
             self.chat_tree
                 .get(key)
@@ -883,7 +883,7 @@ impl ChatTree {
         channel_id: Option<u64>,
         user_id: u64,
         check_for: &str,
-    ) -> ServerResult<bool> {
+    ) -> Result<bool, ServerError> {
         let key = make_guild_user_roles_key(guild_id, user_id);
         let user_roles = self.get_list_u64_logic(&key)?;
 
@@ -917,7 +917,7 @@ impl ChatTree {
         user_id: u64,
         check_for: &str,
         must_be_guild_owner: bool,
-    ) -> ServerResult<()> {
+    ) -> Result<(), ServerError> {
         let is_owner = self.is_user_guild_owner(guild_id, user_id)?;
         if must_be_guild_owner {
             if is_owner {
@@ -928,11 +928,10 @@ impl ChatTree {
         {
             return Ok(());
         }
-        Err((ServerError::NotEnoughPermissions {
+        Err(ServerError::NotEnoughPermissions {
             must_be_guild_owner,
             missing_permission: check_for.into(),
         })
-        .into())
     }
 
     pub fn kick_user_logic(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
@@ -1234,7 +1233,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: Option<u64>,
         role_id: u64,
-    ) -> ServerResult<Vec<(SmolStr, bool)>> {
+    ) -> Result<Vec<(SmolStr, bool)>, ServerError> {
         let get = |prefix: &[u8]| {
             self.chat_tree
                 .scan_prefix(prefix)
