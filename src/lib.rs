@@ -1,5 +1,4 @@
 #![feature(option_result_unwrap_unchecked)]
-#![feature(let_else)]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::{
