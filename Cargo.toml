@@ -30,7 +30,7 @@ hyper-rustls = { version = "0.23", default-features = false, features = [
     "native-tokio", "http1", "http2"
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
-tower-http = { version = "0.1", default-features = false, features = [
+tower-http = { version = "0.2", default-features = false, features = [
     "trace",
     "sensitive-headers",
     "map-response-body",
