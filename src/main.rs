@@ -68,6 +68,7 @@ const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 async fn main() {
     let mut db_path = "db".to_string();
     let mut console = false;
+    let mut jaeger = false;
     let mut level_filter = Level::INFO;
 
     for (index, arg) in std::env::args().enumerate() {
@@ -80,6 +81,9 @@ async fn main() {
             "--enable-tokio-console" => {
                 console = true;
             }
+            "--enable-jaeger" => {
+                jaeger = true;
+            }
             "-d" | "--debug" => level_filter = Level::DEBUG,
             "-v" | "--verbose" => level_filter = Level::TRACE,
             "-q" | "--quiet" => level_filter = Level::ERROR,
@@ -87,34 +91,31 @@ async fn main() {
         }
     }
 
-    run(db_path, console, level_filter).await
+    run(db_path, console, jaeger, level_filter).await
 }
 
-pub async fn run(db_path: String, console: bool, level_filter: Level) {
+pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Level) {
+    let filters = Targets::default()
+        .with_targets([
+            ("sled", level_filter),
+            ("hyper", level_filter),
+            ("tokio", Level::ERROR),
+            ("runtime", Level::ERROR),
+            ("console_subscriber", Level::ERROR),
+            ("h2", level_filter),
+        ])
+        .with_default(level_filter);
+
     let (combined_logger, admin_logger_handle) = {
         let (admin_logger, admin_logger_handle) = tracing_subscriber::reload::Layer::new(
             fmt::layer().event_format(AdminLogChannelLogger::empty()),
         );
         let term_logger = fmt::layer();
 
-        let level_extra = if level_filter == Level::TRACE {
-            Level::DEBUG
-        } else {
-            Level::ERROR
-        };
         (
-            term_logger.and_then(admin_logger).with_filter(
-                Targets::default()
-                    .with_targets([
-                        ("sled", level_extra),
-                        ("hyper", level_extra),
-                        ("tokio", level_extra),
-                        ("runtime", level_extra),
-                        ("console_subscriber", Level::ERROR),
-                        ("h2", level_extra),
-                    ])
-                    .with_default(level_filter),
-            ),
+            term_logger
+                .and_then(admin_logger)
+                .with_filter(filters.clone()),
             admin_logger_handle,
         )
     };
@@ -136,7 +137,25 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         None
     };
 
+    let telemetry = if jaeger {
+        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+        let jaeger_tracer = opentelemetry_jaeger::new_pipeline()
+            .with_service_name("scherzo")
+            .install_batch(opentelemetry::runtime::Tokio)
+            .expect("failed jaagere");
+
+        Some(
+            tracing_opentelemetry::layer()
+                .with_tracked_inactivity(true)
+                .with_tracer(jaeger_tracer)
+                .with_filter(filters),
+        )
+    } else {
+        None
+    };
+
     tracing_subscriber::registry()
+        .with(telemetry)
         .with(console_layer)
         .with(combined_logger)
         .init();
@@ -382,6 +401,8 @@ pub async fn run(db_path: String, console: bool, level_filter: Level) {
         .await
         .unwrap()
         .unwrap();
+
+    opentelemetry::global::shutdown_tracer_provider();
 }
 
 use tokio::{fs, sync::oneshot};
