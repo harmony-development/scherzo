@@ -58,22 +58,29 @@ pub async fn handler(
         ServerResult::Ok(())
     });
 
+    let mut maybe_err = None;
     tokio::select!(
         res = send_loop => {
-            drop(close_by_send_tx.send(()));
+            if close_by_send_tx.send(()).is_err() {
+                maybe_err = Some("stream events recv loop panicked or is gone, aborting".into());
+            }
             if let Err(err) = res {
-                panic!("stream events send loop task panicked: {}, aborting", err);
+                maybe_err = Some(format!("stream events send loop task panicked: {}, aborting", err).into());
             }
         }
         res = recv_loop => {
-            drop(close_by_recv_tx.send(()));
+            if close_by_recv_tx.send(()).is_err() {
+                maybe_err = Some("stream events send loop panicked or is gone, aborting".into());
+            }
             match res {
-                Ok(res) => res?,
-                Err(err) => panic!("stream events recv loop task panicked: {}, aborting", err),
+                Ok(res) => if let Err(err) = res {
+                    maybe_err = Some(err);
+                },
+                Err(err) => maybe_err = Some(format!("stream events recv loop task panicked: {}, aborting", err).into())
             }
         }
     );
     tracing::debug!("stream events ended for user {}", user_id);
 
-    Ok(())
+    maybe_err.map_or(Ok(()), Err)
 }
