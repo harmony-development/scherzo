@@ -253,7 +253,7 @@ pub async fn handler(
                                     return Err(ServerError::UserAlreadyExists.into());
                                 }
 
-                                let user_id = gen_rand_u64();
+                                let user_id = svc.gen_user_id()?;
                                 let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
                                 let mut batch = Batch::default();

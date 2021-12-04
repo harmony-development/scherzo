@@ -7,6 +7,7 @@ use harmony_rust_sdk::api::{
     profile::{Profile, UserStatus},
 };
 use hyper::{http, HeaderMap};
+use rand::Rng;
 use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
 
@@ -184,6 +185,15 @@ impl AuthServer {
             token = unsafe { std::str::from_utf8_unchecked(&raw) };
         }
         SmolStr::new_inline(token)
+    }
+
+    fn gen_user_id(&self) -> Result<u64, ServerError> {
+        let mut rng = rand::thread_rng();
+        let mut id: u64 = rng.gen_range(1..=std::u64::MAX);
+        while self.deps.auth_tree.contains_key(&id.to_be_bytes())? {
+            id = rng.gen_range(1..=std::u64::MAX);
+        }
+        Ok(id)
     }
 
     fn keys_manager(&self) -> Result<&Arc<KeyManager>, ServerError> {
