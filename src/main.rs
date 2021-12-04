@@ -32,7 +32,13 @@ use harmony_rust_sdk::api::{
     profile::profile_service_server::ProfileServiceServer,
     sync::postbox_service_server::PostboxServiceServer,
 };
-use hrpc::server::transport::http::{box_body, HttpConfig};
+use hrpc::{
+    common::layer::trace::TraceLayer as HrpcTraceLayer,
+    server::{
+        transport::http::{box_body, HttpConfig},
+        MakeRoutes,
+    },
+};
 use hyper::header;
 use scherzo::{
     db::migration::{apply_migrations, get_db_version},
@@ -323,7 +329,8 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
         #[cfg(feature = "voice")]
         voice,
         batch
-    );
+    )
+    .layer(HrpcTraceLayer::default_debug());
 
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
