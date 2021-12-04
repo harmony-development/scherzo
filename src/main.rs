@@ -172,6 +172,12 @@ fn setup_db(db_path: &str, config: &Config) -> (Box<dyn Db>, usize) {
                 || Path::new(&db_backup_name).to_path_buf(),
                 |path| path.join(&db_backup_name),
             );
+            if db_backup_path.exists() {
+                warn!(
+                    "there is already a backup with the same version. will not attempt to migrate"
+                );
+                exit(1);
+            }
             warn!(
                 "preparing to migrate the database, backing up to {:?}!",
                 db_backup_path
@@ -464,4 +470,9 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn exit(code: i32) -> ! {
+    opentelemetry::global::shutdown_tracer_provider();
+    std::process::exit(code)
 }
