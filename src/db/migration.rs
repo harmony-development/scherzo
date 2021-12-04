@@ -72,11 +72,11 @@ fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
     let chat_tree = db.open_tree(b"chat")?;
 
     let mut batch = Batch::default();
-    std::panic::set_hook(Box::new(|_| ()));
     for res in chat_tree.iter() {
         let (mut key, val) = res?;
 
-        if key.len() == CHAN_KEY_LEN && std::panic::catch_unwind(|| deser_chan(val)).is_ok() {
+        if key.len() == CHAN_KEY_LEN && key[8] == 8 {
+            deser_chan(val);
             key.push(9);
 
             let id = chat_tree
@@ -102,6 +102,5 @@ fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
             batch.insert(key, id.to_be_bytes());
         }
     }
-    let _ = std::panic::take_hook();
     chat_tree.apply_batch(batch)
 }
