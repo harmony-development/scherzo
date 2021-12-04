@@ -511,10 +511,16 @@ impl ChatTree {
     }
 
     pub fn is_user_guild_owner(&self, guild_id: u64, user_id: u64) -> Result<bool, ServerError> {
-        Ok(self
+        if user_id == 0 {
+            return Ok(true);
+        }
+
+        let is_owner = self
             .get_guild_owners(guild_id)?
             .into_iter()
-            .any(|owner| owner == user_id))
+            .any(|owner| owner == user_id);
+
+        Ok(is_owner)
     }
 
     pub fn check_guild_user_channel(
