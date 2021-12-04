@@ -297,7 +297,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
             ("runtime", Level::ERROR),
             ("console_subscriber", Level::ERROR),
             ("h2", level_filter),
-            ("h2::codec", Level::ERROR)
+            ("h2::codec", Level::ERROR),
         ])
         .with_default(level_filter);
 
@@ -452,8 +452,8 @@ fn copy_dir_all(src: PathBuf, dst: PathBuf) -> std::io::Result<()> {
     use std::fs;
 
     fs::create_dir_all(&dst)?;
-    let mut dir = fs::read_dir(src.clone())?;
-    while let Some(entry) = dir.next() {
+    let dir = fs::read_dir(src)?;
+    for entry in dir {
         let entry = entry?;
         let ty = entry.file_type()?;
         if ty.is_dir() {
