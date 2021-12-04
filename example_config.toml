@@ -8,6 +8,9 @@ port = 2289
 # Whether to support CORS requests. Should only be used for
 # development purposes, since this allows everything.
 cors_dev = false
+# Whether to log headers in traces. Authorization information
+# will be marked as "sensitive" and won't be logged.
+log_headers = false
 
 [policy]
 # Whether to disable ratelimits or not (useful when testing / benching).

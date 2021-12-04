@@ -265,11 +265,11 @@ fn setup_transport(
         ]))
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                .make_span_with(DefaultMakeSpan::new().include_headers(deps.config.log_headers))
                 .on_failure(DefaultOnFailure::new().latency_unit(LatencyUnit::Micros))
                 .on_response(
                     DefaultOnResponse::new()
-                        .include_headers(true)
+                        .include_headers(deps.config.log_headers)
                         .latency_unit(LatencyUnit::Micros),
                 ),
         )
