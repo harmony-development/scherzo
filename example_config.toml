@@ -5,6 +5,9 @@ host = ""
 listen_on_localhost = true
 # The port to listen on.
 port = 2289
+# Whether to support CORS requests. Should only be used for
+# development purposes, since this allows everything.
+cors_dev = false
 
 [policy]
 # Whether to disable ratelimits or not (useful when testing / benching).
