@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, convert::TryInto, io::BufReader, mem::size_of, ops::Not, path::Path,
-    str::FromStr, sync::atomic::AtomicU64,
+    collections::HashSet, convert::TryInto, io::BufReader, lazy::SyncOnceCell, mem::size_of,
+    ops::Not, path::Path, str::FromStr, sync::atomic::AtomicU64,
 };
 
 use harmony_rust_sdk::api::{
@@ -1677,24 +1677,34 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+#[derive(Clone)]
 pub struct AdminLogChannelLogger {
-    inner: Option<(EventSender, (u64, u64), AtomicU64)>,
+    inner: Arc<SyncOnceCell<(EventSender, (u64, u64), AtomicU64)>>,
 }
 
 impl AdminLogChannelLogger {
-    pub fn new(deps: &Dependencies) -> ServerResult<Self> {
+    pub fn init(&self, deps: &Dependencies) -> ServerResult<()> {
         let (guild_id, log_chan_id, _) = deps.chat_tree.get_admin_guild_keys()?.unwrap();
-        Ok(Self {
-            inner: Some((
+
+        if self
+            .inner
+            .set((
                 deps.chat_event_sender.clone(),
                 (guild_id, log_chan_id),
                 AtomicU64::new(1),
-            )),
-        })
+            ))
+            .is_err()
+        {
+            unreachable!("we only set this once");
+        }
+
+        Ok(())
     }
 
-    pub fn empty() -> Self {
-        Self { inner: None }
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(SyncOnceCell::new()),
+        }
     }
 }
 
@@ -1716,10 +1726,8 @@ where
             return Ok(());
         }
 
-        if let Some((chat_event_sender, (guild_id, channel_id), msg_id)) = self
-            .inner
-            .as_ref()
-            .map(|(s, ids, msg_id)| (s, *ids, msg_id))
+        if let Some((chat_event_sender, (guild_id, channel_id), msg_id)) =
+            self.inner.get().map(|(s, ids, msg_id)| (s, *ids, msg_id))
         {
             let color = match *metadata.level() {
                 Level::DEBUG => Some(color::encode_rgb([0, 0, 220])),

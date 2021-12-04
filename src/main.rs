@@ -3,10 +3,8 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use std::{
-    future::Future,
     net::SocketAddr,
     path::{Path, PathBuf},
-    pin::Pin,
     time::Duration,
 };
 
@@ -41,7 +39,11 @@ use hrpc::{
 };
 use hyper::header;
 use scherzo::{
-    db::migration::{apply_migrations, get_db_version},
+    config::Config,
+    db::{
+        migration::{apply_migrations, get_db_version},
+        Db,
+    },
     impls::{
         against,
         auth::AuthServer,
@@ -51,7 +53,7 @@ use scherzo::{
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
         rest::RestServiceLayer,
-        sync::SyncServer,
+        sync::{EventDispatch, SyncServer},
         Dependencies, HELP_TEXT,
     },
     utils,
@@ -66,14 +68,14 @@ use tower_http::{
 };
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
+use triomphe::Arc;
 
 // in seconds
 // do once per hour
 // this is expensive if you have big DBs (>500mb uncompressed)
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let mut db_path = "db".to_string();
     let mut console = false;
     let mut jaeger = false;
@@ -99,103 +101,66 @@ async fn main() {
         }
     }
 
-    run(db_path, console, jaeger, level_filter).await
+    run(db_path, console, jaeger, level_filter)
 }
 
-pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Level) {
-    let filters = Targets::default()
-        .with_targets([
-            ("sled", level_filter),
-            ("hyper", level_filter),
-            ("tokio", Level::ERROR),
-            ("runtime", Level::ERROR),
-            ("console_subscriber", Level::ERROR),
-            ("h2", level_filter),
-        ])
-        .with_default(level_filter);
+pub fn run(db_path: String, console: bool, jaeger: bool, level_filter: Level) {
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let _rt_guard = rt.enter();
 
-    let (combined_logger, admin_logger_handle) = {
-        let (admin_logger, admin_logger_handle) = tracing_subscriber::reload::Layer::new(
-            fmt::layer().event_format(AdminLogChannelLogger::empty()),
-        );
-        let term_logger = fmt::layer();
+    let admin_logger_handle = setup_tracing(console, jaeger, level_filter);
 
-        (
-            term_logger
-                .and_then(admin_logger)
-                .with_filter(filters.clone()),
-            admin_logger_handle,
-        )
-    };
+    let config = parse_config();
 
-    let (console_serve_tx, console_serve_rx) = oneshot::channel::<()>();
-    let console_layer = if console {
-        let (console_layer, console_server) = console_subscriber::TasksLayer::new();
-        tokio::spawn(async move {
-            if console_serve_rx.await.is_ok() {
-                info_span!("scherzo::tokio_console").in_scope(|| info!("spawning console server"));
-                console_server.serve().await.unwrap();
-            }
-        });
+    let (db, current_db_version) = setup_db(&db_path, &config);
 
-        Some(console_layer.with_filter(
-            Targets::default().with_targets([("tokio", Level::TRACE), ("runtime", Level::TRACE)]),
-        ))
-    } else {
-        None
-    };
+    let (deps, fed_event_receiver) = Dependencies::new(db.as_ref(), config).unwrap();
 
-    let telemetry = if jaeger {
-        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-        let jaeger_tracer = opentelemetry_jaeger::new_pipeline()
-            .with_service_name("scherzo")
-            .install_batch(opentelemetry::runtime::Tokio)
-            .expect("failed jaagere");
+    if current_db_version == 0 {
+        setup_admin_guild(deps.as_ref());
+    }
 
-        Some(
-            tracing_opentelemetry::layer()
-                .with_tracked_inactivity(true)
-                .with_tracer(jaeger_tracer)
-                .with_filter(filters),
-        )
-    } else {
-        None
-    };
+    admin_logger_handle.init(&deps).unwrap();
 
-    tracing_subscriber::registry()
-        .with(telemetry)
-        .with(console_layer)
-        .with(combined_logger)
-        .init();
-    let _ = console_serve_tx.send(());
+    let (server, rest) = setup_server(deps.clone(), fed_event_receiver);
 
-    info!("logging initialized");
+    let integrity_thread = start_integrity_check_thread(deps.as_ref());
 
-    use scherzo::config::Config;
+    let transport = setup_transport(deps.as_ref(), rest);
 
+    let serve = transport
+        .serve(server)
+        .instrument(info_span!("scherzo::serve"));
+
+    rt.block_on(serve).unwrap();
+
+    integrity_thread.join().unwrap();
+
+    opentelemetry::global::shutdown_tracer_provider();
+}
+
+fn parse_config() -> Config {
     let config_path = std::path::Path::new("./config.toml");
     let config: Config = if config_path.exists() {
-        toml::from_slice(
-            &tokio::fs::read(config_path)
-                .await
-                .expect("failed to read config file"),
-        )
-        .expect("failed to parse config file")
+        toml::from_slice(&std::fs::read(config_path).expect("failed to read config file"))
+            .expect("failed to parse config file")
     } else {
         info!("No config file found, writing default config file");
-        tokio::fs::write(config_path, include_bytes!("../example_config.toml"))
-            .await
+        std::fs::write(config_path, include_bytes!("../example_config.toml"))
             .expect("failed to write default config file");
         toml::from_slice(include_bytes!("../example_config.toml")).unwrap()
     };
     debug!("running with {:?}", config);
-    tokio::fs::create_dir_all(&config.media.media_root)
-        .await
-        .expect("could not create media root dir");
+    std::fs::create_dir_all(&config.media.media_root).expect("could not create media root dir");
+
     if config.policy.disable_ratelimits {
         warn!("rate limits are disabled, please take care!");
     }
 
+    config
+}
+
+fn setup_db(db_path: &str, config: &Config) -> (Box<dyn Db>, usize) {
     let db = scherzo::db::open_db(&db_path, config.db.clone());
     let (current_db_version, needs_migration) = get_db_version(db.as_ref())
         .expect("something went wrong while checking if the db needs migrations!!!");
@@ -212,7 +177,6 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
                 db_backup_path
             );
             copy_dir_all(Path::new(&db_path).to_path_buf(), db_backup_path)
-                .await
                 .expect("could not backup the db, so not applying migrations!!!");
         }
 
@@ -220,73 +184,13 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
         apply_migrations(db.as_ref(), current_db_version)
             .expect("something went wrong while applying the migrations!!!");
     }
+    (db, current_db_version)
+}
 
-    let (deps, fed_event_receiver) = Dependencies::new(db.as_ref(), config).unwrap();
-
-    if current_db_version == 0 {
-        let guild_id = deps
-            .chat_tree
-            .create_guild_logic(
-                0,
-                "Admin".to_string(),
-                None,
-                None,
-                guild_kind::Kind::new_normal(guild_kind::Normal::new()),
-            )
-            .unwrap();
-        deps.chat_tree
-            .set_permissions_logic(
-                guild_id,
-                None,
-                DEFAULT_ROLE_ID,
-                vec![Permission::new("*".to_string(), true)],
-            )
-            .unwrap();
-        let log_id = deps
-            .chat_tree
-            .create_channel_logic(
-                guild_id,
-                "logs".to_string(),
-                ChannelKind::TextUnspecified,
-                None,
-                None,
-            )
-            .unwrap();
-        let cmd_id = deps
-            .chat_tree
-            .create_channel_logic(
-                guild_id,
-                "command".to_string(),
-                ChannelKind::TextUnspecified,
-                None,
-                None,
-            )
-            .unwrap();
-        let invite_id = format!("{}", guild_id);
-        deps.chat_tree
-            .create_invite_logic(guild_id, &invite_id, 1)
-            .unwrap();
-        deps.chat_tree
-            .set_admin_guild_keys(guild_id, log_id, cmd_id)
-            .unwrap();
-        deps.chat_tree
-            .send_with_system(
-                guild_id,
-                cmd_id,
-                content::Content::TextMessage(content::TextContent {
-                    content: Some(FormattedText::new(HELP_TEXT.to_string(), Vec::new())),
-                }),
-            )
-            .unwrap();
-        warn!("admin guild created! use the invite {} to join", invite_id);
-    }
-
-    admin_logger_handle
-        .reload(fmt::layer().event_format(
-            AdminLogChannelLogger::new(&deps).expect("failed to create admin logger"),
-        ))
-        .unwrap();
-
+fn setup_server(
+    deps: Arc<Dependencies>,
+    fed_event_receiver: tokio::sync::mpsc::UnboundedReceiver<EventDispatch>,
+) -> (impl MakeRoutes, RestServiceLayer) {
     let profile_server = ProfileServer::new(deps.clone());
     let emote_server = EmoteServer::new(deps.clone());
     let auth_server = AuthServer::new(deps.clone());
@@ -332,34 +236,13 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
     )
     .layer(HrpcTraceLayer::default_debug());
 
-    let ctt = deps.chat_tree.clone();
-    let att = deps.auth_tree.clone();
-    let ptt = deps.profile_tree.clone();
-    let ett = deps.emote_tree.clone();
-    let stt = deps.sync_tree.clone();
+    (server, rest)
+}
 
-    std::thread::spawn(move || {
-        let span = info_span!("scherzo::db");
-        let _guard = span.enter();
-        info!("database integrity verification task is running");
-        loop {
-            std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
-            if let Err(err) = ctt
-                .chat_tree
-                .verify_integrity()
-                .and_then(|_| att.inner.verify_integrity())
-                .and_then(|_| ptt.inner.verify_integrity())
-                .and_then(|_| ett.inner.verify_integrity())
-                .and_then(|_| stt.verify_integrity())
-            {
-                error!("database integrity check failed: {}", err);
-                break;
-            } else {
-                debug!("database integrity check successful");
-            }
-        }
-    });
-
+fn setup_transport(
+    deps: &Dependencies,
+    rest: RestServiceLayer,
+) -> impl Transport<Error = std::io::Error> {
     let addr: SocketAddr = if deps.config.listen_on_localhost {
         ([127, 0, 0, 1], deps.config.port).into()
     } else {
@@ -397,40 +280,186 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, level_filter: Lev
             .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
     }
 
-    let serve = transport
-        .configure_hyper(
-            HttpConfig::new()
-                .http1_keep_alive(true)
-                .http2_keep_alive_interval(Some(Duration::from_secs(10)))
-                .build(),
-        )
-        .serve(server)
-        .instrument(info_span!("scherzo::serve"));
-
-    tokio::task::Builder::new()
-        .name("scherzo::serve")
-        .spawn(serve)
-        .await
-        .unwrap()
-        .unwrap();
-
-    opentelemetry::global::shutdown_tracer_provider();
+    transport.configure_hyper(
+        HttpConfig::new()
+            .http1_keep_alive(true)
+            .http2_keep_alive_interval(Some(Duration::from_secs(10)))
+            .build(),
+    )
 }
 
-use tokio::{fs, sync::oneshot};
+fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogChannelLogger {
+    let filters = Targets::default()
+        .with_targets([
+            ("sled", level_filter),
+            ("hyper", level_filter),
+            ("tokio", Level::ERROR),
+            ("runtime", Level::ERROR),
+            ("console_subscriber", Level::ERROR),
+            ("h2", level_filter),
+        ])
+        .with_default(level_filter);
 
-fn copy_dir_all(src: PathBuf, dst: PathBuf) -> Pin<Box<dyn Future<Output = std::io::Result<()>>>> {
-    Box::pin(async move {
-        fs::create_dir_all(&dst).await?;
-        let mut dir = fs::read_dir(src.clone()).await?;
-        while let Some(entry) = dir.next_entry().await? {
-            let ty = entry.file_type().await?;
-            if ty.is_dir() {
-                copy_dir_all(entry.path(), dst.join(entry.file_name())).await?;
+    let (combined_logger, admin_logger_handle) = {
+        let admin_handle = AdminLogChannelLogger::new();
+        let admin_logger = fmt::layer().event_format(admin_handle.clone());
+        let term_logger = fmt::layer();
+
+        (
+            term_logger
+                .and_then(admin_logger)
+                .with_filter(filters.clone()),
+            admin_handle,
+        )
+    };
+
+    let (console_serve_tx, console_serve_rx) = tokio::sync::oneshot::channel::<()>();
+    let console_layer = if console {
+        let (console_layer, console_server) = console_subscriber::TasksLayer::new();
+        tokio::spawn(async move {
+            if console_serve_rx.await.is_ok() {
+                info_span!("scherzo::tokio_console").in_scope(|| info!("spawning console server"));
+                console_server.serve().await.unwrap();
+            }
+        });
+
+        Some(console_layer.with_filter(
+            Targets::default().with_targets([("tokio", Level::TRACE), ("runtime", Level::TRACE)]),
+        ))
+    } else {
+        None
+    };
+
+    let telemetry = if jaeger {
+        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+        let jaeger_tracer = opentelemetry_jaeger::new_pipeline()
+            .with_service_name("scherzo")
+            .install_batch(opentelemetry::runtime::Tokio)
+            .expect("failed jaagere");
+
+        Some(
+            tracing_opentelemetry::layer()
+                .with_tracked_inactivity(true)
+                .with_tracer(jaeger_tracer)
+                .with_filter(filters),
+        )
+    } else {
+        None
+    };
+
+    tracing_subscriber::registry()
+        .with(telemetry)
+        .with(console_layer)
+        .with(combined_logger)
+        .init();
+    let _ = console_serve_tx.send(());
+
+    info!("logging initialized");
+
+    admin_logger_handle
+}
+
+fn setup_admin_guild(deps: &Dependencies) {
+    let guild_id = deps
+        .chat_tree
+        .create_guild_logic(
+            0,
+            "Admin".to_string(),
+            None,
+            None,
+            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
+        )
+        .unwrap();
+    deps.chat_tree
+        .set_permissions_logic(
+            guild_id,
+            None,
+            DEFAULT_ROLE_ID,
+            vec![Permission::new("*".to_string(), true)],
+        )
+        .unwrap();
+    let log_id = deps
+        .chat_tree
+        .create_channel_logic(
+            guild_id,
+            "logs".to_string(),
+            ChannelKind::TextUnspecified,
+            None,
+            None,
+        )
+        .unwrap();
+    let cmd_id = deps
+        .chat_tree
+        .create_channel_logic(
+            guild_id,
+            "command".to_string(),
+            ChannelKind::TextUnspecified,
+            None,
+            None,
+        )
+        .unwrap();
+    let invite_id = format!("{}", guild_id);
+    deps.chat_tree
+        .create_invite_logic(guild_id, &invite_id, 1)
+        .unwrap();
+    deps.chat_tree
+        .set_admin_guild_keys(guild_id, log_id, cmd_id)
+        .unwrap();
+    deps.chat_tree
+        .send_with_system(
+            guild_id,
+            cmd_id,
+            content::Content::TextMessage(content::TextContent {
+                content: Some(FormattedText::new(HELP_TEXT.to_string(), Vec::new())),
+            }),
+        )
+        .unwrap();
+    warn!("admin guild created! use the invite {} to join", invite_id);
+}
+
+fn start_integrity_check_thread(deps: &Dependencies) -> std::thread::JoinHandle<()> {
+    let ctt = deps.chat_tree.clone();
+    let att = deps.auth_tree.clone();
+    let ptt = deps.profile_tree.clone();
+    let ett = deps.emote_tree.clone();
+    let stt = deps.sync_tree.clone();
+
+    std::thread::spawn(move || {
+        let span = info_span!("scherzo::db");
+        let _guard = span.enter();
+        info!("database integrity verification task is running");
+        loop {
+            std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
+            if let Err(err) = ctt
+                .chat_tree
+                .verify_integrity()
+                .and_then(|_| att.inner.verify_integrity())
+                .and_then(|_| ptt.inner.verify_integrity())
+                .and_then(|_| ett.inner.verify_integrity())
+                .and_then(|_| stt.verify_integrity())
+            {
+                error!("database integrity check failed: {}", err);
+                break;
             } else {
-                fs::copy(entry.path(), dst.join(entry.file_name())).await?;
+                debug!("database integrity check successful");
             }
         }
-        Ok(())
     })
+}
+
+fn copy_dir_all(src: PathBuf, dst: PathBuf) -> std::io::Result<()> {
+    use std::fs;
+
+    fs::create_dir_all(&dst)?;
+    let mut dir = fs::read_dir(src.clone())?;
+    while let Some(entry) = dir.next() {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
 }
