@@ -31,7 +31,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update -yy
-        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+        sudo apt install -yy --no-install-recommends protobuf-compiler lld musl-tools
     - name: Install rust
       run: rustup update && rustup component add rustfmt clippy
 
@@ -47,15 +47,15 @@ jobs:
     - name: Clippy
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--no-default-features --features sled"
+        args: "--target x86_64-unknown-linux-musl --no-default-features --features sled"
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
     - name: Test
-      run: cargo test --no-default-features --features sled
+      run: cargo test --target x86_64-unknown-linux-musl --no-default-features --features sled
 
     - name: Build
-      run: cargo build --release --no-default-features --features sled
+      run: cargo build --target x86_64-unknown-linux-musl --release --no-default-features --features sled
     
     - name: Upload release
       if: github.event_name == 'push'
