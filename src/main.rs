@@ -235,7 +235,7 @@ fn setup_server(
         voice,
         batch
     )
-    .layer(HrpcTraceLayer::default_debug());
+    .layer(HrpcTraceLayer::default_debug().span_fn(|_| tracing::debug_span!("request")));
 
     (server, rest)
 }
