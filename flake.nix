@@ -23,7 +23,7 @@
       shell = common: prev: {
         packages = prev.packages ++ [
           common.pkgs.musl.dev
-          (common.lib.buildCrate {
+          /*(common.lib.buildCrate {
             memberName = "tokio-console";
 
             root = builtins.fetchGit {
@@ -34,7 +34,7 @@
 
             inherit (common) nativeBuildInputs buildInputs;
             CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
-          })
+          })*/
         ];
         commands = prev.commands ++ [
           {
