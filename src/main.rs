@@ -297,6 +297,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
             ("runtime", Level::ERROR),
             ("console_subscriber", Level::ERROR),
             ("h2", level_filter),
+            ("h2::codec", Level::ERROR)
         ])
         .with_default(level_filter);
 
