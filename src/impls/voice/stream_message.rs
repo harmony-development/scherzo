@@ -1,3 +1,6 @@
+use std::future::Future;
+
+use hrpc::exports::futures_util::FutureExt;
 use tracing::{field, Instrument, Span};
 
 use super::*;
@@ -10,41 +13,19 @@ pub async fn handler(
     let user_id = svc.valid_sessions.auth(&request)?;
 
     let fut = async move {
-        let wait_for_initialize = async {
-            match socket.receive_message().await {
-                Ok(StreamMessageRequest {
-                    message:
-                        Some(RequestMessage::Initialize(Initialize {
-                            guild_id,
-                            channel_id,
-                        })),
-                }) => Ok((guild_id, channel_id)),
-                Err(err) => {
-                    tracing::error!("socket error while initializing: {}", err);
-                    Err(())
-                }
-                _ => Err(()),
-            }
-        };
+        let wait_for_initialize = socket.receive_message().map(|res| match res {
+            Ok(StreamMessageRequest {
+                message:
+                    Some(RequestMessage::Initialize(Initialize {
+                        guild_id,
+                        channel_id,
+                    })),
+            }) => Ok((guild_id, channel_id)),
+            Err(err) => Err(err.into()),
+            _ => Err(zero_data_err()),
+        });
 
-        let (guild_id, channel_id) =
-            match timeout(Duration::from_secs(5), wait_for_initialize).await {
-                Ok(Ok(id)) => id,
-                Err(err) => {
-                    tracing::error!(
-                        "timeouted while waiting for initialization message: {:?}",
-                        err
-                    );
-                    return Ok(());
-                }
-                err => {
-                    tracing::error!(
-                        "error occured while waiting for initialization message: {:?}",
-                        err
-                    );
-                    return Ok(());
-                }
-            };
+        let (guild_id, channel_id) = timeout(5, wait_for_initialize).await?;
         let chan_id = (guild_id, channel_id);
 
         {
@@ -53,21 +34,10 @@ pub async fn handler(
             span.record("channel", &channel_id);
         }
 
-        if let Err(err) = svc
-            .chat_tree
-            .check_guild_user_channel(guild_id, user_id, channel_id)
-        {
-            tracing::error!("error validating IDs: {}", err);
-            return Ok(());
-        }
+        svc.chat_tree
+            .check_guild_user_channel(guild_id, user_id, channel_id)?;
 
-        let mut channel = match svc.channels.get(&svc.worker_pool, chan_id).await {
-            Ok(channel) => channel,
-            Err(err) => {
-                tracing::error!("error while creating voice channel: {}", err,);
-                return Ok(());
-            }
-        };
+        let mut channel = svc.channels.get(&svc.worker_pool, chan_id).await?;
 
         socket
             .send_message(StreamMessageResponse {
@@ -77,26 +47,15 @@ pub async fn handler(
             })
             .await?;
 
-        let wait_for_prepare = async {
-            match socket.receive_message().await {
-                Ok(StreamMessageRequest {
-                    message: Some(RequestMessage::PrepareForJoinChannel(p)),
-                }) => from_json::<RtpCapabilities>(p.rtp_capabilities),
-                _ => Err(()),
-            }
-        };
+        let wait_for_prepare = socket.receive_message().map(|res| match res {
+            Ok(StreamMessageRequest {
+                message: Some(RequestMessage::PrepareForJoinChannel(p)),
+            }) => from_json::<RtpCapabilities>(p.rtp_capabilities),
+            Err(err) => Err(err.into()),
+            _ => Err(zero_data_err()),
+        });
 
-        let client_capabilities = match timeout(Duration::from_secs(5), wait_for_prepare).await {
-            Ok(Ok(rtp_cap)) => rtp_cap,
-            Err(_) => {
-                tracing::error!("timeouted while waiting for prepare message");
-                return Ok(());
-            }
-            _ => {
-                tracing::error!("error occured while waiting for prepare message");
-                return Ok(());
-            }
-        };
+        let client_capabilities = timeout(5, wait_for_prepare).await?;
 
         let user = User::new(&channel).await.unwrap();
         *user.inner.capabilities.lock() = Some(client_capabilities);
@@ -134,48 +93,27 @@ pub async fn handler(
             })
             .await?;
 
-        let wait_for_join = async {
-            match socket.receive_message().await {
-                Ok(StreamMessageRequest {
-                    message: Some(RequestMessage::JoinChannel(join)),
-                }) => {
-                    let consumer_dtls_paramaters: DtlsParameters =
-                        from_json(join.consumer_dtls_paramaters)?;
-                    let producer_dtls_paramaters: DtlsParameters =
-                        from_json(join.producer_dtls_paramaters)?;
-                    let rtp_parameters: RtpParameters = from_json(join.rtp_paramaters)?;
-                    Ok((
-                        consumer_dtls_paramaters,
-                        producer_dtls_paramaters,
-                        rtp_parameters,
-                    ))
-                }
-                Err(err) => {
-                    tracing::error!("socket error while waiting for join channel: {}", err,);
-                    Err(())
-                }
-                _ => Err(()),
+        let wait_for_join = socket.receive_message().map(|res| match res {
+            Ok(StreamMessageRequest {
+                message: Some(RequestMessage::JoinChannel(join)),
+            }) => {
+                let consumer_dtls_paramaters: DtlsParameters =
+                    from_json(join.consumer_dtls_paramaters)?;
+                let producer_dtls_paramaters: DtlsParameters =
+                    from_json(join.producer_dtls_paramaters)?;
+                let rtp_parameters: RtpParameters = from_json(join.rtp_paramaters)?;
+                Ok((
+                    consumer_dtls_paramaters,
+                    producer_dtls_paramaters,
+                    rtp_parameters,
+                ))
             }
-        };
+            Err(err) => Err(err.into()),
+            _ => Err(zero_data_err()),
+        });
 
         let (consumer_dtls_paramaters, producer_dtls_paramaters, rtp_parameters) =
-            match timeout(Duration::from_secs(8), wait_for_join).await {
-                Ok(Ok(val)) => val,
-                Err(err) => {
-                    tracing::error!(
-                        "timeouted while waiting for join channel message: {:?}",
-                        err
-                    );
-                    return Ok(());
-                }
-                err => {
-                    tracing::error!(
-                        "error occured while waiting for join channel message: {:?}",
-                        err
-                    );
-                    return Ok(());
-                }
-            };
+            timeout(8, wait_for_join).await?;
 
         if let Err(err) = user
             .inner
@@ -188,8 +126,11 @@ pub async fn handler(
             })
             .await
         {
-            tracing::error!("could not connect producer transport: {}", err,);
-            return Ok(());
+            return Err((
+                "scherzo.voice-producer-connect",
+                format!("could not connect producer transport: {}", err),
+            )
+                .into());
         } else {
             tracing::info!("connected producer transport",);
         }
@@ -204,8 +145,11 @@ pub async fn handler(
             })
             .await
         {
-            tracing::error!("could not connect consumer transport: {}", err,);
-            return Ok(());
+            return Err((
+                "scherzo.voice-consumer-connect",
+                format!("could not connect consumer transport: {}", err),
+            )
+                .into());
         } else {
             tracing::info!("connected consumer transport",);
         }
@@ -221,8 +165,11 @@ pub async fn handler(
                 *user.inner.producer.lock().await = Some(producer);
             }
             Err(err) => {
-                tracing::error!("could not create producer: {}", err,);
-                return Ok(());
+                return Err((
+                    "scherzo.voice-create-producer",
+                    format!("could not create producer: {}", err),
+                )
+                    .into());
             }
         }
 
@@ -255,7 +202,11 @@ pub async fn handler(
                             { for_producer = %user_producer_id },
                             "could not create consumer: {}", err,
                         );
-                        return Ok(());
+                        return Err((
+                            "scherzo.voice-create-consumer",
+                            format!("could not create consumer: {}", err),
+                        )
+                            .into());
                     }
                 }
             }
@@ -263,7 +214,11 @@ pub async fn handler(
 
         if let Err((user_id, err)) = channel.add_user(user_id, user.clone()).await {
             tracing::error!({ for_participant = %user_id }, "could not create consumer: {}", err);
-            return Ok(());
+            return Err((
+                "scherzo.voice-create-consumer",
+                format!("could not create consumer: {}", err),
+            )
+                .into());
         } else {
             tracing::info!("user added to voice channel successfully");
         }
@@ -333,4 +288,23 @@ pub async fn handler(
         participant = %user_id
     ))
     .await
+}
+
+async fn timeout<T, Fut>(dur: u64, fut: Fut) -> Result<T, HrpcError>
+where
+    Fut: Future<Output = Result<T, HrpcError>>,
+{
+    let res = tokio::time::timeout(Duration::from_secs(dur), fut).await;
+    match res {
+        Ok(out) => out,
+        Err(err) => Err(("scherzo.voice-message-timeout", err.to_string()).into()),
+    }
+}
+
+fn zero_data_err() -> HrpcError {
+    (
+        "scherzo.voice-message-zero-data",
+        "voice message from socket doesn't contain necessary data",
+    )
+        .into()
 }

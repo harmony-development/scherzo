@@ -36,10 +36,7 @@ use mediasoup::{
     worker_manager::WorkerManager,
 };
 use parking_lot::Mutex;
-use tokio::{
-    sync::broadcast::{self, Receiver, Sender},
-    time::timeout,
-};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::Level;
 
 pub mod stream_message;
@@ -351,6 +348,7 @@ fn into_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value).unwrap()
 }
 
-fn from_json<T: serde::de::DeserializeOwned>(value: String) -> Result<T, ()> {
-    serde_json::from_str(&value).map_err(|_| ())
+fn from_json<T: serde::de::DeserializeOwned>(value: String) -> Result<T, HrpcError> {
+    serde_json::from_str(&value)
+        .map_err(|err| ("scherzo.invalid-voice-json", err.to_string()).into())
 }
