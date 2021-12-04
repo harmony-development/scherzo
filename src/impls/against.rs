@@ -1,10 +1,16 @@
-use std::convert::Infallible;
-
-use harmony_rust_sdk::api::exports::hrpc::{
-    exports::futures_util::{future::BoxFuture, FutureExt},
-    server::transport::http::{box_body, HttpRequest, HttpResponse},
+use std::{
+    convert::Infallible,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
 };
-use hyper::header::HeaderName;
+
+use harmony_rust_sdk::api::exports::hrpc::server::transport::http::{
+    box_body, HttpRequest, HttpResponse,
+};
+use hrpc::exports::futures_util::ready;
+use hyper::{client::ResponseFuture, header::HeaderName};
+use pin_project::pin_project;
 use tower::{Layer, Service};
 
 use super::*;
@@ -14,13 +20,7 @@ pub struct AgainstLayer;
 
 impl<S> Layer<S> for AgainstLayer
 where
-    S: tower::Service<
-            HttpRequest,
-            Response = HttpResponse,
-            Error = Infallible,
-            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
-        > + Send
-        + 'static,
+    S: tower::Service<HttpRequest, Response = HttpResponse, Error = Infallible> + Send + 'static,
 {
     type Service = AgainstService<S>;
 
@@ -41,24 +41,15 @@ pub struct AgainstService<S> {
 
 impl<S> Service<HttpRequest> for AgainstService<S>
 where
-    S: tower::Service<
-            HttpRequest,
-            Response = HttpResponse,
-            Error = Infallible,
-            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
-        > + Send
-        + 'static,
+    S: tower::Service<HttpRequest, Response = HttpResponse, Error = Infallible> + Send + 'static,
 {
     type Response = HttpResponse;
 
     type Error = Infallible;
 
-    type Future = BoxFuture<'static, Result<HttpResponse, Infallible>>;
+    type Future = AgainstFuture<S::Future>;
 
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Service::poll_ready(&mut self.inner, cx)
     }
 
@@ -85,13 +76,36 @@ where
             *request.headers_mut() = parts.headers;
             *request.extensions_mut() = parts.extensions;
 
-            Box::pin(self.http.request(request).map(|res| {
-                Ok(res
-                    .map(|r| r.map(box_body))
-                    .unwrap_or_else(|err| ServerError::HttpError(err).into_http_response()))
-            }))
+            AgainstFuture::Remote(self.http.request(request))
         } else {
-            tower::Service::call(&mut self.inner, request)
+            AgainstFuture::Local(tower::Service::call(&mut self.inner, request))
+        }
+    }
+}
+
+#[pin_project(project = EnumProj)]
+pub enum AgainstFuture<Fut> {
+    Remote(#[pin] ResponseFuture),
+    Local(#[pin] Fut),
+}
+
+impl<Fut> Future for AgainstFuture<Fut>
+where
+    Fut: Future<Output = Result<HttpResponse, Infallible>>,
+{
+    type Output = Result<HttpResponse, Infallible>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        match this {
+            EnumProj::Local(fut) => fut.poll(cx),
+            EnumProj::Remote(fut) => {
+                let res = ready!(fut.poll(cx));
+                Poll::Ready(Ok(res.map(|r| r.map(box_body)).unwrap_or_else(|err| {
+                    ServerError::HttpError(err).into_http_response()
+                })))
+            }
         }
     }
 }

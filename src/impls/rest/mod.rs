@@ -9,11 +9,12 @@ use std::{
     cmp,
     convert::Infallible,
     fs::Metadata,
+    future::Future,
     ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
-    task::Poll,
+    task::{Context, Poll},
     time::Duration,
 };
 
@@ -31,8 +32,10 @@ use harmony_rust_sdk::api::{
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
+use hrpc::common::future::Ready;
 use http::{header, HeaderValue, Method, StatusCode, Uri};
 use hyper::Body;
+use pin_project::pin_project;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
@@ -47,6 +50,8 @@ pub mod upload;
 
 const SEPERATOR: u8 = b'\n';
 
+type Out = Result<HttpResponse, Infallible>;
+
 #[derive(Clone)]
 pub struct RestServiceLayer {
     deps: Arc<Dependencies>,
@@ -60,13 +65,7 @@ impl RestServiceLayer {
 
 impl<S> Layer<S> for RestServiceLayer
 where
-    S: tower::Service<
-            HttpRequest,
-            Response = HttpResponse,
-            Error = Infallible,
-            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
-        > + Send
-        + 'static,
+    S: tower::Service<HttpRequest, Response = HttpResponse, Error = Infallible> + Send + 'static,
 {
     type Service = RestService<S>;
 
@@ -89,21 +88,15 @@ pub struct RestService<S> {
 
 impl<S> Service<HttpRequest> for RestService<S>
 where
-    S: tower::Service<
-            HttpRequest,
-            Response = HttpResponse,
-            Error = Infallible,
-            Future = BoxFuture<'static, Result<HttpResponse, Infallible>>,
-        > + Send
-        + 'static,
+    S: tower::Service<HttpRequest, Response = HttpResponse, Error = Infallible> + Send + 'static,
 {
     type Response = HttpResponse;
 
     type Error = Infallible;
 
-    type Future = BoxFuture<'static, Result<HttpResponse, Infallible>>;
+    type Future = RestFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let pending = Service::poll_ready(&mut self.inner, cx).is_pending()
             | Service::poll_ready(&mut self.about, cx).is_pending()
             | Service::poll_ready(&mut self.download, cx).is_pending()
@@ -118,13 +111,37 @@ where
         let path = req.uri().path();
 
         if path.starts_with("/_harmony/media/download/") {
-            Service::call(&mut self.download, req)
+            RestFuture::Other(Service::call(&mut self.download, req))
         } else {
             match path {
-                "/_harmony/media/upload" => Service::call(&mut self.upload, req),
-                "/_harmony/about" => Box::pin(Service::call(&mut self.about, req)),
-                _ => Service::call(&mut self.inner, req),
+                "/_harmony/media/upload" => RestFuture::Other(Service::call(&mut self.upload, req)),
+                "/_harmony/about" => RestFuture::About(Service::call(&mut self.about, req)),
+                _ => RestFuture::Inner(Service::call(&mut self.inner, req)),
             }
+        }
+    }
+}
+
+#[pin_project(project = EnumProj)]
+pub enum RestFuture<Fut> {
+    Inner(#[pin] Fut),
+    About(Ready<Out>),
+    Other(BoxFuture<'static, Out>),
+}
+
+impl<Fut> Future for RestFuture<Fut>
+where
+    Fut: Future<Output = Out>,
+{
+    type Output = Out;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+
+        match this {
+            EnumProj::About(fut) => fut.poll_unpin(cx),
+            EnumProj::Other(fut) => fut.poll_unpin(cx),
+            EnumProj::Inner(fut) => Future::poll(fut, cx),
         }
     }
 }
