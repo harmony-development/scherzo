@@ -104,11 +104,11 @@ fn main() {
     run(db_path, console, jaeger, level_filter)
 }
 
-pub fn run(db_path: String, console: bool, jaeger: bool, level_filter: Level) {
+pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let _rt_guard = rt.enter();
 
-    let admin_logger_handle = setup_tracing(console, jaeger, level_filter);
+    let admin_logger_handle = setup_tracing(console, jaeger, log_level);
 
     let config = parse_config();
 
@@ -122,7 +122,7 @@ pub fn run(db_path: String, console: bool, jaeger: bool, level_filter: Level) {
 
     admin_logger_handle.init(&deps).unwrap();
 
-    let (server, rest) = setup_server(deps.clone(), fed_event_receiver);
+    let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
 
     let integrity_thread = start_integrity_check_thread(deps.as_ref());
 
@@ -190,6 +190,7 @@ fn setup_db(db_path: &str, config: &Config) -> (Box<dyn Db>, usize) {
 fn setup_server(
     deps: Arc<Dependencies>,
     fed_event_receiver: tokio::sync::mpsc::UnboundedReceiver<EventDispatch>,
+    log_level: Level,
 ) -> (impl MakeRoutes, RestServiceLayer) {
     let profile_server = ProfileServer::new(deps.clone());
     let emote_server = EmoteServer::new(deps.clone());
@@ -198,7 +199,7 @@ fn setup_server(
     let mediaproxy_server = MediaproxyServer::new(deps.clone());
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
     #[cfg(feature = "voice")]
-    let voice_server = voice::VoiceServer::new(&deps);
+    let voice_server = voice::VoiceServer::new(&deps, log_level);
 
     let profile = ProfileServiceServer::new(profile_server.clone());
     let emote = EmoteServiceServer::new(emote_server.clone());

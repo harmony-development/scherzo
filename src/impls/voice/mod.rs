@@ -32,7 +32,7 @@ use mediasoup::{
         RtpCodecParametersParameters, RtpParameters,
     },
     transport::{ConsumeError, ProduceError, Transport},
-    worker::{RequestError, Worker},
+    worker::{RequestError, Worker, WorkerLogLevel, WorkerSettings},
     worker_manager::WorkerManager,
 };
 use parking_lot::Mutex;
@@ -40,6 +40,7 @@ use tokio::{
     sync::broadcast::{self, Receiver, Sender},
     time::timeout,
 };
+use tracing::Level;
 
 pub mod stream_message;
 
@@ -62,10 +63,10 @@ pub struct VoiceServer {
 }
 
 impl VoiceServer {
-    pub fn new(deps: &Dependencies) -> Self {
+    pub fn new(deps: &Dependencies, log_level: Level) -> Self {
         Self {
             valid_sessions: deps.valid_sessions.clone(),
-            worker_pool: WorkerPool::new(),
+            worker_pool: WorkerPool::new(log_level),
             channels: Channels::new(),
             chat_tree: deps.chat_tree.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
@@ -83,18 +84,28 @@ impl VoiceService for VoiceServer {
 #[derive(Clone)]
 struct WorkerPool {
     manager: WorkerManager,
+    log_level: WorkerLogLevel,
 }
 
 impl WorkerPool {
-    fn new() -> Self {
+    fn new(log_level: Level) -> Self {
         Self {
             manager: WorkerManager::new(),
+            log_level: match log_level {
+                Level::ERROR => WorkerLogLevel::Error,
+                Level::DEBUG => WorkerLogLevel::Debug,
+                Level::WARN => WorkerLogLevel::Warn,
+                _ => WorkerLogLevel::Error,
+            },
         }
     }
 
     async fn get(&self) -> ServerResult<Worker> {
+        let mut settings = WorkerSettings::default();
+        settings.log_level = self.log_level;
+
         self.manager
-            .create_worker(Default::default())
+            .create_worker(settings)
             .await
             .map_err(|err| ServerError::from(err).into())
     }
