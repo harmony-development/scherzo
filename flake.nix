@@ -16,9 +16,19 @@
     buildPlatform = "naersk";
     overrides = {
       crateOverrides = common: _: {
-        mediasoup-sys = prev: {
-          nativeBuildInputs = (prev.nativeBuildInputs or [ ]) ++ (with common.pkgs; [ python3 gnumake nodejs ]);
-        };
+        mediasoup-sys = prev:
+          let
+            pkgs = common.pkgs;
+            pythonPkgs = pkgs: with pkgs; [
+              pip
+            ];
+            pythonWithPkgs = pkgs.python3.withPackages pythonPkgs;
+            all = (with pkgs; [ cmake gnumake nodejs meson ninja ]) ++ [ pythonWithPkgs ];
+          in
+          {
+            buildInputs = (prev.buildInputs or [ ]) ++ all;
+            nativeBuildInputs = (prev.nativeBuildInputs or [ ]) ++ all;
+          };
       };
       shell = common: prev: {
         packages = prev.packages ++ [
@@ -27,14 +37,14 @@
             memberName = "tokio-console";
 
             root = builtins.fetchGit {
-              url = "https://github.com/tokio-rs/console.git";
-              rev = "a30264e0b5469ea596430b846b05e6e3541915d1";
-              ref = "main";
+            url = "https://github.com/tokio-rs/console.git";
+            rev = "a30264e0b5469ea596430b846b05e6e3541915d1";
+            ref = "main";
             };
 
             inherit (common) nativeBuildInputs buildInputs;
             CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
-          })*/
+            })*/
         ];
         commands = prev.commands ++ [
           {
