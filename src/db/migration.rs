@@ -77,8 +77,29 @@ fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
         let (mut key, val) = res?;
 
         if key.len() == CHAN_KEY_LEN && std::panic::catch_unwind(|| deser_chan(val)).is_ok() {
-            key.push(8);
-            batch.insert(key, 1_u64.to_be_bytes());
+            key.push(9);
+
+            let id = chat_tree
+                .scan_prefix(&key)
+                .last()
+                // Ensure that the first message ID is always 1!
+                // otherwise get message id
+                .map_or(Ok(1), |res| {
+                    res.map(|res| {
+                        u64::from_be_bytes(
+                            res.0
+                                .split_at(key.len())
+                                .1
+                                .try_into()
+                                .expect("failed to convert to u64 id"),
+                        )
+                    })
+                })?;
+
+            key.pop();
+            key.push(7);
+
+            batch.insert(key, id.to_be_bytes());
         }
     }
     let _ = std::panic::take_hook();
