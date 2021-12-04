@@ -233,6 +233,10 @@ pub mod chat {
 
     // message
 
+    pub const fn make_next_msg_id_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
+        concat_static(&[&make_chan_key(guild_id, channel_id), &[7]])
+    }
+
     pub const fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
         concat_static(&[&make_chan_key(guild_id, channel_id), &[9]])
     }

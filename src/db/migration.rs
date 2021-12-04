@@ -1,10 +1,12 @@
 use std::convert::TryInto;
 
+use crate::db::{deser_chan, Batch};
+
 use super::{Db, DbResult};
 
 type Migration = fn(&dyn Db) -> DbResult<()>;
 
-pub const MIGRATIONS: [Migration; 1] = [initial_db_version];
+pub const MIGRATIONS: [Migration; 2] = [initial_db_version, add_next_msg_ids];
 
 pub fn get_db_version(db: &dyn Db) -> DbResult<(usize, bool)> {
     let version_tree = db.open_tree(b"version")?;
@@ -62,4 +64,23 @@ fn initial_db_version(db: &dyn Db) -> DbResult<()> {
         version_tree.insert(b"version", &MIGRATIONS.len().to_be_bytes())?;
     }
     Ok(())
+}
+
+fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
+    const CHAN_KEY_LEN: usize = super::chat::make_chan_key(0, 0).len();
+
+    let chat_tree = db.open_tree(b"chat")?;
+
+    let mut batch = Batch::default();
+    std::panic::set_hook(Box::new(|_| ()));
+    for res in chat_tree.iter() {
+        let (mut key, val) = res?;
+
+        if key.len() == CHAN_KEY_LEN && std::panic::catch_unwind(|| deser_chan(val)).is_ok() {
+            key.push(8);
+            batch.insert(key, 1_u64.to_be_bytes());
+        }
+    }
+    let _ = std::panic::take_hook();
+    chat_tree.apply_batch(batch)
 }

@@ -481,21 +481,19 @@ impl ChatTree {
             .map_err(Into::into)
     }
 
-    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> ServerResult<()> {
+    pub fn does_channel_exist(&self, guild_id: u64, channel_id: u64) -> Result<(), ServerError> {
         self.contains_key(&make_chan_key(guild_id, channel_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchChannel {
                 guild_id,
                 channel_id,
             }))
-            .map_err(Into::into)
     }
 
-    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> ServerResult<()> {
+    pub fn does_role_exist(&self, guild_id: u64, role_id: u64) -> Result<(), ServerError> {
         self.contains_key(&make_guild_role_key(guild_id, role_id))?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::NoSuchRole { guild_id, role_id }))
-            .map_err(Into::into)
     }
 
     pub fn is_user_banned_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
@@ -530,7 +528,8 @@ impl ChatTree {
         channel_id: u64,
     ) -> ServerResult<()> {
         self.check_guild_user(guild_id, user_id)?;
-        self.does_channel_exist(guild_id, channel_id)
+        self.does_channel_exist(guild_id, channel_id)?;
+        Ok(())
     }
 
     pub fn check_guild_user(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
@@ -699,7 +698,7 @@ impl ChatTree {
         guild_id: u64,
         role_id: u64,
         position: Option<ItemPosition>,
-    ) -> ServerResult<()> {
+    ) -> Result<(), ServerError> {
         self.update_order_logic(
             role_id,
             position,
@@ -713,7 +712,7 @@ impl ChatTree {
         guild_id: u64,
         channel_id: u64,
         position: Option<ItemPosition>,
-    ) -> ServerResult<()> {
+    ) -> Result<(), ServerError> {
         self.update_order_logic(
             channel_id,
             position,
@@ -727,9 +726,9 @@ impl ChatTree {
         &self,
         id: u64,
         position: Option<ItemPosition>,
-        check_exists: impl Fn(u64) -> ServerResult<()>,
+        check_exists: impl Fn(u64) -> Result<(), ServerError>,
         key: &[u8],
-    ) -> ServerResult<()> {
+    ) -> Result<(), ServerError> {
         let mut ordering = self.get_list_u64_logic(key)?;
 
         let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
@@ -1037,8 +1036,8 @@ impl ChatTree {
         kind: ChannelKind,
         metadata: Option<Metadata>,
         position: Option<ItemPosition>,
-    ) -> ServerResult<u64> {
-        let channel_id = {
+    ) -> Result<u64, ServerError> {
+        let (channel_id, key) = {
             let mut rng = rand::thread_rng();
             let mut channel_id = rng.gen_range(1..=u64::MAX);
             let mut key = make_chan_key(guild_id, channel_id);
@@ -1046,9 +1045,8 @@ impl ChatTree {
                 channel_id = rng.gen_range(1..=u64::MAX);
                 key = make_chan_key(guild_id, channel_id);
             }
-            channel_id
+            (channel_id, key)
         };
-        let key = make_chan_key(guild_id, channel_id);
 
         let channel = Channel {
             metadata,
@@ -1056,7 +1054,14 @@ impl ChatTree {
             kind: kind.into(),
         };
         let buf = rkyv_ser(&channel);
-        self.insert(key, buf)?;
+
+        let mut batch = Batch::default();
+        batch.insert(key, buf);
+        batch.insert(
+            make_next_msg_id_key(guild_id, channel_id),
+            1_u64.to_be_bytes(),
+        );
+        self.chat_tree.apply_batch(batch)?;
 
         // Add from ordering list
         self.update_channel_order_logic(guild_id, channel_id, position)?;
@@ -1296,26 +1301,17 @@ impl ChatTree {
         })
     }
 
-    pub fn get_next_message_id(&self, guild_id: u64, channel_id: u64) -> ServerResult<u64> {
-        let msg_prefix = make_msg_prefix(guild_id, channel_id);
+    pub fn get_next_message_id(&self, guild_id: u64, channel_id: u64) -> Result<u64, ServerError> {
+        let next_id_key = make_next_msg_id_key(guild_id, channel_id);
+        let raw = self
+            .chat_tree
+            .get(&next_id_key)?
+            .expect("no next message id for channel - this is a bug");
+        // Safety: this won't cause UB since we only store u64
+        let id = u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() });
         self.chat_tree
-            .scan_prefix(&msg_prefix)
-            .last()
-            // Ensure that the first message ID is always 1!
-            .map_or(Ok(1), |res| {
-                // Safety: this won't cause UB since we only store u64 after the prefix [ref:msg_key_u64]
-                res.map(|res| {
-                    u64::from_be_bytes(unsafe {
-                        res.0
-                            .split_at(msg_prefix.len())
-                            .1
-                            .try_into()
-                            .unwrap_unchecked()
-                    }) + 1
-                })
-                .map_err(ServerError::DbError)
-                .map_err(Into::into)
-            })
+            .insert(&next_id_key, &(id + 1).to_be_bytes())?;
+        Ok(id)
     }
 
     pub fn send_message_logic(
