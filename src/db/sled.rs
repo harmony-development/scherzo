@@ -13,10 +13,7 @@ pub mod shared {
 
     use super::*;
 
-    pub async fn open_database<P: AsRef<std::path::Path> + std::fmt::Display + Send + 'static>(
-        db_path: P,
-        db_config: DbConfig,
-    ) -> DbResult<Db> {
+    pub async fn open_database(db_path: String, db_config: DbConfig) -> DbResult<Db> {
         tokio::task::spawn_blocking(move || -> DbResult<Db> {
             let db = sled::Config::new()
                 .use_compression(true)
@@ -59,6 +56,10 @@ pub mod shared {
                     .map_err(Into::into)
                     .map(|tree| Tree { inner: tree }),
             )
+        }
+
+        pub async fn flush(&self) -> DbResult<usize> {
+            self.inner.flush_async().await.map_err(Into::into)
         }
     }
 

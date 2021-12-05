@@ -26,10 +26,7 @@ pub mod sled;
 #[cfg(feature = "sled")]
 pub use self::sled::shared::*;
 
-pub async fn open_db<P: AsRef<std::path::Path> + std::fmt::Display + Send + 'static>(
-    db_path: P,
-    db_config: DbConfig,
-) -> Db {
+pub async fn open_db(db_path: String, db_config: DbConfig) -> Db {
     let span = tracing::info_span!("scherzo::db", path = %db_path);
     let fut = async move {
         tracing::info!("initializing database");

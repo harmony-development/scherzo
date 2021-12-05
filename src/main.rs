@@ -110,11 +110,8 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     let _rt_guard = rt.enter();
 
     let admin_logger_handle = setup_tracing(console, jaeger, log_level);
-
     let config = parse_config();
-
-    let (db, current_db_version) = rt.block_on(setup_db(&db_path, &config));
-
+    let (db, current_db_version) = rt.block_on(setup_db(db_path, &config));
     let (deps, fed_event_receiver) = rt.block_on(Dependencies::new(&db, config)).unwrap();
 
     if current_db_version == 0 {
@@ -124,19 +121,17 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     rt.block_on(admin_logger_handle.init(&deps)).unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
-
     let integrity_thread = start_integrity_check_thread(deps.as_ref());
-
     let transport = setup_transport(deps.as_ref(), rest);
-
     let serve = transport
         .serve(server)
         .instrument(info_span!("scherzo::serve"));
 
-    rt.block_on(serve).unwrap();
-
-    rt.block_on(integrity_thread).unwrap();
-
+    rt.block_on(async move {
+        serve.await.unwrap();
+        integrity_thread.await.expect("integrity thread panicked");
+        db.flush().await.expect("db flush failed");
+    });
     opentelemetry::global::shutdown_tracer_provider();
 }
 
@@ -161,15 +156,15 @@ fn parse_config() -> Config {
     config
 }
 
-async fn setup_db(db_path: &str, config: &Config) -> (Db, usize) {
-    let db = scherzo::db::open_db(&db_path, config.db.clone()).await;
+async fn setup_db(db_path: String, config: &Config) -> (Db, usize) {
+    let db = scherzo::db::open_db(db_path.clone(), config.db.clone()).await;
     let (current_db_version, needs_migration) = get_db_version(&db)
         .await
         .expect("something went wrong while checking if the db needs migrations!!!");
     if needs_migration {
         // Backup db before attempting to apply migrations
         if current_db_version > 0 {
-            let db_backup_name = format!("{}_backup_ver_{}", &db_path, current_db_version);
+            let db_backup_name = format!("{}_backup_ver_{}", db_path, current_db_version);
             let db_backup_path = config.db.db_backup_path.as_ref().map_or_else(
                 || Path::new(&db_backup_name).to_path_buf(),
                 |path| path.join(&db_backup_name),
