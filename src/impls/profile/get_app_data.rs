@@ -10,7 +10,8 @@ pub async fn handler(
     let app_data = svc
         .deps
         .profile_tree
-        .get(make_user_metadata_key(user_id, &app_id))?
+        .get(make_user_metadata_key(user_id, &app_id))
+        .await?
         .unwrap_or_default()
         .into();
 

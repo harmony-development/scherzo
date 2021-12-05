@@ -35,7 +35,8 @@ pub async fn handler(
         }
 
         svc.chat_tree
-            .check_guild_user_channel(guild_id, user_id, channel_id)?;
+            .check_guild_user_channel(guild_id, user_id, channel_id)
+            .await?;
 
         let mut channel = svc.channels.get(&svc.worker_pool, chan_id).await?;
 

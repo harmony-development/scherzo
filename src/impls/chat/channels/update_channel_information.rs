@@ -15,17 +15,19 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(
-        guild_id,
-        Some(channel_id),
-        user_id,
-        "channels.manage.change-information",
-        false,
-    )?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(
+            guild_id,
+            Some(channel_id),
+            user_id,
+            "channels.manage.change-information",
+            false,
+        )
+        .await?;
 
     let key = make_chan_key(guild_id, channel_id);
-    let mut chan_info = if let Some(raw) = chat_tree.get(key)? {
+    let mut chan_info = if let Some(raw) = chat_tree.get(key).await? {
         db::deser_chan(raw)
     } else {
         return Err(ServerError::NoSuchChannel {
@@ -43,7 +45,7 @@ pub async fn handler(
     }
 
     let buf = rkyv_ser(&chan_info);
-    chat_tree.insert(key, buf)?;
+    chat_tree.insert(key, buf).await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

@@ -61,7 +61,7 @@ impl SyncServer {
             loop {
                 tokio::select! {
                     _ = async {
-                        let hosts = sync2.deps.sync_tree.scan_prefix(HOST_PREFIX).flat_map(|res| {
+                        let hosts = sync2.deps.sync_tree.scan_prefix(HOST_PREFIX).await.flat_map(|res| {
                             let key = match res {
                                 Ok((key, _)) => key,
                                 Err(err) => {
@@ -89,7 +89,7 @@ impl SyncServer {
                                     .await
                                 {
                                     for event in queue.event_queue {
-                                        if let Err(err) = sync2.push_logic(&host, event) {
+                                        if let Err(err) = sync2.push_logic(&host, event).await {
                                             error!("error while executing sync event: {}", err);
                                         }
                                     }
@@ -102,7 +102,7 @@ impl SyncServer {
                     _ = async {
                         while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
                             if sync2.is_host_allowed(&host).is_ok() {
-                                match sync2.get_event_queue_raw(&host) {
+                                match sync2.get_event_queue_raw(&host).await {
                                     Ok(raw_queue) => {
                                         let maybe_arch_queue = raw_queue.as_ref().map(|raw_queue| rkyv_arch::<PullResponse>(raw_queue));
                                         if !maybe_arch_queue.map_or(false, |v| v.event_queue.is_empty()) {
@@ -110,7 +110,7 @@ impl SyncServer {
                                                 PullResponse::default,
                                                 |v| v.deserialize(&mut rkyv::Infallible).unwrap()
                                             );
-                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
+                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event).await {
                                                 error!("error while pushing to event queue: {}", err);
                                             }
                                             continue;
@@ -141,7 +141,7 @@ impl SyncServer {
                                                 PullResponse::default,
                                                 |v| v.deserialize(&mut rkyv::Infallible).unwrap()
                                             );
-                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event) {
+                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event).await {
                                                 error!("error while pushing to event queue: {}", err);
                                             }
                                         }
@@ -233,18 +233,20 @@ impl SyncServer {
         Err(ServerError::FailedToAuthSync)
     }
 
-    fn push_logic(&self, host: &str, event: Event) -> ServerResult<()> {
+    async fn push_logic(&self, host: &str, event: Event) -> ServerResult<()> {
         if let Some(kind) = event.kind {
             match kind {
                 Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
                     self.deps
                         .chat_tree
-                        .remove_guild_from_guild_list(user_id, guild_id, host)?;
+                        .remove_guild_from_guild_list(user_id, guild_id, host)
+                        .await?;
                 }
                 Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
                     self.deps
                         .chat_tree
-                        .add_guild_to_guild_list(user_id, guild_id, host)?;
+                        .add_guild_to_guild_list(user_id, guild_id, host)
+                        .await?;
                 }
                 Kind::UserInvited(_) => todo!(),
                 Kind::UserRejectedInvite(_) => todo!(),
@@ -253,15 +255,15 @@ impl SyncServer {
         Ok(())
     }
 
-    fn get_event_queue_raw(&self, host: &str) -> Result<Option<EVec>, ServerError> {
+    async fn get_event_queue_raw(&self, host: &str) -> Result<Option<EVec>, ServerError> {
         let key = make_host_key(host);
-        let queue = self.deps.sync_tree.get(&key)?;
-        self.deps.sync_tree.remove(&key)?;
+        let queue = self.deps.sync_tree.get(&key).await?;
+        self.deps.sync_tree.remove(&key).await?;
         Ok(queue)
     }
 
-    fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
-        self.get_event_queue_raw(host).map(|val| {
+    async fn get_event_queue(&self, host: &str) -> Result<PullResponse, ServerError> {
+        self.get_event_queue_raw(host).await.map(|val| {
             val.map_or_else(PullResponse::default, |val| {
                 rkyv_arch::<PullResponse>(&val)
                     .deserialize(&mut rkyv::Infallible)
@@ -270,7 +272,7 @@ impl SyncServer {
         })
     }
 
-    fn push_to_event_queue(
+    async fn push_to_event_queue(
         &self,
         host: &str,
         mut queue: PullResponse,
@@ -281,7 +283,8 @@ impl SyncServer {
         let buf = rkyv_ser(&queue);
         self.deps
             .sync_tree
-            .insert(&make_host_key(host), buf.as_ref())?;
+            .insert(&make_host_key(host), buf.as_ref())
+            .await?;
         Ok(())
     }
 }

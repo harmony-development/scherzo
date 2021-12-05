@@ -15,17 +15,19 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
 
-    let mut guild_info = chat_tree.get_guild_logic(guild_id)?;
+    let mut guild_info = chat_tree.get_guild_logic(guild_id).await?;
 
-    chat_tree.check_perms(
-        guild_id,
-        None,
-        user_id,
-        "guild.manage.change-information",
-        false,
-    )?;
+    chat_tree
+        .check_perms(
+            guild_id,
+            None,
+            user_id,
+            "guild.manage.change-information",
+            false,
+        )
+        .await?;
 
     if let Some(new_name) = new_name.clone() {
         guild_info.name = new_name;
@@ -37,7 +39,7 @@ pub async fn handler(
         guild_info.metadata = Some(new_metadata);
     }
 
-    chat_tree.put_guild_logic(guild_id, guild_info)?;
+    chat_tree.put_guild_logic(guild_id, guild_info).await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

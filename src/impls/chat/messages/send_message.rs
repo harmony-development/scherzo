@@ -13,8 +13,12 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
-    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
+    chat_tree
+        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .await?;
+    chat_tree
+        .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
+        .await?;
 
     let content = chat_tree
         .process_message_content(
@@ -24,17 +28,20 @@ pub async fn handler(
         )
         .await?;
     request.content = Some(content);
-    let (message_id, message) = chat_tree.send_message_logic(user_id, request)?;
+    let (message_id, message) = chat_tree.send_message_logic(user_id, request).await?;
 
-    let is_cmd_channel =
-        chat_tree.get_admin_guild_keys()?.map(|(g, _, c)| (g, c)) == Some((guild_id, channel_id));
+    let is_cmd_channel = chat_tree
+        .get_admin_guild_keys()
+        .await?
+        .map(|(g, _, c)| (g, c))
+        == Some((guild_id, channel_id));
 
     let action_content = if is_cmd_channel {
         if let Some(content::Content::TextMessage(content::TextContent {
             content: Some(FormattedText { text, .. }),
         })) = message.content.as_ref().and_then(|c| c.content.as_ref())
         {
-            svc.deps.action_processor.run(text).ok()
+            svc.deps.action_processor.run(text).await.ok()
         } else {
             None
         }
@@ -64,7 +71,9 @@ pub async fn handler(
         let content = content::Content::TextMessage(content::TextContent {
             content: Some(FormattedText::new(msg, Vec::new())),
         });
-        let (message_id, message) = chat_tree.send_with_system(guild_id, channel_id, content)?;
+        let (message_id, message) = chat_tree
+            .send_with_system(guild_id, channel_id, content)
+            .await?;
         svc.send_event_through_chan(
             EventSub::Guild(guild_id),
             stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {

@@ -174,7 +174,7 @@ pub async fn handler(
                                 let email = try_get_email(&mut values)?;
 
                                 let user_id = if let Some(user_id) =
-                                    svc.deps.auth_tree.get(email.as_bytes())?
+                                    svc.deps.auth_tree.get(email.as_bytes()).await?
                                 {
                                     // Safety: this unwrap can never cause UB since we only store u64
                                     u64::from_be_bytes(unsafe {
@@ -190,7 +190,8 @@ pub async fn handler(
                                 if svc
                                     .deps
                                     .auth_tree
-                                    .get(user_id.to_be_bytes().as_ref())?
+                                    .get(user_id.to_be_bytes().as_ref())
+                                    .await?
                                     .map_or(true, |pass| pass.as_ref() != password_hashed.as_ref())
                                 {
                                     return Err(ServerError::WrongUserOrPassword {
@@ -216,6 +217,7 @@ pub async fn handler(
                                     .auth_tree
                                     .inner
                                     .apply_batch(batch)
+                                    .await
                                     .map_err(ServerError::DbError)?;
 
                                 tracing::debug!("user {} logged in with email {}", user_id, email,);
@@ -238,7 +240,8 @@ pub async fn handler(
                                     if svc
                                         .deps
                                         .auth_tree
-                                        .get(&reg_token_key(token_hashed.as_ref()))?
+                                        .get(&reg_token_key(token_hashed.as_ref()))
+                                        .await?
                                         .is_none()
                                     {
                                         return Err(ServerError::InvalidRegistrationToken.into());
@@ -249,11 +252,11 @@ pub async fn handler(
                                 let email = try_get_email(&mut values)?;
                                 let username = try_get_username(&mut values)?;
 
-                                if svc.deps.auth_tree.get(email.as_bytes())?.is_some() {
+                                if svc.deps.auth_tree.get(email.as_bytes()).await?.is_some() {
                                     return Err(ServerError::UserAlreadyExists.into());
                                 }
 
-                                let user_id = svc.gen_user_id()?;
+                                let user_id = svc.gen_user_id().await?;
                                 let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
                                 let mut batch = Batch::default();
@@ -277,6 +280,7 @@ pub async fn handler(
                                     .auth_tree
                                     .inner
                                     .apply_batch(batch)
+                                    .await
                                     .expect("failed to register into db");
 
                                 let buf = rkyv_ser(&Profile {
@@ -285,7 +289,8 @@ pub async fn handler(
                                 });
                                 svc.deps
                                     .profile_tree
-                                    .insert(make_user_profile_key(user_id), buf)?;
+                                    .insert(make_user_profile_key(user_id), buf)
+                                    .await?;
 
                                 tracing::debug!("new user {} registered", user_id,);
 

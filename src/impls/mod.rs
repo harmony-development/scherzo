@@ -83,17 +83,17 @@ pub struct Dependencies {
 }
 
 impl Dependencies {
-    pub fn new(db: &Db, config: Config) -> DbResult<(Arc<Self>, FedEventReceiver)> {
+    pub async fn new(db: &Db, config: Config) -> DbResult<(Arc<Self>, FedEventReceiver)> {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
-        let auth_tree = AuthTree::new(db)?;
+        let auth_tree = AuthTree::new(db).await?;
 
         let this = Self {
             auth_tree: auth_tree.clone(),
-            chat_tree: ChatTree::new(db)?,
-            profile_tree: ProfileTree::new(db)?,
-            emote_tree: EmoteTree::new(db)?,
-            sync_tree: db.open_tree(b"sync")?,
+            chat_tree: ChatTree::new(db).await?,
+            profile_tree: ProfileTree::new(db).await?,
+            emote_tree: EmoteTree::new(db).await?,
+            sync_tree: db.open_tree(b"sync").await?,
 
             valid_sessions: Arc::new(DashMap::default()),
             chat_event_sender: broadcast::channel(1000).0,
@@ -206,12 +206,12 @@ pub struct ActionProcesser {
 }
 
 impl ActionProcesser {
-    pub fn run(&self, action: &str) -> ServerResult<String> {
+    pub async fn run(&self, action: &str) -> ServerResult<String> {
         let maybe_action = AdminAction::from_str(action);
         match maybe_action {
             Ok(action) => match action {
                 AdminAction::GenerateRegistrationToken => {
-                    let token = self.auth_tree.put_rand_reg_token()?;
+                    let token = self.auth_tree.put_rand_reg_token().await?;
                     Ok(token.into())
                 }
                 AdminAction::Help => Ok(HELP_TEXT.to_string()),

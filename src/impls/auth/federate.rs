@@ -8,7 +8,7 @@ pub async fn handler(
 
     let keys_manager = svc.keys_manager()?;
 
-    let profile = svc.deps.profile_tree.get_profile_logic(user_id)?;
+    let profile = svc.deps.profile_tree.get_profile_logic(user_id).await?;
     let server_id = request.into_message().await?.server_id;
 
     svc.is_host_allowed(&server_id)?;

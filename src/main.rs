@@ -32,6 +32,7 @@ use harmony_rust_sdk::api::{
 };
 use hrpc::{
     common::layer::trace::TraceLayer as HrpcTraceLayer,
+    exports::futures_util::TryFutureExt,
     server::{
         transport::http::{box_body, HttpConfig},
         MakeRoutes,
@@ -112,15 +113,15 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
 
     let config = parse_config();
 
-    let (db, current_db_version) = setup_db(&db_path, &config);
+    let (db, current_db_version) = rt.block_on(setup_db(&db_path, &config));
 
-    let (deps, fed_event_receiver) = Dependencies::new(db.as_ref(), config).unwrap();
+    let (deps, fed_event_receiver) = rt.block_on(Dependencies::new(&db, config)).unwrap();
 
     if current_db_version == 0 {
-        setup_admin_guild(deps.as_ref());
+        rt.block_on(setup_admin_guild(deps.as_ref()));
     }
 
-    admin_logger_handle.init(&deps).unwrap();
+    rt.block_on(admin_logger_handle.init(&deps)).unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
 
@@ -134,7 +135,7 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
 
     rt.block_on(serve).unwrap();
 
-    integrity_thread.join().unwrap();
+    rt.block_on(integrity_thread).unwrap();
 
     opentelemetry::global::shutdown_tracer_provider();
 }
@@ -160,9 +161,10 @@ fn parse_config() -> Config {
     config
 }
 
-fn setup_db(db_path: &str, config: &Config) -> (Box<dyn Db>, usize) {
-    let db = scherzo::db::open_db(&db_path, config.db.clone());
-    let (current_db_version, needs_migration) = get_db_version(db.as_ref())
+async fn setup_db(db_path: &str, config: &Config) -> (Db, usize) {
+    let db = scherzo::db::open_db(&db_path, config.db.clone()).await;
+    let (current_db_version, needs_migration) = get_db_version(&db)
+        .await
         .expect("something went wrong while checking if the db needs migrations!!!");
     if needs_migration {
         // Backup db before attempting to apply migrations
@@ -187,7 +189,8 @@ fn setup_db(db_path: &str, config: &Config) -> (Box<dyn Db>, usize) {
         }
 
         warn!("applying database migrations!");
-        apply_migrations(db.as_ref(), current_db_version)
+        apply_migrations(&db, current_db_version)
+            .await
             .expect("something went wrong while applying the migrations!!!");
     }
     (db, current_db_version)
@@ -367,7 +370,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
     admin_logger_handle
 }
 
-fn setup_admin_guild(deps: &Dependencies) {
+async fn setup_admin_guild(deps: &Dependencies) {
     let guild_id = deps
         .chat_tree
         .create_guild_logic(
@@ -377,6 +380,7 @@ fn setup_admin_guild(deps: &Dependencies) {
             None,
             guild_kind::Kind::new_normal(guild_kind::Normal::new()),
         )
+        .await
         .unwrap();
     deps.chat_tree
         .set_permissions_logic(
@@ -385,6 +389,7 @@ fn setup_admin_guild(deps: &Dependencies) {
             DEFAULT_ROLE_ID,
             vec![Permission::new("*".to_string(), true)],
         )
+        .await
         .unwrap();
     let log_id = deps
         .chat_tree
@@ -395,6 +400,7 @@ fn setup_admin_guild(deps: &Dependencies) {
             None,
             None,
         )
+        .await
         .unwrap();
     let cmd_id = deps
         .chat_tree
@@ -405,13 +411,16 @@ fn setup_admin_guild(deps: &Dependencies) {
             None,
             None,
         )
+        .await
         .unwrap();
     let invite_id = format!("{}", guild_id);
     deps.chat_tree
         .create_invite_logic(guild_id, &invite_id, 1)
+        .await
         .unwrap();
     deps.chat_tree
         .set_admin_guild_keys(guild_id, log_id, cmd_id)
+        .await
         .unwrap();
     deps.chat_tree
         .send_with_system(
@@ -421,20 +430,19 @@ fn setup_admin_guild(deps: &Dependencies) {
                 content: Some(FormattedText::new(HELP_TEXT.to_string(), Vec::new())),
             }),
         )
+        .await
         .unwrap();
     warn!("admin guild created! use the invite {} to join", invite_id);
 }
 
-fn start_integrity_check_thread(deps: &Dependencies) -> std::thread::JoinHandle<()> {
+fn start_integrity_check_thread(deps: &Dependencies) -> tokio::task::JoinHandle<()> {
     let ctt = deps.chat_tree.clone();
     let att = deps.auth_tree.clone();
     let ptt = deps.profile_tree.clone();
     let ett = deps.emote_tree.clone();
     let stt = deps.sync_tree.clone();
 
-    std::thread::spawn(move || {
-        let span = info_span!("scherzo::db");
-        let _guard = span.enter();
+    let fut = async move {
         info!("database integrity verification task is running");
         loop {
             std::thread::sleep(Duration::from_secs(INTEGRITY_VERIFICATION_PERIOD));
@@ -445,6 +453,7 @@ fn start_integrity_check_thread(deps: &Dependencies) -> std::thread::JoinHandle<
                 .and_then(|_| ptt.inner.verify_integrity())
                 .and_then(|_| ett.inner.verify_integrity())
                 .and_then(|_| stt.verify_integrity())
+                .await
             {
                 error!("database integrity check failed: {}", err);
                 break;
@@ -452,7 +461,9 @@ fn start_integrity_check_thread(deps: &Dependencies) -> std::thread::JoinHandle<
                 debug!("database integrity check successful");
             }
         }
-    })
+    };
+
+    tokio::spawn(fut.instrument(info_span!("scherzo::db")))
 }
 
 fn copy_dir_all(src: PathBuf, dst: PathBuf) -> std::io::Result<()> {

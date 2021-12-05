@@ -9,7 +9,8 @@ pub async fn handler(
     let SetAppDataRequest { app_id, app_data } = request.into_message().await?;
     svc.deps
         .profile_tree
-        .insert(make_user_metadata_key(user_id, &app_id), app_data)?;
+        .insert(make_user_metadata_key(user_id, &app_id), app_data)
+        .await?;
 
     Ok((SetAppDataResponse {}).into_response())
 }

@@ -17,6 +17,7 @@ use rkyv::{
     ser::{serializers::AllocSerializer, Serializer},
     AlignedVec, Archive, Deserialize, Serialize,
 };
+use tracing::Instrument;
 
 pub mod migration;
 #[cfg(feature = "sled")]
@@ -25,15 +26,15 @@ pub mod sled;
 #[cfg(feature = "sled")]
 pub use self::sled::shared::*;
 
-pub fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
+pub async fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
     db_path: P,
     db_config: DbConfig,
 ) -> Db {
     let span = tracing::info_span!("scherzo::db", path = %db_path);
-    span.in_scope(|| {
+    let fut = async move {
         tracing::info!("initializing database");
 
-        let db_result = open_database(db_path, db_config);
+        let db_result = open_database(db_path, db_config).await;
 
         match db_result {
             Ok(db) => db,
@@ -43,7 +44,8 @@ pub fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
                 std::process::exit(1);
             }
         }
-    })
+    };
+    fut.instrument(span).await
 }
 
 #[must_use]

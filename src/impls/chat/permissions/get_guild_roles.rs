@@ -10,10 +10,12 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "roles.get", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "roles.get", false)
+        .await?;
 
-    let roles = chat_tree.get_guild_roles_logic(guild_id)?;
+    let roles = chat_tree.get_guild_roles_logic(guild_id).await?;
 
     Ok((GetGuildRolesResponse { roles }).into_response())
 }

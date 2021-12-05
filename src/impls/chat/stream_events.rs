@@ -32,7 +32,7 @@ pub async fn handler(
 
                         let sub = match req {
                             Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
-                                match chat_tree.check_guild_user(guild_id, user_id) {
+                                match chat_tree.check_guild_user(guild_id, user_id).await {
                                     Ok(_) => EventSub::Guild(guild_id),
                                     Err(err) => {
                                         tracing::error!("{}", err);

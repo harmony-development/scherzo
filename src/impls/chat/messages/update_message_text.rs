@@ -17,14 +17,20 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
-    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
+    chat_tree
+        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .await?;
+    chat_tree
+        .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
+        .await?;
 
     if new_content.as_ref().map_or(true, |f| f.text.is_empty()) {
         return Err(ServerError::MessageContentCantBeEmpty.into());
     }
 
-    let (mut message, key) = chat_tree.get_message_logic(guild_id, channel_id, message_id)?;
+    let (mut message, key) = chat_tree
+        .get_message_logic(guild_id, channel_id, message_id)
+        .await?;
 
     let msg_content = if let Some(content) = &mut message.content {
         content
@@ -40,7 +46,7 @@ pub async fn handler(
     message.edited_at = Some(edited_at);
 
     let buf = rkyv_ser(&message);
-    chat_tree.insert(key, buf)?;
+    chat_tree.insert(key, buf).await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

@@ -11,18 +11,19 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    let (guild_id, mut invite) = if let Some(raw) = chat_tree.get(&key)? {
+    let (guild_id, mut invite) = if let Some(raw) = chat_tree.get(&key).await? {
         db::deser_invite_entry(raw)
     } else {
         return Err(ServerError::NoSuchInvite(invite_id.into()).into());
     };
 
-    if chat_tree.is_user_banned_in_guild(guild_id, user_id)? {
+    if chat_tree.is_user_banned_in_guild(guild_id, user_id).await? {
         return Err(ServerError::UserBanned.into());
     }
 
     chat_tree
         .is_user_in_guild(guild_id, user_id)
+        .await
         .ok()
         .map_or(Ok(()), |_| Err(ServerError::UserAlreadyInGuild))?;
 
@@ -32,8 +33,10 @@ pub async fn handler(
         return Err(ServerError::InviteExpired.into());
     }
 
-    chat_tree.insert(make_member_key(guild_id, user_id), [])?;
-    chat_tree.add_default_role_to(guild_id, user_id)?;
+    chat_tree
+        .insert(make_member_key(guild_id, user_id), [])
+        .await?;
+    chat_tree.add_default_role_to(guild_id, user_id).await?;
     invite.use_count += 1;
 
     svc.send_event_through_chan(
@@ -46,13 +49,15 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    svc.dispatch_guild_join(guild_id, user_id)?;
+    svc.dispatch_guild_join(guild_id, user_id).await?;
 
     let buf = rkyv_ser(&invite);
-    chat_tree.insert(
-        key,
-        [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
-    )?;
+    chat_tree
+        .insert(
+            key,
+            [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+        )
+        .await?;
 
     Ok((JoinGuildResponse { guild_id }).into_response())
 }

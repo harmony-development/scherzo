@@ -17,8 +17,10 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "roles.manage", false)
+        .await?;
 
     let role = Role {
         name: name.clone(),
@@ -26,7 +28,7 @@ pub async fn handler(
         hoist,
         pingable,
     };
-    let role_id = chat_tree.add_guild_role_logic(guild_id, None, role)?;
+    let role_id = chat_tree.add_guild_role_logic(guild_id, None, role).await?;
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleCreated(stream_event::RoleCreated {

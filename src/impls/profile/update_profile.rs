@@ -14,13 +14,16 @@ pub async fn handler(
         new_is_bot,
     } = request.into_message().await?;
 
-    svc.deps.profile_tree.update_profile_logic(
-        user_id,
-        new_user_name.clone(),
-        new_user_avatar.clone(),
-        new_user_status,
-        new_is_bot,
-    )?;
+    svc.deps
+        .profile_tree
+        .update_profile_logic(
+            user_id,
+            new_user_name.clone(),
+            new_user_avatar.clone(),
+            new_user_status,
+            new_is_bot,
+        )
+        .await?;
 
     svc.send_event_through_chan(
         EventSub::Homeserver,
@@ -32,7 +35,12 @@ pub async fn handler(
             new_is_bot,
         }),
         None,
-        EventContext::new(svc.deps.chat_tree.calculate_users_seeing_user(user_id)?),
+        EventContext::new(
+            svc.deps
+                .chat_tree
+                .calculate_users_seeing_user(user_id)
+                .await?,
+        ),
     );
 
     Ok((UpdateProfileResponse {}).into_response())

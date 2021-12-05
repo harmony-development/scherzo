@@ -13,8 +13,12 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
-    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)?;
+    chat_tree
+        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .await?;
+    chat_tree
+        .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
+        .await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

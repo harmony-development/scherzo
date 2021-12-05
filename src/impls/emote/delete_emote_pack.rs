@@ -10,13 +10,14 @@ pub async fn handler(
 
     svc.deps
         .emote_tree
-        .check_if_emote_pack_owner(pack_id, user_id)?;
+        .check_if_emote_pack_owner(pack_id, user_id)
+        .await?;
 
     let key = make_emote_pack_key(pack_id);
 
     let mut batch = Batch::default();
     batch.remove(key);
-    for res in svc.deps.emote_tree.scan_prefix(&key) {
+    for res in svc.deps.emote_tree.scan_prefix(&key).await {
         let (key, _) = res?;
         batch.remove(key);
     }
@@ -24,13 +25,19 @@ pub async fn handler(
         .emote_tree
         .inner
         .apply_batch(batch)
+        .await
         .map_err(ServerError::DbError)?;
 
     svc.deps
         .emote_tree
-        .dequip_emote_pack_logic(user_id, pack_id)?;
+        .dequip_emote_pack_logic(user_id, pack_id)
+        .await?;
 
-    let equipped_users = svc.deps.emote_tree.calculate_users_pack_equipped(pack_id)?;
+    let equipped_users = svc
+        .deps
+        .emote_tree
+        .calculate_users_pack_equipped(pack_id)
+        .await?;
     svc.send_event_through_chan(
         EventSub::Homeserver,
         stream_event::Event::EmotePackDeleted(EmotePackDeleted { pack_id }),

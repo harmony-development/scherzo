@@ -16,16 +16,20 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "channels.manage.create", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "channels.manage.create", false)
+        .await?;
 
-    let channel_id = chat_tree.create_channel_logic(
-        guild_id,
-        channel_name.clone(),
-        ChannelKind::from_i32(kind).unwrap_or_default(),
-        metadata.clone(),
-        position.clone(),
-    )?;
+    let channel_id = chat_tree
+        .create_channel_logic(
+            guild_id,
+            channel_name.clone(),
+            ChannelKind::from_i32(kind).unwrap_or_default(),
+            metadata.clone(),
+            position.clone(),
+        )
+        .await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

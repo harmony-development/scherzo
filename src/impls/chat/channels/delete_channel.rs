@@ -13,17 +13,22 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
-    chat_tree.check_perms(
-        guild_id,
-        Some(channel_id),
-        user_id,
-        "channels.manage.delete",
-        false,
-    )?;
+    chat_tree
+        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .await?;
+    chat_tree
+        .check_perms(
+            guild_id,
+            Some(channel_id),
+            user_id,
+            "channels.manage.delete",
+            false,
+        )
+        .await?;
 
     let channel_data = chat_tree
         .scan_prefix(&make_chan_key(guild_id, channel_id))
+        .await
         .try_fold(Vec::new(), |mut all, res| {
             all.push(res?.0);
             ServerResult::Ok(all)
@@ -31,7 +36,7 @@ pub async fn handler(
 
     // Remove from ordering list
     let key = make_guild_chan_ordering_key(guild_id);
-    let mut ordering = chat_tree.get_list_u64_logic(&key)?;
+    let mut ordering = chat_tree.get_list_u64_logic(&key).await?;
     if let Some(index) = ordering.iter().position(|oid| channel_id.eq(oid)) {
         ordering.remove(index);
     } else {
@@ -47,6 +52,7 @@ pub async fn handler(
     chat_tree
         .chat_tree
         .apply_batch(batch)
+        .await
         .map_err(ServerError::DbError)?;
 
     svc.send_event_through_chan(

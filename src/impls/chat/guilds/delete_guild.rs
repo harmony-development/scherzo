@@ -10,18 +10,20 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "guild.manage.delete", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "guild.manage.delete", false)
+        .await?;
 
-    let guild_members = chat_tree.get_guild_members_logic(guild_id)?.members;
+    let guild_members = chat_tree.get_guild_members_logic(guild_id).await?.members;
 
-    let guild_data =
-        chat_tree
-            .scan_prefix(&guild_id.to_be_bytes())
-            .try_fold(Vec::new(), |mut all, res| {
-                all.push(res?.0);
-                ServerResult::Ok(all)
-            })?;
+    let guild_data = chat_tree
+        .scan_prefix(&guild_id.to_be_bytes())
+        .await
+        .try_fold(Vec::new(), |mut all, res| {
+            all.push(res?.0);
+            ServerResult::Ok(all)
+        })?;
 
     let mut batch = Batch::default();
     for key in guild_data {
@@ -30,6 +32,7 @@ pub async fn handler(
     chat_tree
         .chat_tree
         .apply_batch(batch)
+        .await
         .map_err(ServerError::DbError)?;
 
     svc.send_event_through_chan(
@@ -41,7 +44,7 @@ pub async fn handler(
 
     let mut local_ids = Vec::new();
     for member_id in guild_members {
-        match svc.deps.profile_tree.local_to_foreign_id(member_id)? {
+        match svc.deps.profile_tree.local_to_foreign_id(member_id).await? {
             Some((foreign_id, target)) => svc.dispatch_event(
                 target,
                 DispatchKind::UserRemovedFromGuild(SyncUserRemovedFromGuild {
@@ -50,7 +53,9 @@ pub async fn handler(
                 }),
             ),
             None => {
-                chat_tree.remove_guild_from_guild_list(user_id, guild_id, "")?;
+                chat_tree
+                    .remove_guild_from_guild_list(user_id, guild_id, "")
+                    .await?;
                 local_ids.push(member_id);
             }
         }

@@ -16,8 +16,12 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user_channel(guild_id, user_id, channel_id)?;
-    chat_tree.check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)?;
+    chat_tree
+        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .await?;
+    chat_tree
+        .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)
+        .await?;
 
     chat_tree
         .get_channel_messages_logic(
@@ -27,5 +31,6 @@ pub async fn handler(
             direction.map(|val| Direction::from_i32(val).unwrap_or_default()),
             count,
         )
+        .await
         .map(IntoResponse::into_response)
 }

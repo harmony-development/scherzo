@@ -17,16 +17,20 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.is_user_in_guild(guild_id, user_to_ban)?;
-    chat_tree.check_perms(guild_id, None, user_id, "user.manage.ban", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree.is_user_in_guild(guild_id, user_to_ban).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "user.manage.ban", false)
+        .await?;
 
-    chat_tree.kick_user_logic(guild_id, user_to_ban)?;
+    chat_tree.kick_user_logic(guild_id, user_to_ban).await?;
 
-    chat_tree.insert(
-        make_banned_member_key(guild_id, user_to_ban),
-        get_time_secs().to_be_bytes(),
-    )?;
+    chat_tree
+        .insert(
+            make_banned_member_key(guild_id, user_to_ban),
+            get_time_secs().to_be_bytes(),
+        )
+        .await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
@@ -39,7 +43,7 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    svc.dispatch_guild_leave(guild_id, user_to_ban)?;
+    svc.dispatch_guild_leave(guild_id, user_to_ban).await?;
 
     Ok((BanUserResponse {}).into_response())
 }

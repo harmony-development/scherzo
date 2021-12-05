@@ -85,15 +85,19 @@ pub struct EmoteTree {
 impl EmoteTree {
     impl_db_methods!(inner);
 
-    pub fn new(db: &Db) -> DbResult<Self> {
-        let inner = db.open_tree(b"emote")?;
+    pub async fn new(db: &Db) -> DbResult<Self> {
+        let inner = db.open_tree(b"emote").await?;
         Ok(Self { inner })
     }
 
-    pub fn check_if_emote_pack_owner(&self, pack_id: u64, user_id: u64) -> ServerResult<EmotePack> {
+    pub async fn check_if_emote_pack_owner(
+        &self,
+        pack_id: u64,
+        user_id: u64,
+    ) -> ServerResult<EmotePack> {
         let key = make_emote_pack_key(pack_id);
 
-        let pack = if let Some(data) = self.get(key)? {
+        let pack = if let Some(data) = self.get(key).await? {
             let pack = db::deser_emote_pack(data);
 
             if pack.pack_owner != user_id {
@@ -108,23 +112,24 @@ impl EmoteTree {
         Ok(pack)
     }
 
-    pub fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
+    pub async fn dequip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
-        self.remove(key)?;
+        self.remove(key).await?;
         Ok(())
     }
 
-    pub fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
+    pub async fn equip_emote_pack_logic(&self, user_id: u64, pack_id: u64) -> ServerResult<()> {
         let key = make_equipped_emote_key(user_id, pack_id);
-        self.insert(key, &[])?;
+        self.insert(key, &[]).await?;
         Ok(())
     }
 
-    pub fn calculate_users_pack_equipped(&self, pack_id: u64) -> ServerResult<Vec<u64>> {
+    pub async fn calculate_users_pack_equipped(&self, pack_id: u64) -> ServerResult<Vec<u64>> {
         let mut result = Vec::new();
         for user_id in
             self.inner
                 .scan_prefix(USER_PREFIX)
+                .await
                 .try_fold(Vec::new(), |mut all, res| {
                     let (key, _) = res.map_err(ServerError::from)?;
                     if key.len() == make_user_profile_key(0).len() {
@@ -140,7 +145,7 @@ impl EmoteTree {
         {
             let prefix = make_equipped_emote_prefix(user_id);
             let mut has = false;
-            for res in self.inner.scan_prefix(&prefix) {
+            for res in self.inner.scan_prefix(&prefix).await {
                 let (key, _) = res.map_err(ServerError::from)?;
                 if key.len() == make_equipped_emote_key(user_id, 0).len() {
                     let id = u64::from_be_bytes(unsafe {

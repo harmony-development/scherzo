@@ -25,7 +25,8 @@ pub async fn handler(
         let local_user_id = if let Some(id) = svc
             .deps
             .profile_tree
-            .foreign_to_local_id(foreign_id, &server_id)?
+            .foreign_to_local_id(foreign_id, &server_id)
+            .await?
         {
             id
         } else {
@@ -55,6 +56,7 @@ pub async fn handler(
                 .profile_tree
                 .inner
                 .apply_batch(batch)
+                .await
                 .map_err(ServerError::DbError)?;
 
             local_id

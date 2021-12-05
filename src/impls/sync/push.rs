@@ -10,15 +10,17 @@ pub async fn handler(
         .deps
         .sync_tree
         .contains_key(&key)
+        .await
         .map_err(ServerError::DbError)?
     {
         svc.deps
             .sync_tree
             .insert(&key, &[])
+            .await
             .map_err(ServerError::DbError)?;
     }
     if let Some(event) = request.into_message().await?.event {
-        svc.push_logic(&host, event)?;
+        svc.push_logic(&host, event).await?;
     }
     Ok((PushResponse {}).into_response())
 }

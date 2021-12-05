@@ -10,11 +10,12 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
 
     chat_tree
         .chat_tree
         .remove(&make_member_key(guild_id, user_id))
+        .await
         .map_err(ServerError::DbError)?;
 
     svc.send_event_through_chan(
@@ -28,7 +29,7 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    svc.dispatch_guild_leave(guild_id, user_id)?;
+    svc.dispatch_guild_leave(guild_id, user_id).await?;
 
     Ok((LeaveGuildResponse {}).into_response())
 }

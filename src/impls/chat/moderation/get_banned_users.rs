@@ -13,6 +13,7 @@ pub async fn handler(
         svc.deps
             .chat_tree
             .scan_prefix(&prefix)
+            .await
             .try_fold(Vec::new(), |mut all, res| {
                 let (key, _) = res?;
                 if key.len() == make_banned_member_key(0, 0).len() {

@@ -11,6 +11,7 @@ pub async fn handler(
     svc.deps
         .profile_tree
         .get_profile_logic(user_id)
+        .await
         .map(|p| GetProfileResponse { profile: Some(p) })
         .map(IntoResponse::into_response)
         .map_err(Into::into)

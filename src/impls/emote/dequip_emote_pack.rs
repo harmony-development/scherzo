@@ -10,7 +10,8 @@ pub async fn handler(
 
     svc.deps
         .emote_tree
-        .dequip_emote_pack_logic(user_id, pack_id)?;
+        .dequip_emote_pack_logic(user_id, pack_id)
+        .await?;
 
     svc.send_event_through_chan(
         EventSub::Homeserver,

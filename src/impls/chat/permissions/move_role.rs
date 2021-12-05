@@ -14,12 +14,16 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
-    chat_tree.does_role_exist(guild_id, role_id)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "roles.manage", false)
+        .await?;
+    chat_tree.does_role_exist(guild_id, role_id).await?;
 
     if let Some(pos) = new_position {
-        chat_tree.move_role_logic(guild_id, role_id, Some(pos.clone()))?;
+        chat_tree
+            .move_role_logic(guild_id, role_id, Some(pos.clone()))
+            .await?;
         svc.send_event_through_chan(
             EventSub::Guild(guild_id),
             stream_event::Event::RoleMoved(stream_event::RoleMoved {

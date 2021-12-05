@@ -17,11 +17,13 @@ pub async fn handler(
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id)?;
-    chat_tree.check_perms(guild_id, None, user_id, "roles.manage", false)?;
+    chat_tree.check_guild_user(guild_id, user_id).await?;
+    chat_tree
+        .check_perms(guild_id, None, user_id, "roles.manage", false)
+        .await?;
 
     let key = make_guild_role_key(guild_id, role_id);
-    let mut role = if let Some(raw) = chat_tree.get(key)? {
+    let mut role = if let Some(raw) = chat_tree.get(key).await? {
         db::deser_role(raw)
     } else {
         return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
@@ -41,7 +43,7 @@ pub async fn handler(
     }
 
     let ser_role = rkyv_ser(&role);
-    chat_tree.insert(key, ser_role)?;
+    chat_tree.insert(key, ser_role).await?;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),

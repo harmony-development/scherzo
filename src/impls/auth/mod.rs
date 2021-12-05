@@ -7,9 +7,10 @@ use harmony_rust_sdk::api::{
     profile::{Profile, UserStatus},
 };
 use hyper::{http, HeaderMap};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
+use tracing::Instrument;
 
 use crate::key::{self as keys, Manager as KeyManager};
 
@@ -83,80 +84,93 @@ impl AuthServer {
         let ptt = deps.profile_tree.clone();
         let vs = deps.valid_sessions.clone();
 
-        std::thread::spawn(move || {
-            let _guard = tracing::info_span!("auth_session_check").entered();
-            tracing::info!("starting auth session expiration check thread");
+        tokio::spawn(
+            (async move {
+                tracing::info!("starting auth session expiration check thread");
 
-            // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-            unsafe fn scan_tree_for(att: &Tree, prefix: &[u8]) -> ServerResult<Vec<(u64, EVec)>> {
-                let len = prefix.len();
-                att.scan_prefix(prefix)
-                    .try_fold(Vec::new(), move |mut all, res| {
-                        let (key, val) = res.map_err(ServerError::from)?;
-                        all.push((
-                            u64::from_be_bytes(key.split_at(len).1.try_into().unwrap_unchecked()),
-                            val,
-                        ));
-                        ServerResult::Ok(all)
-                    })
-            }
+                // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
+                async unsafe fn scan_tree_for(
+                    att: &Tree,
+                    prefix: &[u8],
+                ) -> ServerResult<Vec<(u64, EVec)>> {
+                    let len = prefix.len();
+                    att.scan_prefix(prefix)
+                        .await
+                        .try_fold(Vec::new(), move |mut all, res| {
+                            let (key, val) = res.map_err(ServerError::from)?;
+                            all.push((
+                                u64::from_be_bytes(
+                                    key.split_at(len).1.try_into().unwrap_unchecked(),
+                                ),
+                                val,
+                            ));
+                            ServerResult::Ok(all)
+                        })
+                }
 
-            loop {
-                // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                let tokens = unsafe { scan_tree_for(&att.inner, TOKEN_PREFIX) };
-                // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                let atimes = unsafe { scan_tree_for(&att.inner, ATIME_PREFIX) };
+                loop {
+                    // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
+                    let tokens = unsafe { scan_tree_for(&att.inner, TOKEN_PREFIX).await };
+                    // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
+                    let atimes = unsafe { scan_tree_for(&att.inner, ATIME_PREFIX).await };
 
-                match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
-                    Ok((tokens, atimes)) => {
-                        let mut batch = Batch::default();
-                        for (id, raw_token) in tokens {
-                            if let Ok(profile) = ptt.get_profile_logic(id) {
-                                for (oid, raw_atime) in &atimes {
-                                    if id.eq(oid) {
-                                        // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
-                                        let secs = u64::from_be_bytes(unsafe {
-                                            raw_atime.as_ref().try_into().unwrap_unchecked()
-                                        });
-                                        let auth_how_old = get_time_secs() - secs;
-                                        // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
-                                        let token = unsafe {
-                                            std::str::from_utf8_unchecked(raw_token.as_ref())
-                                        };
+                    match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
+                        Ok((tokens, atimes)) => {
+                            let mut batch = Batch::default();
+                            for (id, raw_token) in tokens {
+                                if let Ok(profile) = ptt.get_profile_logic(id).await {
+                                    for (oid, raw_atime) in &atimes {
+                                        if id.eq(oid) {
+                                            // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
+                                            let secs = u64::from_be_bytes(unsafe {
+                                                raw_atime.as_ref().try_into().unwrap_unchecked()
+                                            });
+                                            let auth_how_old = get_time_secs() - secs;
+                                            // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
+                                            let token = unsafe {
+                                                std::str::from_utf8_unchecked(raw_token.as_ref())
+                                            };
 
-                                        if vs.contains_key(token) {
-                                            // [ref:atime_u64_key] [ref:atime_u64_value]
-                                            batch.insert(
-                                                atime_key(id).to_vec(),
-                                                get_time_secs().to_be_bytes().to_vec(),
-                                            );
-                                        } else if !profile.is_bot && auth_how_old >= SESSION_EXPIRE
-                                        {
-                                            tracing::debug!("user {} session has expired", id);
-                                            batch.remove(token_key(id).to_vec());
-                                            batch.remove(atime_key(id).to_vec());
-                                            vs.remove(token);
-                                        } else {
-                                            // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
-                                            vs.insert(SmolStr::new_inline(token), id);
+                                            if vs.contains_key(token) {
+                                                // [ref:atime_u64_key] [ref:atime_u64_value]
+                                                batch.insert(
+                                                    atime_key(id).to_vec(),
+                                                    get_time_secs().to_be_bytes().to_vec(),
+                                                );
+                                            } else if !profile.is_bot
+                                                && auth_how_old >= SESSION_EXPIRE
+                                            {
+                                                tracing::debug!("user {} session has expired", id);
+                                                batch.remove(token_key(id).to_vec());
+                                                batch.remove(atime_key(id).to_vec());
+                                                vs.remove(token);
+                                            } else {
+                                                // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
+                                                vs.insert(SmolStr::new_inline(token), id);
+                                            }
                                         }
                                     }
                                 }
                             }
+                            if let Err(err) = att
+                                .inner
+                                .apply_batch(batch)
+                                .await
+                                .map_err(ServerError::DbError)
+                            {
+                                tracing::error!("error applying auth token batch: {}", err);
+                            }
                         }
-                        if let Err(err) = att.inner.apply_batch(batch).map_err(ServerError::DbError)
-                        {
-                            tracing::error!("error applying auth token batch: {}", err);
+                        Err(err) => {
+                            tracing::error!("error scanning tree for tokens: {}", err);
                         }
                     }
-                    Err(err) => {
-                        tracing::error!("error scanning tree for tokens: {}", err);
-                    }
-                }
 
-                std::thread::sleep(Duration::from_secs(60 * 5));
-            }
-        });
+                    std::thread::sleep(Duration::from_secs(60 * 5));
+                }
+            })
+            .instrument(tracing::info_span!("auth_session_check")),
+        );
 
         Self {
             step_map: DashMap::default().into(),
@@ -184,10 +198,10 @@ impl AuthServer {
         SmolStr::new_inline(token)
     }
 
-    fn gen_user_id(&self) -> Result<u64, ServerError> {
-        let mut rng = rand::thread_rng();
+    async fn gen_user_id(&self) -> Result<u64, ServerError> {
+        let mut rng = rand::rngs::SmallRng::from_entropy();
         let mut id: u64 = rng.gen_range(1..=std::u64::MAX);
-        while self.deps.auth_tree.contains_key(&id.to_be_bytes())? {
+        while self.deps.auth_tree.contains_key(&id.to_be_bytes()).await? {
             id = rng.gen_range(1..=std::u64::MAX);
         }
         Ok(id)
@@ -243,18 +257,22 @@ pub struct AuthTree {
 impl AuthTree {
     impl_db_methods!(inner);
 
-    pub fn new(db: &Db) -> DbResult<Self> {
+    pub async fn new(db: &Db) -> DbResult<Self> {
         Ok(Self {
-            inner: db.open_tree(b"auth")?,
+            inner: db.open_tree(b"auth").await?,
         })
     }
-    pub fn put_rand_reg_token(&self) -> ServerResult<SmolStr> {
+
+    pub async fn put_rand_reg_token(&self) -> ServerResult<SmolStr> {
         // TODO: check if the token is already in tree
         let token = gen_rand_inline_str();
         {
             let hashed = hash_password(token.as_bytes());
             let key = reg_token_key(hashed.as_ref());
-            self.inner.insert(&key, &[]).map_err(ServerError::from)?;
+            self.inner
+                .insert(&key, &[])
+                .await
+                .map_err(ServerError::from)?;
         }
         Ok(token)
     }

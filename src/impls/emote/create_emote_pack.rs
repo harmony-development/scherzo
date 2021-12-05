@@ -18,11 +18,12 @@ pub async fn handler(
     };
     let data = rkyv_ser(&emote_pack);
 
-    svc.deps.emote_tree.insert(key, data)?;
+    svc.deps.emote_tree.insert(key, data).await?;
 
     svc.deps
         .emote_tree
-        .equip_emote_pack_logic(user_id, pack_id)?;
+        .equip_emote_pack_logic(user_id, pack_id)
+        .await?;
     svc.send_event_through_chan(
         EventSub::Homeserver,
         stream_event::Event::EmotePackAdded(EmotePackAdded {

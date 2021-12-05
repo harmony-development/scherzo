@@ -6,20 +6,21 @@ use scherzo::{
     impls::{auth::AuthTree, chat::ChatTree},
 };
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = std::env::args().skip(1).collect::<Vec<String>>();
     let db_path = std::env::var("SCHERZO_DB").unwrap_or_else(|_| "./db".to_string());
 
-    let db = scherzo::db::open_db(db_path, DbConfig::default());
+    let db = scherzo::db::open_db(db_path, DbConfig::default()).await;
 
-    let auth_tree = AuthTree::new(&db)?;
-    let chat_tree = ChatTree::new(&db)?;
+    let auth_tree = AuthTree::new(&db).await?;
+    let chat_tree = ChatTree::new(&db).await?;
 
     match args.first().map(String::as_str).ok_or("no command")? {
         "list" => match args.get(1).map(String::as_str).ok_or("need list name")? {
             "accounts" => {
                 let mut stdout = std::io::stdout();
-                for res in auth_tree.inner.iter() {
+                for res in auth_tree.inner.iter().await {
                     let (key, _) = res?;
 
                     if let Ok(parsed) = std::str::from_utf8(key.as_ref()) {
@@ -31,7 +32,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             "guilds" => {
                 let mut stdout = std::io::stdout();
-                for res in chat_tree.chat_tree.iter() {
+                for res in chat_tree.chat_tree.iter().await {
                     let (key, val) = res?;
 
                     if key.len() == size_of::<u64>() {
@@ -48,7 +49,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .map(String::as_str)
                     .ok_or("need guild id")?
                     .parse::<u64>()?;
-                let channels = chat_tree.get_guild_channels_logic(guild_id, 0)?;
+                let channels = chat_tree.get_guild_channels_logic(guild_id, 0).await?;
 
                 let mut stdout = std::io::stdout();
                 for channel in channels.channels {
