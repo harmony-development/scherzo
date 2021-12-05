@@ -62,13 +62,13 @@ impl ProfileService for ProfileServer {
 
 #[derive(Clone)]
 pub struct ProfileTree {
-    pub inner: ArcTree,
+    pub inner: Tree,
 }
 
 impl ProfileTree {
     impl_db_methods!(inner);
 
-    pub fn new(db: &dyn Db) -> DbResult<Self> {
+    pub fn new(db: &Db) -> DbResult<Self> {
         let inner = db.open_tree(b"profile")?;
         Ok(Self { inner })
     }

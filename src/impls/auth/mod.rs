@@ -88,10 +88,7 @@ impl AuthServer {
             tracing::info!("starting auth session expiration check thread");
 
             // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-            unsafe fn scan_tree_for(
-                att: &dyn Tree,
-                prefix: &[u8],
-            ) -> ServerResult<Vec<(u64, EVec)>> {
+            unsafe fn scan_tree_for(att: &Tree, prefix: &[u8]) -> ServerResult<Vec<(u64, EVec)>> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .try_fold(Vec::new(), move |mut all, res| {
@@ -106,9 +103,9 @@ impl AuthServer {
 
             loop {
                 // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                let tokens = unsafe { scan_tree_for(att.inner.as_ref(), TOKEN_PREFIX) };
+                let tokens = unsafe { scan_tree_for(&att.inner, TOKEN_PREFIX) };
                 // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                let atimes = unsafe { scan_tree_for(att.inner.as_ref(), ATIME_PREFIX) };
+                let atimes = unsafe { scan_tree_for(&att.inner, ATIME_PREFIX) };
 
                 match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
                     Ok((tokens, atimes)) => {
@@ -240,13 +237,13 @@ impl auth_service_server::AuthService for AuthServer {
 
 #[derive(Clone)]
 pub struct AuthTree {
-    pub inner: ArcTree,
+    pub inner: Tree,
 }
 
 impl AuthTree {
     impl_db_methods!(inner);
 
-    pub fn new(db: &dyn Db) -> DbResult<Self> {
+    pub fn new(db: &Db) -> DbResult<Self> {
         Ok(Self {
             inner: db.open_tree(b"auth")?,
         })

@@ -12,8 +12,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let db = scherzo::db::open_db(db_path, DbConfig::default());
 
-    let auth_tree = AuthTree::new(db.as_ref())?;
-    let chat_tree = ChatTree::new(db.as_ref())?;
+    let auth_tree = AuthTree::new(&db)?;
+    let chat_tree = ChatTree::new(&db)?;
 
     match args.first().map(String::as_str).ok_or("no command")? {
         "list" => match args.get(1).map(String::as_str).ok_or("need list name")? {

@@ -32,7 +32,7 @@ pub mod prelude {
     pub use std::{convert::TryInto, mem::size_of};
 
     pub use crate::{
-        db::{self, rkyv_arch, rkyv_ser, ArcTree, Batch, Db, DbResult, Tree},
+        db::{self, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
         utils::evec::EVec,
         ServerError,
     };
@@ -69,7 +69,7 @@ pub struct Dependencies {
     pub chat_tree: ChatTree,
     pub profile_tree: ProfileTree,
     pub emote_tree: EmoteTree,
-    pub sync_tree: ArcTree,
+    pub sync_tree: Tree,
 
     pub valid_sessions: SessionMap,
     pub chat_event_sender: chat::EventSender,
@@ -83,7 +83,7 @@ pub struct Dependencies {
 }
 
 impl Dependencies {
-    pub fn new(db: &dyn Db, config: Config) -> DbResult<(Arc<Self>, FedEventReceiver)> {
+    pub fn new(db: &Db, config: Config) -> DbResult<(Arc<Self>, FedEventReceiver)> {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
         let auth_tree = AuthTree::new(db)?;

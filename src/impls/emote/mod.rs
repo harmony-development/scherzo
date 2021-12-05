@@ -79,13 +79,13 @@ impl EmoteService for EmoteServer {
 
 #[derive(Clone)]
 pub struct EmoteTree {
-    pub inner: ArcTree,
+    pub inner: Tree,
 }
 
 impl EmoteTree {
     impl_db_methods!(inner);
 
-    pub fn new(db: &dyn Db) -> DbResult<Self> {
+    pub fn new(db: &Db) -> DbResult<Self> {
         let inner = db.open_tree(b"emote")?;
         Ok(Self { inner })
     }

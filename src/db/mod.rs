@@ -3,34 +3,37 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display, Formatter},
     mem::size_of,
-    ops::RangeInclusive,
-    sync::Arc,
 };
 
 use crate::{config::DbConfig, travel_error, utils::evec::EVec};
+
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
     emote::{Emote, EmotePack},
     profile::Profile,
 };
+use rkyv::{
+    archived_root,
+    ser::{serializers::AllocSerializer, Serializer},
+    AlignedVec, Archive, Deserialize, Serialize,
+};
 
 pub mod migration;
-pub mod noop;
 #[cfg(feature = "sled")]
 pub mod sled;
 
+#[cfg(feature = "sled")]
+pub use self::sled::shared::*;
+
 pub fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
-    _db_path: P,
-    _db_config: DbConfig,
-) -> Box<dyn Db> {
-    let span = tracing::info_span!("scherzo::db", path = %_db_path);
+    db_path: P,
+    db_config: DbConfig,
+) -> Db {
+    let span = tracing::info_span!("scherzo::db", path = %db_path);
     span.in_scope(|| {
         tracing::info!("initializing database");
 
-        #[cfg(feature = "sled")]
-        let db_result = sled::open_sled(_db_path, _db_config);
-        #[cfg(not(any(feature = "sled")))]
-        let db_result = Ok(Box::new(noop::NoopDb));
+        let db_result = open_database(db_path, db_config);
 
         match db_result {
             Ok(db) => db,
@@ -78,28 +81,6 @@ impl StdError for DbError {
 }
 
 pub type DbResult<T> = Result<T, DbError>;
-pub type ArcTree = Arc<dyn Tree>;
-
-pub trait Db {
-    fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree>;
-}
-
-pub type Iter<'a> = Box<dyn Iterator<Item = DbResult<(EVec, EVec)>> + Send + Sync + 'a>;
-pub type RangeIter<'a> =
-    Box<dyn DoubleEndedIterator<Item = DbResult<(EVec, EVec)>> + Send + Sync + 'a>;
-
-// TODO: Tree methods should use async
-pub trait Tree: Send + Sync {
-    fn get(&self, key: &[u8]) -> DbResult<Option<EVec>>;
-    fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<EVec>>;
-    fn remove(&self, key: &[u8]) -> DbResult<Option<EVec>>;
-    fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a>;
-    fn iter(&self) -> Iter<'_>;
-    fn apply_batch(&self, batch: Batch) -> DbResult<()>;
-    fn contains_key(&self, key: &[u8]) -> DbResult<bool>;
-    fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a>;
-    fn verify_integrity(&self) -> DbResult<()>;
-}
 
 pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
     raw.chunks_exact(size_of::<u64>())
@@ -416,12 +397,6 @@ const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
     }
     new
 }
-
-use rkyv::{
-    archived_root,
-    ser::{serializers::AllocSerializer, Serializer},
-    AlignedVec, Archive, Deserialize, Serialize,
-};
 
 pub fn rkyv_ser<Value: Serialize<AllocSerializer<256>>>(value: &Value) -> AlignedVec {
     let mut ser = AllocSerializer::<256>::default();

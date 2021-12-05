@@ -2,90 +2,110 @@ use std::ops::RangeInclusive;
 
 use crate::{config::DbConfig, utils::evec::EVec};
 
-use super::{ArcTree, Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
+use super::{Batch, DbError, DbResult};
 
-pub fn open_sled<P: AsRef<std::path::Path> + std::fmt::Display>(
-    db_path: P,
-    db_config: DbConfig,
-) -> Result<Box<dyn Db>, String> {
-    let result = sled::Config::new()
-        .use_compression(true)
-        .path(db_path)
-        .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
-        .mode(
-            db_config
-                .sled_throughput_at_storage_cost
-                .then(|| sled::Mode::HighThroughput)
-                .unwrap_or(sled::Mode::LowSpace),
-        )
-        .open()
-        .and_then(|db| db.verify_integrity().map(|_| db));
+pub mod shared {
+    use super::*;
 
-    match result {
-        Ok(db) => Ok(Box::new(db)),
-        Err(err) => Err(err.to_string()),
-    }
-}
+    pub fn open_database<P: AsRef<std::path::Path> + std::fmt::Display>(
+        db_path: P,
+        db_config: DbConfig,
+    ) -> Result<Db, String> {
+        let result = sled::Config::new()
+            .use_compression(true)
+            .path(db_path)
+            .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
+            .mode(
+                db_config
+                    .sled_throughput_at_storage_cost
+                    .then(|| sled::Mode::HighThroughput)
+                    .unwrap_or(sled::Mode::LowSpace),
+            )
+            .open()
+            .and_then(|db| db.verify_integrity().map(|_| db));
 
-impl Db for sled::Db {
-    fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree> {
-        self.open_tree(name).map_err(Into::into).map(|tree| {
-            let box_tree: Box<dyn Tree> = Box::new(tree);
-            box_tree.into()
-        })
-    }
-}
-
-impl Tree for sled::Tree {
-    fn get(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
-        self.get(key)
-            .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.into()))
+        match result {
+            Ok(db) => Ok(Db { inner: db }),
+            Err(err) => Err(err.to_string()),
+        }
     }
 
-    fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<EVec>, DbError> {
-        self.insert(key, value)
-            .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.into()))
+    #[derive(Debug, Clone)]
+    pub struct Db {
+        inner: sled::Db,
     }
 
-    fn remove(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
-        self.remove(key)
-            .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.into()))
+    impl Db {
+        pub fn open_tree(&self, name: &[u8]) -> DbResult<Tree> {
+            self.inner
+                .open_tree(name)
+                .map_err(Into::into)
+                .map(|tree| Tree { inner: tree })
+        }
     }
 
-    fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a> {
-        Box::new(
-            self.scan_prefix(prefix)
-                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
-        )
+    #[derive(Debug, Clone)]
+    pub struct Tree {
+        inner: sled::Tree,
     }
 
-    fn iter(&self) -> Iter<'_> {
-        Box::new(
-            self.iter()
-                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
-        )
-    }
+    impl Tree {
+        pub fn get(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
+            self.inner
+                .get(key)
+                .map_err(Into::into)
+                .map(|opt| opt.map(|i| i.into()))
+        }
 
-    fn apply_batch(&self, batch: Batch) -> Result<(), DbError> {
-        self.apply_batch(batch.into()).map_err(Into::into)
-    }
+        pub fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<EVec>, DbError> {
+            self.inner
+                .insert(key, value)
+                .map_err(Into::into)
+                .map(|opt| opt.map(|i| i.into()))
+        }
 
-    fn contains_key(&self, key: &[u8]) -> Result<bool, DbError> {
-        self.contains_key(key).map_err(Into::into)
-    }
+        pub fn remove(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
+            self.inner
+                .remove(key)
+                .map_err(Into::into)
+                .map(|opt| opt.map(|i| i.into()))
+        }
 
-    fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a> {
-        Box::new(
-            self.range(range)
-                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
-        )
-    }
+        pub fn scan_prefix<'a>(
+            &'a self,
+            prefix: &[u8],
+        ) -> impl Iterator<Item = DbResult<(EVec, EVec)>> + 'a {
+            self.inner
+                .scan_prefix(prefix)
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into))
+        }
 
-    fn verify_integrity(&self) -> DbResult<()> {
-        self.verify_integrity().map_err(Into::into)
+        pub fn iter(&self) -> impl Iterator<Item = DbResult<(EVec, EVec)>> + '_ {
+            self.inner
+                .iter()
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into))
+        }
+
+        pub fn apply_batch(&self, batch: Batch) -> Result<(), DbError> {
+            self.inner.apply_batch(batch.into()).map_err(Into::into)
+        }
+
+        pub fn contains_key(&self, key: &[u8]) -> Result<bool, DbError> {
+            self.inner.contains_key(key).map_err(Into::into)
+        }
+
+        pub fn range<'a>(
+            &'a self,
+            range: RangeInclusive<&[u8]>,
+        ) -> impl Iterator<Item = DbResult<(EVec, EVec)>> + DoubleEndedIterator + 'a {
+            self.inner
+                .range(range)
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into))
+        }
+
+        pub fn verify_integrity(&self) -> DbResult<()> {
+            self.inner.verify_integrity().map_err(Into::into)
+        }
     }
 }
 

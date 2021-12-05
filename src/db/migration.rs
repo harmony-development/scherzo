@@ -4,11 +4,11 @@ use crate::db::{deser_chan, Batch};
 
 use super::{Db, DbResult};
 
-type Migration = fn(&dyn Db) -> DbResult<()>;
+type Migration = fn(&Db) -> DbResult<()>;
 
 pub const MIGRATIONS: [Migration; 2] = [initial_db_version, add_next_msg_ids];
 
-pub fn get_db_version(db: &dyn Db) -> DbResult<(usize, bool)> {
+pub fn get_db_version(db: &Db) -> DbResult<(usize, bool)> {
     let version_tree = db.open_tree(b"version")?;
     let version = version_tree
         .get(b"version")?
@@ -17,7 +17,7 @@ pub fn get_db_version(db: &dyn Db) -> DbResult<(usize, bool)> {
     Ok((version, version < MIGRATIONS.len()))
 }
 
-pub fn apply_migrations(db: &dyn Db, current_version: usize) -> DbResult<()> {
+pub fn apply_migrations(db: &Db, current_version: usize) -> DbResult<()> {
     let _guard =
         tracing::info_span!("apply_migrations", before_migration_version = %current_version)
             .entered();
@@ -41,7 +41,7 @@ pub fn apply_migrations(db: &dyn Db, current_version: usize) -> DbResult<()> {
     }
 }
 
-fn increment_db_version(db: &dyn Db) -> DbResult<()> {
+fn increment_db_version(db: &Db) -> DbResult<()> {
     let version_tree = db.open_tree(b"version")?;
     if let Some(version) = version_tree
         .get(b"version")?
@@ -58,7 +58,7 @@ fn increment_db_version(db: &dyn Db) -> DbResult<()> {
     Ok(())
 }
 
-fn initial_db_version(db: &dyn Db) -> DbResult<()> {
+fn initial_db_version(db: &Db) -> DbResult<()> {
     let version_tree = db.open_tree(b"version")?;
     if !version_tree.contains_key(b"version")? {
         version_tree.insert(b"version", &MIGRATIONS.len().to_be_bytes())?;
@@ -66,7 +66,7 @@ fn initial_db_version(db: &dyn Db) -> DbResult<()> {
     Ok(())
 }
 
-fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
+fn add_next_msg_ids(db: &Db) -> DbResult<()> {
     const CHAN_KEY_LEN: usize = super::chat::make_chan_key(0, 0).len();
 
     let chat_tree = db.open_tree(b"chat")?;

@@ -456,13 +456,13 @@ impl chat_service_server::ChatService for ChatServer {
 
 #[derive(Clone)]
 pub struct ChatTree {
-    pub chat_tree: db::ArcTree,
+    pub chat_tree: Tree,
 }
 
 impl ChatTree {
     impl_db_methods!(chat_tree);
 
-    pub fn new(db: &dyn Db) -> DbResult<Self> {
+    pub fn new(db: &Db) -> DbResult<Self> {
         let chat_tree = db.open_tree(b"chat")?;
         Ok(Self { chat_tree })
     }
