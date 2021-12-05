@@ -26,7 +26,7 @@ pub mod sled;
 #[cfg(feature = "sled")]
 pub use self::sled::shared::*;
 
-pub async fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
+pub async fn open_db<P: AsRef<std::path::Path> + std::fmt::Display + Send + 'static>(
     db_path: P,
     db_config: DbConfig,
 ) -> Db {

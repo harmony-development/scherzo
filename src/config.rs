@@ -88,6 +88,10 @@ impl Default for PolicyConfig {
     }
 }
 
+const fn sled_load_to_cache_on_startup_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DbConfig {
     /// This is in MiB
@@ -97,6 +101,8 @@ pub struct DbConfig {
     pub db_backup_path: Option<PathBuf>,
     #[serde(default)]
     pub sled_throughput_at_storage_cost: bool,
+    #[serde(default = "sled_load_to_cache_on_startup_default")]
+    pub sled_load_to_cache_on_startup: bool,
 }
 
 impl Default for DbConfig {
@@ -105,6 +111,7 @@ impl Default for DbConfig {
             db_cache_limit: db_cache_limit_default(),
             db_backup_path: None,
             sled_throughput_at_storage_cost: false,
+            sled_load_to_cache_on_startup: sled_load_to_cache_on_startup_default(),
         }
     }
 }

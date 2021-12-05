@@ -13,24 +13,37 @@ pub mod shared {
 
     use super::*;
 
-    pub fn open_database<P: AsRef<std::path::Path> + std::fmt::Display>(
+    pub async fn open_database<P: AsRef<std::path::Path> + std::fmt::Display + Send + 'static>(
         db_path: P,
         db_config: DbConfig,
-    ) -> SledFut<Db> {
-        let result = sled::Config::new()
-            .use_compression(true)
-            .path(db_path)
-            .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
-            .mode(
-                db_config
-                    .sled_throughput_at_storage_cost
-                    .then(|| sled::Mode::HighThroughput)
-                    .unwrap_or(sled::Mode::LowSpace),
-            )
-            .open()
-            .and_then(|db| db.verify_integrity().map(|_| db));
+    ) -> DbResult<Db> {
+        tokio::task::spawn_blocking(move || -> DbResult<Db> {
+            let db = sled::Config::new()
+                .use_compression(true)
+                .path(db_path)
+                .cache_capacity(db_config.db_cache_limit * 1024 * 1024)
+                .mode(
+                    db_config
+                        .sled_throughput_at_storage_cost
+                        .then(|| sled::Mode::HighThroughput)
+                        .unwrap_or(sled::Mode::LowSpace),
+                )
+                .open()
+                .and_then(|db| db.verify_integrity().map(|_| db))?;
 
-        ready(result.map(|inner| Db { inner }).map_err(Into::into))
+            if db_config.sled_load_to_cache_on_startup {
+                for tree_name in db.tree_names() {
+                    let tree = db.open_tree(tree_name)?;
+                    for res in tree.iter() {
+                        res?;
+                    }
+                }
+            }
+
+            Ok(Db { inner: db })
+        })
+        .await
+        .unwrap()
     }
 
     #[derive(Debug, Clone)]
