@@ -6,15 +6,15 @@ use syn::{parse_macro_input, AttributeArgs, ItemFn};
 pub fn impl_db_methods(input: TokenStream) -> TokenStream {
     let input = proc_macro2::TokenStream::from(input);
     (quote! {
-        pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, ServerError> {
+        pub fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<Option<EVec>, ServerError> {
             self. #input .insert(key.as_ref(), value.as_ref()).map_err(ServerError::DbError)
         }
 
-        pub fn remove(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, ServerError> {
+        pub fn remove(&self, key: impl AsRef<[u8]>) -> Result<Option<EVec>, ServerError> {
             self. #input .remove(key.as_ref()).map_err(ServerError::DbError)
         }
 
-        pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Vec<u8>>, ServerError> {
+        pub fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<EVec>, ServerError> {
             self. #input .get(key.as_ref()).map_err(ServerError::DbError)
         }
 
@@ -22,7 +22,7 @@ pub fn impl_db_methods(input: TokenStream) -> TokenStream {
             self. #input .contains_key(key.as_ref()).map_err(ServerError::DbError)
         }
 
-        pub fn scan_prefix<'a>(&'a self, prefix: impl AsRef<[u8]>) -> Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>), ServerError>> + Send + 'a> {
+        pub fn scan_prefix<'a>(&'a self, prefix: impl AsRef<[u8]>) -> Box<dyn Iterator<Item = Result<(EVec, EVec), ServerError>> + Send + 'a> {
             Box::new(self. #input .scan_prefix(prefix.as_ref()).map(|res| res.map_err(ServerError::DbError)))
         }
     }).into()

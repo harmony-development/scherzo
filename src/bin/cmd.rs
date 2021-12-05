@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 for res in auth_tree.inner.iter() {
                     let (key, _) = res?;
 
-                    if let Ok(parsed) = std::str::from_utf8(key.as_slice()) {
+                    if let Ok(parsed) = std::str::from_utf8(key.as_ref()) {
                         if parsed.contains('@') {
                             writeln!(stdout, "email: {}", parsed)?;
                         }

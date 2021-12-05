@@ -191,7 +191,7 @@ pub async fn handler(
                                     .deps
                                     .auth_tree
                                     .get(user_id.to_be_bytes().as_ref())?
-                                    .map_or(true, |pass| pass != password_hashed.as_ref())
+                                    .map_or(true, |pass| pass.as_ref() != password_hashed.as_ref())
                                 {
                                     return Err(ServerError::WrongUserOrPassword {
                                         email: email.into(),

@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use crate::config::DbConfig;
+use crate::{config::DbConfig, utils::evec::EVec};
 
 use super::{ArcTree, Batch, Db, DbError, DbResult, Iter, RangeIter, Tree};
 
@@ -37,36 +37,36 @@ impl Db for sled::Db {
 }
 
 impl Tree for sled::Tree {
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
+    fn get(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
         self.get(key)
             .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.to_vec()))
+            .map(|opt| opt.map(|i| i.into()))
     }
 
-    fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
+    fn insert(&self, key: &[u8], value: &[u8]) -> Result<Option<EVec>, DbError> {
         self.insert(key, value)
             .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.to_vec()))
+            .map(|opt| opt.map(|i| i.into()))
     }
 
-    fn remove(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DbError> {
+    fn remove(&self, key: &[u8]) -> Result<Option<EVec>, DbError> {
         self.remove(key)
             .map_err(Into::into)
-            .map(|opt| opt.map(|i| i.to_vec()))
+            .map(|opt| opt.map(|i| i.into()))
     }
 
     fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a> {
-        Box::new(self.scan_prefix(prefix).map(|res| {
-            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
-                .map_err(Into::into)
-        }))
+        Box::new(
+            self.scan_prefix(prefix)
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
+        )
     }
 
     fn iter(&self) -> Iter<'_> {
-        Box::new(self.iter().map(|res| {
-            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
-                .map_err(Into::into)
-        }))
+        Box::new(
+            self.iter()
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
+        )
     }
 
     fn apply_batch(&self, batch: Batch) -> Result<(), DbError> {
@@ -78,10 +78,10 @@ impl Tree for sled::Tree {
     }
 
     fn range<'a>(&'a self, range: RangeInclusive<&[u8]>) -> RangeIter<'a> {
-        Box::new(self.range(range).map(|res| {
-            res.map(|(a, b)| (a.to_vec(), b.to_vec()))
-                .map_err(Into::into)
-        }))
+        Box::new(
+            self.range(range)
+                .map(|res| res.map(|(a, b)| (a.into(), b.into())).map_err(Into::into)),
+        )
     }
 
     fn verify_integrity(&self) -> DbResult<()> {

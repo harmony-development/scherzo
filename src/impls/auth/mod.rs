@@ -91,7 +91,7 @@ impl AuthServer {
             unsafe fn scan_tree_for(
                 att: &dyn Tree,
                 prefix: &[u8],
-            ) -> ServerResult<Vec<(u64, Vec<u8>)>> {
+            ) -> ServerResult<Vec<(u64, EVec)>> {
                 let len = prefix.len();
                 att.scan_prefix(prefix)
                     .try_fold(Vec::new(), move |mut all, res| {
@@ -119,7 +119,7 @@ impl AuthServer {
                                     if id.eq(oid) {
                                         // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
                                         let secs = u64::from_be_bytes(unsafe {
-                                            raw_atime.as_slice().try_into().unwrap_unchecked()
+                                            raw_atime.as_ref().try_into().unwrap_unchecked()
                                         });
                                         let auth_how_old = get_time_secs() - secs;
                                         // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]

@@ -33,6 +33,7 @@ pub mod prelude {
 
     pub use crate::{
         db::{self, rkyv_arch, rkyv_ser, ArcTree, Batch, Db, DbResult, Tree},
+        utils::evec::EVec,
         ServerError,
     };
 

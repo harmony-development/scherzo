@@ -11,7 +11,8 @@ pub async fn handler(
         .deps
         .profile_tree
         .get(make_user_metadata_key(user_id, &app_id))?
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into();
 
     Ok((GetAppDataResponse { app_data }).into_response())
 }

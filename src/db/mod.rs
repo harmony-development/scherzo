@@ -7,8 +7,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{config::DbConfig, travel_error};
-use cached::proc_macro::cached;
+use crate::{config::DbConfig, travel_error, utils::evec::EVec};
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
     emote::{Emote, EmotePack},
@@ -47,15 +46,15 @@ pub fn open_db<P: AsRef<std::path::Path> + std::fmt::Display>(
 #[must_use]
 #[derive(Default)]
 pub struct Batch {
-    inserts: Vec<(Vec<u8>, Option<Vec<u8>>)>,
+    inserts: Vec<(EVec, Option<EVec>)>,
 }
 
 impl Batch {
-    pub fn insert(&mut self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
+    pub fn insert(&mut self, key: impl Into<EVec>, value: impl Into<EVec>) {
         self.inserts.push((key.into(), Some(value.into())));
     }
 
-    pub fn remove(&mut self, key: impl Into<Vec<u8>>) {
+    pub fn remove(&mut self, key: impl Into<EVec>) {
         self.inserts.push((key.into(), None));
     }
 }
@@ -85,16 +84,15 @@ pub trait Db {
     fn open_tree(&self, name: &[u8]) -> DbResult<ArcTree>;
 }
 
-pub type Iter<'a> = Box<dyn Iterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + Sync + 'a>;
+pub type Iter<'a> = Box<dyn Iterator<Item = DbResult<(EVec, EVec)>> + Send + Sync + 'a>;
 pub type RangeIter<'a> =
-    Box<dyn DoubleEndedIterator<Item = DbResult<(Vec<u8>, Vec<u8>)>> + Send + Sync + 'a>;
+    Box<dyn DoubleEndedIterator<Item = DbResult<(EVec, EVec)>> + Send + Sync + 'a>;
 
 // TODO: Tree methods should use async
-// TODO: make a wrapper return type over DB return types (like `IVec`) to not allocate a `Vec`
 pub trait Tree: Send + Sync {
-    fn get(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
-    fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<Vec<u8>>>;
-    fn remove(&self, key: &[u8]) -> DbResult<Option<Vec<u8>>>;
+    fn get(&self, key: &[u8]) -> DbResult<Option<EVec>>;
+    fn insert(&self, key: &[u8], value: &[u8]) -> DbResult<Option<EVec>>;
+    fn remove(&self, key: &[u8]) -> DbResult<Option<EVec>>;
     fn scan_prefix<'a>(&'a self, prefix: &[u8]) -> Iter<'a>;
     fn iter(&self) -> Iter<'_>;
     fn apply_batch(&self, batch: Batch) -> DbResult<()>;
@@ -364,14 +362,14 @@ pub mod sync {
 }
 
 crate::impl_deser! {
-    profile, Profile, 5096;
-    invite, Invite, 1024;
-    message, HarmonyMessage, 10192;
-    guild, Guild, 1024;
-    chan, Channel, 1024;
-    role, Role, 1024;
-    emote, Emote, 1024;
-    emote_pack, EmotePack, 1024;
+    profile, Profile;
+    invite, Invite;
+    message, HarmonyMessage;
+    guild, Guild;
+    chan, Channel;
+    role, Role;
+    emote, Emote;
+    emote_pack, EmotePack;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
@@ -379,23 +377,21 @@ pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
     u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() })
 }
 
-#[cached(size = 1024)]
-pub fn deser_invite_entry(data: Vec<u8>) -> (u64, Invite) {
+pub fn deser_invite_entry(data: EVec) -> (u64, Invite) {
     let guild_id = deser_invite_entry_guild_id(&data);
     let (_, invite_raw) = data.split_at(size_of::<u64>());
-    let invite = deser_invite(invite_raw.into());
+    let invite = deser_invite(invite_raw);
 
     (guild_id, invite)
 }
 
 #[macro_export]
 macro_rules! impl_deser {
-    ( $( $name:ident, $msg:ty, $size:expr; )* ) => {
+    ( $( $name:ident, $msg:ty; )* ) => {
         paste::paste! {
             $(
-                #[cached(size = $size)]
-                pub fn [<deser_ $name>](data: Vec<u8>) -> $msg {
-                    let archive = rkyv_arch::<$msg>(data.as_slice());
+                pub fn [<deser_ $name>](data: impl AsRef<[u8]>) -> $msg {
+                    let archive = rkyv_arch::<$msg>(data.as_ref());
                     unsafe { archive.deserialize(&mut rkyv::Infallible).unwrap_unchecked() }
                 }
             )*

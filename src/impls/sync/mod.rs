@@ -253,7 +253,7 @@ impl SyncServer {
         Ok(())
     }
 
-    fn get_event_queue_raw(&self, host: &str) -> Result<Option<Vec<u8>>, ServerError> {
+    fn get_event_queue_raw(&self, host: &str) -> Result<Option<EVec>, ServerError> {
         let key = make_host_key(host);
         let queue = self.deps.sync_tree.get(&key)?;
         self.deps.sync_tree.remove(&key)?;

@@ -73,7 +73,8 @@ fn add_next_msg_ids(db: &dyn Db) -> DbResult<()> {
 
     let mut batch = Batch::default();
     for res in chat_tree.iter() {
-        let (mut key, val) = res?;
+        let (key, val) = res?;
+        let mut key: Vec<u8> = key.into();
 
         if key.len() == CHAN_KEY_LEN && key[8] == 8 {
             deser_chan(val);

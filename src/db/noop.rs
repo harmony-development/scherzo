@@ -1,5 +1,7 @@
 use std::ops::RangeInclusive;
 
+use crate::utils::evec::EVec;
+
 use super::{ArcTree, Batch, Db, DbResult, Iter, RangeIter, Tree};
 
 pub struct NoopDb;
@@ -15,15 +17,15 @@ impl Db for NoopDb {
 }
 
 impl Tree for NoopTree {
-    fn get(&self, _: &[u8]) -> DbResult<Option<Vec<u8>>> {
+    fn get(&self, _: &[u8]) -> DbResult<Option<EVec>> {
         Ok(None)
     }
 
-    fn insert(&self, _: &[u8], _: &[u8]) -> DbResult<Option<Vec<u8>>> {
+    fn insert(&self, _: &[u8], _: &[u8]) -> DbResult<Option<EVec>> {
         Ok(None)
     }
 
-    fn remove(&self, _: &[u8]) -> DbResult<Option<Vec<u8>>> {
+    fn remove(&self, _: &[u8]) -> DbResult<Option<EVec>> {
         Ok(None)
     }
 

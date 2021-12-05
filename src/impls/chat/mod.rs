@@ -594,7 +594,7 @@ impl ChatTree {
                     let invite_id = unsafe {
                         std::str::from_utf8_unchecked(key.split_at(INVITE_PREFIX.len()).1)
                     };
-                    let invite = db::deser_invite(invite_raw.into());
+                    let invite = db::deser_invite(invite_raw);
                     all.push(InviteWithId {
                         invite_id: invite_id.to_string(),
                         invite: Some(invite),
