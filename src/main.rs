@@ -256,7 +256,7 @@ fn setup_transport(
         ([0, 0, 0, 0], deps.config.port).into()
     };
 
-    let cors = utils::option_layer(deps.config.cors_dev.then(CorsLayer::permissive));
+    let cors = utils::either::option_layer(deps.config.cors_dev.then(CorsLayer::permissive));
 
     let mut transport = Hyper::new(addr)
         .expect("failed to create transport")
