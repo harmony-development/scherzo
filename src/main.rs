@@ -76,8 +76,7 @@ use triomphe::Arc;
 // this is expensive if you have big DBs (>500mb uncompressed)
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let mut db_path = "db".to_string();
     let mut console = false;
     let mut jaeger = false;
@@ -103,23 +102,28 @@ async fn main() {
         }
     }
 
-    run(db_path, console, jaeger, level_filter).await
+    run(db_path, console, jaeger, level_filter)
 }
 
-pub async fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
+pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    let _rt_guard = rt.enter();
+
     let admin_logger_handle = setup_tracing(console, jaeger, log_level);
     let config = parse_config();
-    let (db, current_db_version) = setup_db(db_path, &config).await;
-    let (deps, fed_event_receiver) = Dependencies::new(&db, config).await.unwrap();
+    let (db, current_db_version) = rt.block_on(setup_db(db_path, &config));
+    let (deps, fed_event_receiver) = rt.block_on(Dependencies::new(&db, config)).unwrap();
 
     if current_db_version == 0 {
-        setup_admin_guild(deps.as_ref()).await;
+        rt.block_on(setup_admin_guild(deps.as_ref()));
     }
 
-    admin_logger_handle.init(&deps).await.unwrap();
+    rt.block_on(admin_logger_handle.init(&deps)).unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
-    start_integrity_check_thread(deps.as_ref());
+
+    let integrity = start_integrity_check_thread(deps.as_ref());
+
     let transport = setup_transport(deps.as_ref(), rest);
     let serve = tokio::spawn(
         transport
@@ -127,16 +131,29 @@ pub async fn run(db_path: String, console: bool, jaeger: bool, log_level: Level)
             .instrument(info_span!("scherzo::serve")),
     );
 
-    tokio::select! {
-        biased;
-        res = tokio::signal::ctrl_c() => {
-            res.expect("failed to wait for signal");
+    rt.block_on(async {
+        tokio::select! {
+            biased;
+            res = tokio::signal::ctrl_c() => {
+                res.expect("failed to wait for signal");
+            }
+            res = serve => {
+                res.expect("serve task panicked").expect("failed to serve");
+            }
         }
-        res = serve => {
-            res.expect("serve task panicked").expect("failed to serve");
-        }
+    });
+
+    integrity.abort();
+
+    if let Ok(Err(err)) = rt.block_on(tokio::time::timeout(Duration::from_secs(1), db.flush())) {
+        panic!("failed to flush: {}", err);
     }
-    db.flush().expect("db flush failed");
+
+    rt.shutdown_timeout(Duration::from_secs(1));
+
+    opentelemetry::global::shutdown_tracer_provider();
+
+    std::process::exit(0);
 }
 
 fn parse_config() -> Config {
