@@ -58,8 +58,8 @@ pub mod shared {
             )
         }
 
-        pub async fn flush(&self) -> DbResult<usize> {
-            self.inner.flush_async().await.map_err(Into::into)
+        pub fn flush(&self) -> DbResult<usize> {
+            self.inner.flush().map_err(Into::into)
         }
     }
 

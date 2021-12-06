@@ -76,7 +76,8 @@ use triomphe::Arc;
 // this is expensive if you have big DBs (>500mb uncompressed)
 const INTEGRITY_VERIFICATION_PERIOD: u64 = 60 * 60;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let mut db_path = "db".to_string();
     let mut console = false;
     let mut jaeger = false;
@@ -102,37 +103,40 @@ fn main() {
         }
     }
 
-    run(db_path, console, jaeger, level_filter)
+    run(db_path, console, jaeger, level_filter).await
 }
 
-pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
-    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-    let _rt_guard = rt.enter();
-
+pub async fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     let admin_logger_handle = setup_tracing(console, jaeger, log_level);
     let config = parse_config();
-    let (db, current_db_version) = rt.block_on(setup_db(db_path, &config));
-    let (deps, fed_event_receiver) = rt.block_on(Dependencies::new(&db, config)).unwrap();
+    let (db, current_db_version) = setup_db(db_path, &config).await;
+    let (deps, fed_event_receiver) = Dependencies::new(&db, config).await.unwrap();
 
     if current_db_version == 0 {
-        rt.block_on(setup_admin_guild(deps.as_ref()));
+        setup_admin_guild(deps.as_ref()).await;
     }
 
-    rt.block_on(admin_logger_handle.init(&deps)).unwrap();
+    admin_logger_handle.init(&deps).await.unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
-    let integrity_thread = start_integrity_check_thread(deps.as_ref());
+    start_integrity_check_thread(deps.as_ref());
     let transport = setup_transport(deps.as_ref(), rest);
-    let serve = transport
-        .serve(server)
-        .instrument(info_span!("scherzo::serve"));
+    let serve = tokio::spawn(
+        transport
+            .serve(server)
+            .instrument(info_span!("scherzo::serve")),
+    );
 
-    rt.block_on(async move {
-        serve.await.unwrap();
-        integrity_thread.await.expect("integrity thread panicked");
-        db.flush().await.expect("db flush failed");
-    });
-    opentelemetry::global::shutdown_tracer_provider();
+    tokio::select! {
+        biased;
+        res = tokio::signal::ctrl_c() => {
+            res.expect("failed to wait for signal");
+        }
+        res = serve => {
+            res.expect("serve task panicked").expect("failed to serve");
+        }
+    }
+    db.flush().expect("db flush failed");
 }
 
 fn parse_config() -> Config {
@@ -255,14 +259,16 @@ fn setup_transport(
     };
 
     let cors = utils::either::option_layer(deps.config.cors_dev.then(CorsLayer::permissive));
+    let concurrency_limiter = utils::either::option_layer(
+        (deps.config.policy.max_concurrent_requests > 0)
+            .then(|| ConcurrencyLimitLayer::new(deps.config.policy.max_concurrent_requests)),
+    );
 
     let mut transport = Hyper::new(addr)
         .expect("failed to create transport")
         .layer(cors)
         .layer(MapResponseBodyLayer::new(box_body))
-        .layer(ConcurrencyLimitLayer::new(
-            deps.config.policy.max_concurrent_requests,
-        ))
+        .layer(concurrency_limiter)
         .layer(SetSensitiveRequestHeadersLayer::new([
             header::AUTHORIZATION,
             header::SEC_WEBSOCKET_PROTOCOL,
