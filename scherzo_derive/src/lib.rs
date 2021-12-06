@@ -45,7 +45,7 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
             use harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer;
 
             (!self.disable_ratelimits)
-                .then(|| HrpcLayer::new(tower::limit::RateLimitLayer::new(#num, std::time::Duration::from_secs(#dur))))
+                .then(|| HrpcLayer::new(hrpc::server::layer::ratelimit::RateLimitLayer::new(#num, std::time::Duration::from_secs(#dur))))
         }
 
         #func
