@@ -31,10 +31,13 @@ use harmony_rust_sdk::api::{
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::{
-    common::layer::trace::TraceLayer as HrpcTraceLayer,
+    common::layer::{modify::ModifyLayer, trace::TraceLayer as HrpcTraceLayer},
     exports::futures_util::TryFutureExt,
+    proto::Error as HrpcError,
     server::{
-        transport::http::{box_body, HttpConfig},
+        transport::http::{
+            box_body, layer::errid_to_status::ErrorIdentifierToStatusLayer, HttpConfig,
+        },
         MakeRoutes,
     },
 };
@@ -57,7 +60,7 @@ use scherzo::{
         sync::{EventDispatch, SyncServer},
         Dependencies, HELP_TEXT,
     },
-    utils,
+    utils, ServerError,
 };
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
@@ -262,7 +265,10 @@ fn setup_server(
         voice,
         batch
     )
-    .layer(HrpcTraceLayer::default_debug().span_fn(|_| tracing::debug_span!("request")));
+    .layer(ErrorIdentifierToStatusLayer::new(
+        ServerError::identifier_to_status,
+    ))
+    .layer(HrpcTraceLayer::default_debug().span_fn(|_| tracing::debug_span!("hrpc_request")));
 
     (server, rest)
 }

@@ -5,6 +5,7 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display, Formatter, Write},
     io::Error as IoError,
+    str::FromStr,
     time::Duration,
 };
 
@@ -379,7 +380,8 @@ impl ServerError {
                 multer::Error::StreamSizeExceeded { .. } | multer::Error::UnknownField { .. },
             )
             | ServerError::MustNotBeLastOwner
-            | ServerError::ContentCantBeSentByUser => StatusCode::BAD_REQUEST,
+            | ServerError::ContentCantBeSentByUser
+            | ServerError::InvalidProtoMessage(_) => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::IoError(_)
             | ServerError::InternalServerError
@@ -389,8 +391,7 @@ impl ServerError {
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
-            | ServerError::MultipartError(_)
-            | ServerError::InvalidProtoMessage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::MultipartError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -433,7 +434,7 @@ impl ServerError {
             ServerError::WrongTypeForField { .. } => "h.missing-form",
             ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
             ServerError::UserNotInGuild { .. } => "h.not-joined",
-            ServerError::NotImplemented => "h.not-implemented",
+            ServerError::NotImplemented => HrpcErrorIdentifier::NotImplemented.as_id(),
             ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
             ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
             ServerError::NoSuchMessage { .. } => "h.bad-message-id",
@@ -450,7 +451,7 @@ impl ServerError {
             ServerError::InvalidFileId => "h.bad-file-id",
             ServerError::TooManyFiles => "too-many-files",
             ServerError::MissingFiles => "missing-files",
-            ServerError::TooFast(_) => "h.rate-limited",
+            ServerError::TooFast(_) => HrpcErrorIdentifier::ResourceExhausted.as_id(),
             ServerError::NotAnImage => "h.not-an-image",
             ServerError::NotMedia => "not-media",
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => {
@@ -477,6 +478,19 @@ impl ServerError {
             ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
             ServerError::MustNotBeLastOwner => "h.last-owner-in-guild",
             ServerError::ContentCantBeSentByUser => "h.content-not-allowed-for-user",
+        }
+    }
+
+    pub fn identifier_to_status(id: &str) -> Option<StatusCode> {
+        tracing::debug!("err id: {}", id);
+
+        if HrpcErrorIdentifier::from_str(id).is_ok() {
+            return None;
+        }
+
+        match id {
+            "h.federation-disabled" | "h.host-not-allowed" => Some(StatusCode::FORBIDDEN),
+            _ => Some(StatusCode::BAD_REQUEST),
         }
     }
 
