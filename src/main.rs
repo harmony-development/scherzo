@@ -143,6 +143,8 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
         }
     });
 
+    tracing::info!("shutting down...");
+
     integrity.abort();
 
     if let Ok(Err(err)) = rt.block_on(tokio::time::timeout(Duration::from_secs(1), db.flush())) {
