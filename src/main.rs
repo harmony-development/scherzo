@@ -31,9 +31,8 @@ use harmony_rust_sdk::api::{
     sync::postbox_service_server::PostboxServiceServer,
 };
 use hrpc::{
-    common::layer::{modify::ModifyLayer, trace::TraceLayer as HrpcTraceLayer},
+    common::layer::trace::TraceLayer as HrpcTraceLayer,
     exports::futures_util::TryFutureExt,
-    proto::Error as HrpcError,
     server::{
         transport::http::{
             box_body, layer::errid_to_status::ErrorIdentifierToStatusLayer, HttpConfig,
