@@ -267,7 +267,13 @@ fn setup_server(
     .layer(ErrorIdentifierToStatusLayer::new(
         ServerError::identifier_to_status,
     ))
-    .layer(HrpcTraceLayer::default_debug().span_fn(|_| tracing::debug_span!("hrpc_request")));
+    .layer(HrpcTraceLayer::default_debug().span_fn(|req| {
+        let socket_addr = req
+            .extensions()
+            .get::<SocketAddr>()
+            .map_or_else(String::new, SocketAddr::to_string);
+        tracing::debug_span!("hrpc_request", socket_addr = %socket_addr)
+    }));
 
     (server, rest)
 }
