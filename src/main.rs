@@ -228,7 +228,7 @@ fn setup_server(
     let mediaproxy_server = MediaproxyServer::new(deps.clone());
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
     #[cfg(feature = "voice")]
-    let voice_server = voice::VoiceServer::new(&deps, log_level);
+    let voice_server = voice::VoiceServer::new(deps.clone(), log_level);
 
     let profile = ProfileServiceServer::new(profile_server.clone());
     let emote = EmoteServiceServer::new(emote_server.clone());
@@ -250,7 +250,7 @@ fn setup_server(
 
     let rest = RestServiceLayer::new(deps.clone());
 
-    let batch_server = BatchServer::new(&deps, batchable_services);
+    let batch_server = BatchServer::new(deps, batchable_services);
     let batch = BatchServiceServer::new(batch_server);
 
     let server = combine_services!(

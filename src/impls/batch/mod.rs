@@ -112,12 +112,13 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
 
 #[derive(Clone)]
 pub struct BatchServer {
+    deps: Arc<Dependencies>,
     disable_ratelimits: bool,
     svc_pool: Arc<Pool<RecyclableService>>,
 }
 
 impl BatchServer {
-    pub fn new<Svc: MakeRoutes + Sync>(deps: &Dependencies, svc: Svc) -> Self {
+    pub fn new<Svc: MakeRoutes + Sync>(deps: Arc<Dependencies>, svc: Svc) -> Self {
         Self {
             disable_ratelimits: deps.config.policy.disable_ratelimits,
             svc_pool: Arc::new(
@@ -125,6 +126,7 @@ impl BatchServer {
                     .with_supplier(move || RecyclableService(svc.make_routes().build()))
                     .build(),
             ),
+            deps,
         }
     }
 

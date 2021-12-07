@@ -57,16 +57,18 @@ pub struct VoiceServer {
     channels: Channels,
     chat_tree: ChatTree,
     disable_ratelimits: bool,
+    deps: Arc<Dependencies>,
 }
 
 impl VoiceServer {
-    pub fn new(deps: &Dependencies, log_level: Level) -> Self {
+    pub fn new(deps: Arc<Dependencies>, log_level: Level) -> Self {
         Self {
             valid_sessions: deps.valid_sessions.clone(),
             worker_pool: WorkerPool::new(log_level),
             channels: Channels::new(),
             chat_tree: deps.chat_tree.clone(),
             disable_ratelimits: deps.config.policy.disable_ratelimits,
+            deps,
         }
     }
 }
