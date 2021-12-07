@@ -291,7 +291,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#042c1f78447839bed54538ed89b9277e437ed6b4"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#bbce8e78bab3277b6e533d50df3fb2a7463c3746"
 dependencies = [
  "prost",
  "prost-types",
@@ -303,7 +303,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#042c1f78447839bed54538ed89b9277e437ed6b4"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#bbce8e78bab3277b6e533d50df3fb2a7463c3746"
 dependencies = [
  "console-api",
  "futures",
@@ -850,9 +850,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.33.3"
+version = "0.33.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5a23a76f02c3d17422433d51200a7e11ad3065ed3aa57d7cb8834854d31c552"
+checksum = "21664336f448bb18c30ab2c2e207855b097944c306eb399dd16719c8f744d76f"
 dependencies = [
  "axum-server",
  "base64",
@@ -1066,9 +1066,9 @@ checksum = "48dc51180a9b377fd75814d0cc02199c20f8e99433d6762f650d39cdbbd3b56f"
 
 [[package]]
 name = "itertools"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ddb889f9d0d08a67338271fa9b62996bc788c7796a5c18cf057420aaed5eaf"
+checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
 dependencies = [
  "either",
 ]
@@ -2464,9 +2464,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-tungstenite"
-version = "0.16.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e057364a4dd37870b33bf8dc1885d29187d90770f488d599d3ee8d9e4916fbd3"
+checksum = "e80b39df6afcc12cdf752398ade96a6b9e99c903dfdc36e53ad10b9c366bca72"
 dependencies = [
  "futures-util",
  "log",
