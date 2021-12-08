@@ -51,7 +51,7 @@ use scherzo::{
         against,
         auth::AuthServer,
         batch::BatchServer,
-        chat::{AdminLogChannelLogger, ChatServer, DEFAULT_ROLE_ID},
+        chat::{ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
@@ -111,7 +111,7 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     let _rt_guard = rt.enter();
 
-    let admin_logger_handle = setup_tracing(console, jaeger, log_level);
+    setup_tracing(console, jaeger, log_level);
     let config = parse_config();
     let (db, current_db_version) = rt.block_on(setup_db(db_path, &config));
     let (deps, fed_event_receiver) = rt.block_on(Dependencies::new(&db, config)).unwrap();
@@ -119,8 +119,6 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     if current_db_version == 0 {
         rt.block_on(setup_admin_guild(deps.as_ref()));
     }
-
-    //rt.block_on(admin_logger_handle.init(&deps)).unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
 
@@ -329,7 +327,7 @@ fn setup_transport(
     )
 }
 
-fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogChannelLogger {
+fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
     let filters = Targets::default()
         .with_targets([
             ("sled", level_filter),
@@ -342,18 +340,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
         ])
         .with_default(level_filter);
 
-    let (combined_logger, admin_logger_handle) = {
-        let admin_handle = AdminLogChannelLogger::new();
-        //let admin_logger = fmt::layer().event_format(admin_handle.clone());
-        let term_logger = fmt::layer();
-
-        (
-            term_logger
-                //.and_then(admin_logger)
-                .with_filter(filters.clone()),
-            admin_handle,
-        )
-    };
+    let term_logger = fmt::layer().with_filter(filters.clone());
 
     let (console_serve_tx, console_serve_rx) = tokio::sync::oneshot::channel::<()>();
     let console_layer = if console {
@@ -392,13 +379,11 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
     tracing_subscriber::registry()
         .with(telemetry)
         .with(console_layer)
-        .with(combined_logger)
+        .with(term_logger)
         .init();
     let _ = console_serve_tx.send(());
 
     info!("logging initialized");
-
-    admin_logger_handle
 }
 
 async fn setup_admin_guild(deps: &Dependencies) {
