@@ -15,6 +15,8 @@
 //! - guild keys are simply guild ids but serialized (`.to_be_bytes()`)
 //! - channel keys are `guild id + seperator + channel id`
 //! - messages are `channel key + seperator + message id`
+//! - these make it very easy to delete stuff related to guilds / channels / messages
+//! as it is just a simple `.scan_prefix()` call followed by a batch remove
 //! 
 //! `auth` service general struture:
 //! - `token prefix + user id` -> token
