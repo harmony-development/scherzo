@@ -176,7 +176,7 @@ impl AuthServer {
             step_map: DashMap::default().into(),
             send_step: DashMap::default().into(),
             queued_steps: DashMap::default().into(),
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }
     }

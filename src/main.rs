@@ -172,7 +172,7 @@ fn parse_config() -> Config {
     debug!("running with {:?}", config);
     std::fs::create_dir_all(&config.media.media_root).expect("could not create media root dir");
 
-    if config.policy.disable_ratelimits {
+    if config.policy.ratelimit.disable {
         warn!("rate limits are disabled, please take care!");
     }
 

@@ -67,7 +67,7 @@ impl VoiceServer {
             worker_pool: WorkerPool::new(log_level),
             channels: Channels::new(),
             chat_tree: deps.chat_tree.clone(),
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }
     }

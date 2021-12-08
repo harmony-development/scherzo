@@ -120,7 +120,7 @@ pub struct BatchServer {
 impl BatchServer {
     pub fn new<Svc: MakeRoutes + Sync>(deps: Arc<Dependencies>, svc: Svc) -> Self {
         Self {
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.ratelimit.disable,
             svc_pool: Arc::new(
                 PoolBuilder::default()
                     .with_supplier(move || RecyclableService(svc.make_routes().build()))

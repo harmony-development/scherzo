@@ -48,7 +48,8 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
                 .then(|| HrpcLayer::new(crate::utils::rate_limit(
                     #num,
                     std::time::Duration::from_secs(#dur),
-                    self.deps.config.policy.client_ip_header_name.clone()
+                    self.deps.config.policy.ratelimit.client_ip_header_name.clone(),
+                    self.deps.config.policy.ratelimit.allowed_ips.clone(),
                 ))
             )
         }

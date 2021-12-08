@@ -88,7 +88,7 @@ impl MediaproxyServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
             http: http_client(&mut hyper::Client::builder()),
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }
     }

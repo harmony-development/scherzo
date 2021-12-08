@@ -23,7 +23,7 @@ pub struct ProfileServer {
 impl ProfileServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            disable_ratelimits: deps.config.policy.disable_ratelimits,
+            disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }
     }

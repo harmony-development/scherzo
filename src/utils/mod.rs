@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     net::{IpAddr, SocketAddr},
     str::FromStr,
     time::Duration,
@@ -13,13 +14,27 @@ pub fn rate_limit(
     num: u64,
     per: Duration,
     check_header_for_ip: Option<String>,
-) -> RateLimitLayer<impl Fn(&mut BoxRequest) -> Option<IpAddr> + Clone> {
-    RateLimitLayer::new(num, per).extract_key_with(move |req| {
-        check_header_for_ip
-            .as_deref()
-            .and_then(|header_name| get_forwarded_for_ip_addr(req, header_name))
-            .or_else(|| get_ip_addr(req))
-    })
+    allowed_ips: Option<Vec<String>>,
+) -> RateLimitLayer<
+    impl Fn(&mut BoxRequest) -> Option<IpAddr> + Clone,
+    impl Fn(&IpAddr) -> bool + Clone,
+> {
+    let allowed_ips = allowed_ips.map(|ips| {
+        ips.into_iter()
+            .map(|s| IpAddr::from_str(&s))
+            .flatten()
+            .collect::<HashSet<_, ahash::RandomState>>()
+    });
+
+    RateLimitLayer::new(num, per).set_key_fns(
+        move |req| {
+            check_header_for_ip
+                .as_deref()
+                .and_then(|header_name| get_forwarded_for_ip_addr(req, header_name))
+                .or_else(|| get_ip_addr(req))
+        },
+        move |ip| allowed_ips.as_ref().map_or(false, |ips| ips.contains(ip)),
+    )
 }
 
 fn get_ip_addr(req: &BoxRequest) -> Option<IpAddr> {

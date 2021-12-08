@@ -18,8 +18,18 @@ log_headers = false
 
 [policy]
 
+# Whether to disable registration and only allow it using admin generated tokens.
+disable_registration = false
+
+# Maximum amount of requests that should be processed concurrently.
+# If set to 0, it will be disabled.
+# Note: you'll want to increase this if your server has 100+ members.
+max_concurrent_requests = 512
+
+[policy.ratelimit]
+
 # Whether to disable ratelimits or not (useful when testing / benching).
-disable_ratelimits = false
+disable = false
 
 # The header name to look at for client IPs. This is useful if scherzo is
 # running behind a reverse proxy, where the requests will be made from one
@@ -32,13 +42,12 @@ disable_ratelimits = false
 #
 # client_ip_header_name = ""
 
-# Whether to disable registration and only allow it using admin generated tokens.
-disable_registration = false
-
-# Maximum amount of requests that should be processed concurrently.
-# If set to 0, it will be disabled.
-# Note: you'll want to increase this if your server has 100+ members.
-max_concurrent_requests = 512
+# A list of allowed IP addresses that can bypass the rate limiter.
+#
+# Invalid IP addresses will be silently ignored. Note that these are
+# *IP addresses* and as such they don't take a port.
+#
+# allowed_ips = ["127.0.0.1", "0.0.0.0", "::1"]
 
 [db]
 

@@ -68,12 +68,20 @@ const fn max_concurrent_requests_default() -> usize {
     512
 }
 
+#[derive(Default, Debug, Clone, Deserialize, Serialize)]
+pub struct RateLimitConfig {
+    #[serde(default)]
+    pub disable: bool,
+    #[serde(default)]
+    pub client_ip_header_name: Option<String>,
+    #[serde(default)]
+    pub allowed_ips: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PolicyConfig {
     #[serde(default)]
-    pub disable_ratelimits: bool,
-    #[serde(default)]
-    pub client_ip_header_name: Option<String>,
+    pub ratelimit: RateLimitConfig,
     #[serde(default)]
     pub disable_registration: bool,
     #[serde(default = "max_concurrent_requests_default")]
@@ -83,8 +91,7 @@ pub struct PolicyConfig {
 impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
-            disable_ratelimits: false,
-            client_ip_header_name: None,
+            ratelimit: RateLimitConfig::default(),
             disable_registration: false,
             max_concurrent_requests: max_concurrent_requests_default(),
         }
