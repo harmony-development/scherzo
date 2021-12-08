@@ -120,7 +120,7 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
         rt.block_on(setup_admin_guild(deps.as_ref()));
     }
 
-    rt.block_on(admin_logger_handle.init(&deps)).unwrap();
+    //rt.block_on(admin_logger_handle.init(&deps)).unwrap();
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
 
@@ -344,12 +344,12 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) -> AdminLogCh
 
     let (combined_logger, admin_logger_handle) = {
         let admin_handle = AdminLogChannelLogger::new();
-        let admin_logger = fmt::layer().event_format(admin_handle.clone());
+        //let admin_logger = fmt::layer().event_format(admin_handle.clone());
         let term_logger = fmt::layer();
 
         (
             term_logger
-                .and_then(admin_logger)
+                //.and_then(admin_logger)
                 .with_filter(filters.clone()),
             admin_handle,
         )
