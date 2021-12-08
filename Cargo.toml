@@ -42,7 +42,7 @@ sled = { version = "0.34.6", features = ["compression"], optional = true }
 
 rand = "0.8"
 ed25519-compact = "1"
-sha3 = "0.9"
+sha3 = "0.10"
 ahash = { version = "0.7", default-features = false }
 
 tokio = { version = "1.9", features = [
