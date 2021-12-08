@@ -1,3 +1,5 @@
+#![feature(once_cell)]
+
 #[cfg(feature = "jemalloc")]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
@@ -51,7 +53,7 @@ use scherzo::{
         against,
         auth::AuthServer,
         batch::BatchServer,
-        chat::{ChatServer, DEFAULT_ROLE_ID},
+        chat::{AdminGuildKeys, ChatServer, DEFAULT_ROLE_ID},
         emote::EmoteServer,
         mediaproxy::MediaproxyServer,
         profile::ProfileServer,
@@ -119,6 +121,12 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
     if current_db_version == 0 {
         rt.block_on(setup_admin_guild(deps.as_ref()));
     }
+
+    let admin_guild_keys = rt
+        .block_on(AdminGuildKeys::new(&deps.chat_tree))
+        .expect("failed to get keys")
+        .expect("keys must be created");
+    let _ = deps.chat_tree.admin_guild_keys.set(admin_guild_keys);
 
     let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
 

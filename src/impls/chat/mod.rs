@@ -483,6 +483,16 @@ pub struct AdminGuildKeys {
 }
 
 impl AdminGuildKeys {
+    pub async fn new(chat_tree: &ChatTree) -> ServerResult<Option<AdminGuildKeys>> {
+        Ok(chat_tree.get(ADMIN_GUILD_KEY).await?.map(|raw| {
+            let (gid_raw, cmd_raw) = raw.split_at(size_of::<u64>());
+            let guild_id = unsafe { u64::from_be_bytes(gid_raw.try_into().unwrap_unchecked()) };
+            let cmd_id = unsafe { u64::from_be_bytes(cmd_raw.try_into().unwrap_unchecked()) };
+
+            AdminGuildKeys { guild_id, cmd_id }
+        }))
+    }
+
     pub fn check_if_cmd(&self, guild_id: u64, channel_id: u64) -> bool {
         (self.guild_id, self.cmd_id) == (guild_id, channel_id)
     }
@@ -491,7 +501,7 @@ impl AdminGuildKeys {
 #[derive(Clone)]
 pub struct ChatTree {
     pub chat_tree: Tree,
-    admin_guild_keys: SyncOnceCell<AdminGuildKeys>,
+    pub admin_guild_keys: SyncOnceCell<AdminGuildKeys>,
 }
 
 impl ChatTree {
@@ -1658,34 +1668,6 @@ impl ChatTree {
         };
 
         Ok(content)
-    }
-
-    pub async fn get_admin_guild_keys(&self) -> ServerResult<Option<&AdminGuildKeys>> {
-        if let Some(keys) = self.admin_guild_keys.get() {
-            return Ok(Some(keys));
-        }
-
-        let ids = self.get(ADMIN_GUILD_KEY).await?.map(|raw| {
-            let (gid_raw, cmd_raw) = raw.split_at(size_of::<u64>());
-            let guild_id = unsafe { u64::from_be_bytes(gid_raw.try_into().unwrap_unchecked()) };
-            let cmd_id = unsafe { u64::from_be_bytes(cmd_raw.try_into().unwrap_unchecked()) };
-            (guild_id, cmd_id)
-        });
-
-        if let Some((guild_id, cmd_id)) = ids {
-            if self
-                .admin_guild_keys
-                .set(AdminGuildKeys { guild_id, cmd_id })
-                .is_err()
-            {
-                tracing::error!(
-                    "admin keys already set, but something is trying to set them again..."
-                );
-            }
-            Ok(self.admin_guild_keys.get())
-        } else {
-            Ok(None)
-        }
     }
 
     pub async fn set_admin_guild_keys(&self, guild_id: u64, cmd_id: u64) -> ServerResult<()> {

@@ -31,8 +31,8 @@ pub async fn handler(
     let (message_id, message) = chat_tree.send_message_logic(user_id, request).await?;
 
     let is_cmd_channel = chat_tree
-        .get_admin_guild_keys()
-        .await?
+        .admin_guild_keys
+        .get()
         .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id));
 
     let action_content = if is_cmd_channel {

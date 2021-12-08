@@ -387,7 +387,9 @@ pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
 pub fn deser_invite_entry(data: EVec) -> (u64, Invite) {
     let guild_id = deser_invite_entry_guild_id(&data);
     let (_, invite_raw) = data.split_at(size_of::<u64>());
-    let invite = deser_invite(invite_raw);
+    let mut data = AlignedVec::new();
+    data.extend_from_slice(invite_raw);
+    let invite = deser_invite(data);
 
     (guild_id, invite)
 }
