@@ -200,6 +200,7 @@ impl ChatServer {
                     Ok(broadcast) = async {
                         let mut result = rx.recv().await;
                         while result.is_err() {
+                            tracing::error!("failed getting event: {:?}", result);
                             result = rx.recv().await;
                         }
                         result
