@@ -170,6 +170,8 @@ impl ChatServer {
             broadcast: &EventBroadcast,
             user_id: u64,
         ) -> bool {
+            tracing::debug!({ user_id = %user_id }, "writing event to socket");
+
             socket
                 .send_message(StreamEventsResponse {
                     event: Some(broadcast.event.clone().into()),
@@ -178,8 +180,10 @@ impl ChatServer {
                 .map_or_else(
                     |err| {
                         tracing::error!(
-                            "couldnt write to stream events socket for user {}: {}",
-                            user_id,
+                            {
+                                user_id = %user_id,
+                            },
+                            "couldnt write to stream events socket: {}",
                             err
                         );
                         true
@@ -199,19 +203,7 @@ impl ChatServer {
                     Some(sub) = sub_rx.recv() => {
                         subs.insert(sub);
                     }
-                    Ok(broadcast) = async {
-                        let mut result = rx.try_recv();
-                        if let Err(TryRecvError::Lagged(behind)) = result {
-                            tracing::error!("chat event receiver is lagging behind {} events...", behind);
-                        }
-                        while matches!(result, Err(TryRecvError::Lagged(_))) {
-                            result = rx.try_recv();
-                        }
-                        match result {
-                            Ok(event) => Ok(event),
-                            Err(_) => rx.recv().await,
-                        }
-                    } => {
+                    Ok(broadcast) = rx.recv() => {
                         let check_perms = || async {
                             match broadcast.perm_check {
                                 Some(PermCheck {
