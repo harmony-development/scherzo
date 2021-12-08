@@ -1,3 +1,28 @@
+//! This module contains the DB abstraction, DB keys and migrations.
+//! The DB abstraction is taken straight from sled and so fits most to it,
+//! but is essentially an abstraction for any KV map.
+//! 
+//! scherzo uses big endian for keys, as it was first written for sled.
+//! 
+//! scherzo uses:
+//! - `chat` tree for chat service,
+//! - `auth` tree for auth service,
+//! - `emote` tree for emote service,
+//! - `profile` tree for profile service,
+//! - and `sync` tree for sync service.
+//! 
+//! `chat` service general structure:
+//! - guild keys are simply guild ids but serialized (`.to_be_bytes()`)
+//! - channel keys are `guild id + seperator + channel id`
+//! - messages are `channel key + seperator + message id`
+//! 
+//! `auth` service general struture:
+//! - `token prefix + user id` -> token
+//! - `atime prefix + user id` -> last valid time (what?)
+//! - email -> hashed password
+//! 
+//! TODO other stuff
+
 use std::{
     convert::TryInto,
     error::Error as StdError,
