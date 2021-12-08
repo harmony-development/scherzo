@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, convert::TryInto, future::Future, io::BufReader, mem::size_of, ops::Not,
-    path::Path, str::FromStr,
+    collections::HashSet, convert::TryInto, future::Future, io::BufReader, lazy::SyncOnceCell,
+    mem::size_of, ops::Not, path::Path, str::FromStr,
 };
 
 use harmony_rust_sdk::api::{
@@ -477,8 +477,21 @@ impl chat_service_server::ChatService for ChatServer {
 }
 
 #[derive(Clone)]
+pub struct AdminGuildKeys {
+    pub guild_id: u64,
+    pub cmd_id: u64,
+}
+
+impl AdminGuildKeys {
+    pub fn check_if_cmd(&self, guild_id: u64, channel_id: u64) -> bool {
+        (self.guild_id, self.cmd_id) == (guild_id, channel_id)
+    }
+}
+
+#[derive(Clone)]
 pub struct ChatTree {
     pub chat_tree: Tree,
+    admin_guild_keys: SyncOnceCell<AdminGuildKeys>,
 }
 
 impl ChatTree {
@@ -486,7 +499,10 @@ impl ChatTree {
 
     pub async fn new(db: &Db) -> DbResult<Self> {
         let chat_tree = db.open_tree(b"chat").await?;
-        Ok(Self { chat_tree })
+        Ok(Self {
+            chat_tree,
+            admin_guild_keys: SyncOnceCell::new(),
+        })
     }
 
     pub async fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
@@ -1644,29 +1660,36 @@ impl ChatTree {
         Ok(content)
     }
 
-    pub async fn get_admin_guild_keys(&self) -> ServerResult<Option<(u64, u64, u64)>> {
-        Ok(self.get(ADMIN_GUILD_KEY).await?.map(|raw| {
-            let (gid_raw, rest) = raw.split_at(size_of::<u64>());
+    pub async fn get_admin_guild_keys(&self) -> ServerResult<Option<&AdminGuildKeys>> {
+        if let Some(keys) = self.admin_guild_keys.get() {
+            return Ok(Some(keys));
+        }
+
+        let ids = self.get(ADMIN_GUILD_KEY).await?.map(|raw| {
+            let (gid_raw, cmd_raw) = raw.split_at(size_of::<u64>());
             let guild_id = unsafe { u64::from_be_bytes(gid_raw.try_into().unwrap_unchecked()) };
-            let (log_raw, cmd_raw) = rest.split_at(size_of::<u64>());
-            let log_id = unsafe { u64::from_be_bytes(log_raw.try_into().unwrap_unchecked()) };
             let cmd_id = unsafe { u64::from_be_bytes(cmd_raw.try_into().unwrap_unchecked()) };
-            (guild_id, log_id, cmd_id)
-        }))
+            (guild_id, cmd_id)
+        });
+
+        if let Some((guild_id, cmd_id)) = ids {
+            if self
+                .admin_guild_keys
+                .set(AdminGuildKeys { guild_id, cmd_id })
+                .is_err()
+            {
+                tracing::error!(
+                    "admin keys already set, but something is trying to set them again..."
+                );
+            }
+            Ok(self.admin_guild_keys.get())
+        } else {
+            Ok(None)
+        }
     }
 
-    pub async fn set_admin_guild_keys(
-        &self,
-        guild_id: u64,
-        log_id: u64,
-        cmd_id: u64,
-    ) -> ServerResult<()> {
-        let value = [
-            guild_id.to_be_bytes(),
-            log_id.to_be_bytes(),
-            cmd_id.to_be_bytes(),
-        ]
-        .concat();
+    pub async fn set_admin_guild_keys(&self, guild_id: u64, cmd_id: u64) -> ServerResult<()> {
+        let value = [guild_id.to_be_bytes(), cmd_id.to_be_bytes()].concat();
         self.insert(ADMIN_GUILD_KEY, value).await?;
         Ok(())
     }

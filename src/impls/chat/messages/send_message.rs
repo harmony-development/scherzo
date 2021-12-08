@@ -33,8 +33,7 @@ pub async fn handler(
     let is_cmd_channel = chat_tree
         .get_admin_guild_keys()
         .await?
-        .map(|(g, _, c)| (g, c))
-        == Some((guild_id, channel_id));
+        .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id));
 
     let action_content = if is_cmd_channel {
         if let Some(content::Content::TextMessage(content::TextContent {

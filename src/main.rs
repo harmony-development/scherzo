@@ -407,17 +407,6 @@ async fn setup_admin_guild(deps: &Dependencies) {
         )
         .await
         .unwrap();
-    let log_id = deps
-        .chat_tree
-        .create_channel_logic(
-            guild_id,
-            "logs".to_string(),
-            ChannelKind::TextUnspecified,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
     let cmd_id = deps
         .chat_tree
         .create_channel_logic(
@@ -435,7 +424,7 @@ async fn setup_admin_guild(deps: &Dependencies) {
         .await
         .unwrap();
     deps.chat_tree
-        .set_admin_guild_keys(guild_id, log_id, cmd_id)
+        .set_admin_guild_keys(guild_id, cmd_id)
         .await
         .unwrap();
     deps.chat_tree

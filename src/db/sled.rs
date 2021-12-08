@@ -78,7 +78,7 @@ pub mod shared {
             )
         }
 
-        pub fn insert(&self, key: &[u8], value: &[u8]) -> SledFut<Option<EVec>> {
+        pub fn insert(&self, key: &[u8], value: impl Into<sled::IVec>) -> SledFut<Option<EVec>> {
             ready(
                 self.inner
                     .insert(key, value)
