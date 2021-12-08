@@ -28,7 +28,7 @@ use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
     sync::{
-        broadcast::Sender as BroadcastSend,
+        broadcast::{error::TryRecvError, Sender as BroadcastSend},
         mpsc::{self, Receiver, UnboundedSender},
         oneshot,
     },
@@ -200,15 +200,18 @@ impl ChatServer {
                         subs.insert(sub);
                     }
                     Ok(broadcast) = async {
-                        let mut result = rx.recv().await;
-                        while result.is_err() {
-                            tracing::error!("failed getting event: {:?}", result);
-                            result = rx.recv().await;
+                        let mut result = rx.try_recv();
+                        if let Err(TryRecvError::Lagged(behind)) = result {
+                            tracing::error!("chat event receiver is lagging behind {} events...", behind);
                         }
-                        result
+                        while matches!(result, Err(TryRecvError::Lagged(_))) {
+                            result = rx.try_recv();
+                        }
+                        match result {
+                            Ok(event) => Ok(event),
+                            Err(_) => rx.recv().await,
+                        }
                     } => {
-                        tracing::debug!("broadcasting an event...");
-
                         let check_perms = || async {
                             match broadcast.perm_check {
                                 Some(PermCheck {
@@ -267,6 +270,11 @@ impl ChatServer {
             perm_check,
             context,
         };
+
+        tracing::debug!(
+            "broadcasting events to {} receivers",
+            self.deps.chat_event_sender.receiver_count()
+        );
 
         drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
     }
