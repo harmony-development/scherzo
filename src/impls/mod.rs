@@ -96,7 +96,7 @@ impl Dependencies {
             sync_tree: db.open_tree(b"sync").await?,
 
             valid_sessions: Arc::new(DashMap::default()),
-            chat_event_sender: broadcast::channel(100000).0,
+            chat_event_sender: broadcast::channel(2048).0,
             fed_event_dispatcher,
             key_manager: config
                 .federation
