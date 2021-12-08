@@ -71,7 +71,7 @@ pub enum EventSub {
     Actions,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PermCheck<'a> {
     guild_id: u64,
     channel_id: Option<u64>,
@@ -95,6 +95,7 @@ impl<'a> PermCheck<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct EventContext {
     user_ids: HashSet<u64, ahash::RandomState>,
 }
@@ -111,6 +112,7 @@ impl EventContext {
     }
 }
 
+#[derive(Debug)]
 pub struct EventBroadcast {
     sub: EventSub,
     event: Event,
