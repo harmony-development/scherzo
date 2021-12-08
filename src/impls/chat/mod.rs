@@ -197,7 +197,15 @@ impl ChatServer {
                     Some(sub) = sub_rx.recv() => {
                         subs.insert(sub);
                     }
-                    Ok(broadcast) = rx.recv() => {
+                    Ok(broadcast) = async {
+                        let mut result = rx.recv().await;
+                        while result.is_err() {
+                            result = rx.recv().await;
+                        }
+                        result
+                    } => {
+                        tracing::debug!("broadcasting an event...");
+
                         let check_perms = || async {
                             match broadcast.perm_check {
                                 Some(PermCheck {
