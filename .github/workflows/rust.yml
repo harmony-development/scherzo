@@ -31,9 +31,9 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update -yy
-        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+        sudo apt install -yy --no-install-recommends protobuf-compiler lld zip
         curl -L https://github.com/upx/upx/suites/4555380352/artifacts/122350849 > upx-zip.zip
-        unzip upx-zip
+        unzip upx-zip.zip
         chmod +x upx
     - name: Install rust
       run: rustup update && rustup component add rustfmt clippy
