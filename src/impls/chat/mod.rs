@@ -29,7 +29,6 @@ use tokio::{
     sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
     task::JoinHandle,
 };
-use tracing::Instrument;
 use triomphe::Arc;
 
 use crate::{
