@@ -22,8 +22,12 @@ pub async fn handler(
             auth_id
         );
     }
+
     // Safety: step stack can never be empty [ref:step_stack_non_empty]
     prev_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
+
+    drop(step_stack);
+
     if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
         tracing::debug!("sending prev step to {} stream", auth_id);
         if let Err(err) = chan.send(prev_step.clone()).await {
