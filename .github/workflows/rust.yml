@@ -32,7 +32,7 @@ jobs:
       run: |
         sudo apt update -yy
         sudo apt install -yy --no-install-recommends protobuf-compiler lld
-        curl -L https://github.com/upx/upx/suites/4555380352/artifacts/122350849 > upx-zip
+        curl -L https://github.com/upx/upx/suites/4555380352/artifacts/122350849 > upx-zip.zip
         unzip ./upx-zip
         chmod +x upx
     - name: Install rust
