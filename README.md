@@ -15,11 +15,8 @@ docker run -d -p 2289:2289 -v db:/srv/scherzo/db -v media:/srv/scherzo/media yus
 
 One liner to start the latest master CI artifact:
 ```
-mkdir scherzo && cd scherzo && curl -L https://git.io/Jn9Lo > scherzo && chmod +x scherzo && ./scherzo
+mkdir scherzo && cd scherzo && curl -L https://github.com/harmony-development/scherzo/releases/download/continuous/scherzo > scherzo && chmod +x scherzo && ./scherzo
 ```
-
-Please note that the CI artifact and the docker container do not have voice support enabled.
-If you want voice support it is recommended to compile it yourself (for now).
 
 ## Configuration
 
