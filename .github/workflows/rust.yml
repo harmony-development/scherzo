@@ -32,8 +32,8 @@ jobs:
       run: |
         sudo apt update -yy
         sudo apt install -yy --no-install-recommends protobuf-compiler lld
-        curl -L https://github.com/upx/upx/suites/4555380352/artifacts/122350849 > upx.zip
-        unzip upx.zip
+        curl -L https://github.com/upx/upx/suites/4555380352/artifacts/122350849 > upx-zip
+        unzip ./upx-zip
         chmod +x upx
     - name: Install rust
       run: rustup update && rustup component add rustfmt clippy
@@ -62,8 +62,8 @@ jobs:
     
     - name: UPX
       run: |
-          upx target/x86_64-unknown-linux-gnu/release/scherzo
-          upx target/x86_64-unknown-linux-gnu/release/scherzo_cmd
+          ./upx target/x86_64-unknown-linux-gnu/release/scherzo
+          ./upx target/x86_64-unknown-linux-gnu/release/scherzo_cmd
     
     - name: Upload release
       if: github.event_name == 'push'
