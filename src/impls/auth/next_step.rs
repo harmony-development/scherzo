@@ -236,6 +236,13 @@ pub async fn handler(
                             "register" => {
                                 if svc.deps.config.policy.disable_registration {
                                     let token_raw = try_get_token(&mut values)?;
+                                    if token_raw.is_empty() {
+                                        bail!((
+                                            "h.invalid-registration-token",
+                                            "registration token can't be empty"
+                                        ));
+                                    }
+
                                     let token_hashed = hash_password(token_raw);
                                     if svc
                                         .deps
@@ -247,13 +254,22 @@ pub async fn handler(
                                         return Err(ServerError::InvalidRegistrationToken.into());
                                     }
                                 }
+
                                 let password_raw = try_get_password(&mut values)?;
+                                if password_raw.is_empty() {
+                                    bail!(("h.invalid-password", "password can't be empty"));
+                                }
+
                                 let password_hashed = hash_password(password_raw);
                                 let email = try_get_email(&mut values)?;
                                 let username = try_get_username(&mut values)?;
 
+                                if username.is_empty() {
+                                    bail!(("h.invalid-username", "username can't be empty"));
+                                }
+
                                 if svc.deps.auth_tree.get(email.as_bytes()).await?.is_some() {
-                                    return Err(ServerError::UserAlreadyExists.into());
+                                    bail!(ServerError::UserAlreadyExists);
                                 }
 
                                 let user_id = svc.gen_user_id().await?;

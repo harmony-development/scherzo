@@ -482,8 +482,6 @@ impl ServerError {
     }
 
     pub fn identifier_to_status(id: &str) -> Option<StatusCode> {
-        tracing::debug!("err id: {}", id);
-
         if HrpcErrorIdentifier::from_str(id).is_ok() {
             return None;
         }
