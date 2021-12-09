@@ -1,4 +1,4 @@
-#![feature(once_cell)]
+#![feature(once_cell, let_else)]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
 use std::{

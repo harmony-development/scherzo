@@ -1,5 +1,13 @@
+use harmony_rust_sdk::api::auth::{auth_step::form::FormField, next_step_request::FormFields};
+
 use super::*;
 
+pub mod login;
+pub mod registration;
+
+// While implementing new choices / forms, make sure to:
+// - handle the choice / from in `handle_choice` or `handle_fields` respectively
+// - handle the form title in this handler
 pub async fn handler(
     svc: &AuthServer,
     req: Request<NextStepRequest>,
@@ -13,10 +21,19 @@ pub async fn handler(
 
     tracing::debug!("got next step for auth id {}", auth_id);
 
-    let next_step;
+    // get step stack for this auth id (the stack is initialized in begin_auth)
+    let Some(mut step_stack) = svc.step_map.get_mut(auth_id.as_str()) else {
+        bail!(ServerError::InvalidAuthId);
+    };
 
-    if let Some(mut step_stack) = svc.step_map.get_mut(auth_id.as_str()) {
-        if let Some(step) = maybe_step {
+    // get the next step if possible
+    let next_step;
+    match maybe_step {
+        None => {
+            // Safety: step stack can never be empty [ref:step_stack_non_empty]
+            next_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
+        }
+        Some(step) => {
             // Safety: step stack can never be empty, and our steps always have an inner step contained in them [ref:step_stack_non_empty]
             let current_step = unsafe {
                 step_stack
@@ -31,313 +48,50 @@ pub async fn handler(
             tracing::debug!("client replied with {:#?}", step);
             match step {
                 next_step_request::Step::Choice(next_step_request::Choice { choice }) => {
-                    if let auth_step::Step::Choice(auth_step::Choice { options, .. }) = current_step
-                    {
-                        if options.contains(&choice) {
-                            next_step = match choice.as_str() {
-                                "login" => AuthStep {
-                                    can_go_back: true,
-                                    fallback_url: String::default(),
-                                    step: Some(auth_step::Step::Form(auth_step::Form {
-                                        title: "login".to_string(),
-                                        fields: vec![
-                                            auth_step::form::FormField {
-                                                name: "email".to_string(),
-                                                r#type: "email".to_string(),
-                                            },
-                                            auth_step::form::FormField {
-                                                name: "password".to_string(),
-                                                r#type: "password".to_string(),
-                                            },
-                                        ],
-                                    })),
-                                },
-                                "register" => {
-                                    let mut fields = vec![
-                                        auth_step::form::FormField {
-                                            name: "username".to_string(),
-                                            r#type: "text".to_string(),
-                                        },
-                                        auth_step::form::FormField {
-                                            name: "email".to_string(),
-                                            r#type: "email".to_string(),
-                                        },
-                                        auth_step::form::FormField {
-                                            name: "password".to_string(),
-                                            r#type: "password".to_string(),
-                                        },
-                                    ];
-                                    if svc.deps.config.policy.disable_registration {
-                                        fields.push(auth_step::form::FormField {
-                                            name: "token".to_string(),
-                                            r#type: "password".to_string(),
-                                        });
-                                    }
-                                    AuthStep {
-                                        can_go_back: true,
-                                        fallback_url: String::default(),
-                                        step: Some(auth_step::Step::Form(auth_step::Form {
-                                            title: "register".to_string(),
-                                            fields,
-                                        })),
-                                    }
-                                }
-                                _ => unreachable!(),
-                            };
-                            step_stack.push(next_step.clone());
-                        } else {
-                            return Err(ServerError::NoSuchChoice {
-                                choice: choice.into(),
-                                expected_any_of: options.into_iter().map(Into::into).collect(),
-                            }
-                            .into());
-                        }
-                    } else {
-                        return Err(ServerError::WrongStep {
+                    let auth_step::Step::Choice(auth_step::Choice { options, .. }) = current_step else {
+                        bail!(ServerError::WrongStep {
                             expected: SmolStr::new_inline("form"),
                             got: SmolStr::new_inline("choice"),
-                        }
-                        .into());
+                        });
+                    };
+
+                    if options.contains(&choice) {
+                        next_step = handle_choice(svc, choice.as_str())?;
+                        step_stack.push(next_step.clone());
+                    } else {
+                        bail!(ServerError::NoSuchChoice {
+                            choice: choice.into(),
+                            expected_any_of: options.into_iter().map(Into::into).collect(),
+                        });
                     }
                 }
                 next_step_request::Step::Form(next_step_request::Form { fields }) => {
-                    if let auth_step::Step::Form(auth_step::Form {
+                    let auth_step::Step::Form(auth_step::Form {
                         fields: auth_fields,
                         title,
-                    }) = current_step
-                    {
-                        let mut values = Vec::with_capacity(fields.len());
-
-                        for (index, field) in fields.into_iter().enumerate() {
-                            if let Some(afield) = auth_fields.get(index) {
-                                if let Some(field) = field.field {
-                                    match afield.r#type.as_str() {
-                                        "password" | "new-password" => {
-                                            if matches!(field, Field::Bytes(_)) {
-                                                values.push(field);
-                                            } else {
-                                                return Err(ServerError::WrongTypeForField {
-                                                    name: afield.name.as_str().into(),
-                                                    expected: SmolStr::new_inline("bytes"),
-                                                }
-                                                .into());
-                                            }
-                                        }
-                                        "text" => {
-                                            if matches!(field, Field::String(_)) {
-                                                values.push(field);
-                                            } else {
-                                                return Err(ServerError::WrongTypeForField {
-                                                    name: afield.name.as_str().into(),
-                                                    expected: SmolStr::new_inline("text"),
-                                                }
-                                                .into());
-                                            }
-                                        }
-                                        "number" => {
-                                            if matches!(field, Field::Number(_)) {
-                                                values.push(field);
-                                            } else {
-                                                return Err(ServerError::WrongTypeForField {
-                                                    name: afield.name.as_str().into(),
-                                                    expected: SmolStr::new_inline("number"),
-                                                }
-                                                .into());
-                                            }
-                                        }
-                                        "email" => {
-                                            if matches!(field, Field::String(_)) {
-                                                // TODO: validate email here and return error if invalid
-                                                values.push(field);
-                                            } else {
-                                                return Err(ServerError::WrongTypeForField {
-                                                    name: afield.name.as_str().into(),
-                                                    expected: SmolStr::new_inline("email"),
-                                                }
-                                                .into());
-                                            }
-                                        }
-                                        _ => unreachable!(),
-                                    }
-                                } else {
-                                    return Err(ServerError::NoFieldSpecified.into());
-                                }
-                            } else {
-                                return Err(ServerError::NoSuchField.into());
-                            }
-                        }
-
-                        match title.as_str() {
-                            "login" => {
-                                let password_raw = try_get_password(&mut values)?;
-                                let password_hashed = hash_password(password_raw);
-                                let email = try_get_email(&mut values)?;
-
-                                let user_id = if let Some(user_id) =
-                                    svc.deps.auth_tree.get(email.as_bytes()).await?
-                                {
-                                    // Safety: this unwrap can never cause UB since we only store u64
-                                    u64::from_be_bytes(unsafe {
-                                        user_id.try_into().unwrap_unchecked()
-                                    })
-                                } else {
-                                    return Err(ServerError::WrongUserOrPassword {
-                                        email: email.into(),
-                                    }
-                                    .into());
-                                };
-
-                                if svc
-                                    .deps
-                                    .auth_tree
-                                    .get(user_id.to_be_bytes().as_ref())
-                                    .await?
-                                    .map_or(true, |pass| pass.as_ref() != password_hashed.as_ref())
-                                {
-                                    return Err(ServerError::WrongUserOrPassword {
-                                        email: email.into(),
-                                    }
-                                    .into());
-                                }
-
-                                let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
-                                let mut batch = Batch::default();
-                                // [ref:token_u64_key]
-                                batch.insert(
-                                    token_key(user_id).to_vec(),
-                                    session_token.as_str().as_bytes().to_vec(),
-                                );
-                                batch.insert(
-                                    // [ref:atime_u64_key]
-                                    atime_key(user_id).to_vec(),
-                                    // [ref:atime_u64_value]
-                                    get_time_secs().to_be_bytes().to_vec(),
-                                );
-                                svc.deps
-                                    .auth_tree
-                                    .inner
-                                    .apply_batch(batch)
-                                    .await
-                                    .map_err(ServerError::DbError)?;
-
-                                tracing::debug!("user {} logged in with email {}", user_id, email,);
-
-                                next_step = AuthStep {
-                                    can_go_back: false,
-                                    fallback_url: String::default(),
-                                    step: Some(auth_step::Step::Session(Session {
-                                        user_id,
-                                        session_token: session_token.clone().into(),
-                                    })),
-                                };
-
-                                svc.deps.valid_sessions.insert(session_token, user_id);
-                            }
-                            "register" => {
-                                if svc.deps.config.policy.disable_registration {
-                                    let token_raw = try_get_token(&mut values)?;
-                                    if token_raw.is_empty() {
-                                        bail!((
-                                            "h.invalid-registration-token",
-                                            "registration token can't be empty"
-                                        ));
-                                    }
-
-                                    let token_hashed = hash_password(token_raw);
-                                    if svc
-                                        .deps
-                                        .auth_tree
-                                        .get(&reg_token_key(token_hashed.as_ref()))
-                                        .await?
-                                        .is_none()
-                                    {
-                                        return Err(ServerError::InvalidRegistrationToken.into());
-                                    }
-                                }
-
-                                let password_raw = try_get_password(&mut values)?;
-                                if password_raw.is_empty() {
-                                    bail!(("h.invalid-password", "password can't be empty"));
-                                }
-
-                                let password_hashed = hash_password(password_raw);
-                                let email = try_get_email(&mut values)?;
-                                let username = try_get_username(&mut values)?;
-
-                                if username.is_empty() {
-                                    bail!(("h.invalid-username", "username can't be empty"));
-                                }
-
-                                if svc.deps.auth_tree.get(email.as_bytes()).await?.is_some() {
-                                    bail!(ServerError::UserAlreadyExists);
-                                }
-
-                                let user_id = svc.gen_user_id().await?;
-                                let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
-
-                                let mut batch = Batch::default();
-                                batch.insert(email.into_bytes(), user_id.to_be_bytes().to_vec());
-                                batch.insert(
-                                    user_id.to_be_bytes().to_vec(),
-                                    password_hashed.as_ref().to_vec(),
-                                );
-                                // [ref:token_u64_key]
-                                batch.insert(
-                                    token_key(user_id).to_vec(),
-                                    session_token.as_str().as_bytes().to_vec(),
-                                );
-                                batch.insert(
-                                    // [ref:atime_u64_key]
-                                    atime_key(user_id).to_vec(),
-                                    // [ref:atime_u64_value]
-                                    get_time_secs().to_be_bytes().to_vec(),
-                                );
-                                svc.deps
-                                    .auth_tree
-                                    .inner
-                                    .apply_batch(batch)
-                                    .await
-                                    .expect("failed to register into db");
-
-                                let buf = rkyv_ser(&Profile {
-                                    user_name: username,
-                                    ..Default::default()
-                                });
-                                svc.deps
-                                    .profile_tree
-                                    .insert(make_user_profile_key(user_id), buf)
-                                    .await?;
-
-                                tracing::debug!("new user {} registered", user_id,);
-
-                                next_step = AuthStep {
-                                    can_go_back: false,
-                                    fallback_url: String::default(),
-                                    step: Some(auth_step::Step::Session(Session {
-                                        user_id,
-                                        session_token: session_token.clone().into(),
-                                    })),
-                                };
-
-                                svc.deps.valid_sessions.insert(session_token, user_id);
-                            }
-                            _ => unreachable!(),
-                        }
-                    } else {
-                        return Err(ServerError::WrongStep {
+                    }) = current_step else {
+                        bail!(ServerError::WrongStep {
                             expected: SmolStr::new_inline("choice"),
                             got: SmolStr::new_inline("form"),
-                        }
-                        .into());
+                        });
+                    };
+
+                    let mut values = Vec::with_capacity(fields.len());
+
+                    handle_fields(svc, &mut values, fields, auth_fields)?;
+
+                    // handle new forms here
+                    match title.as_str() {
+                        "login" => next_step = login::handle(svc, &mut values).await?,
+                        "register" => next_step = registration::handle(svc, &mut values).await?,
+                        title => bail!((
+                            "h.invalid-form",
+                            format!("invalid form name used: {}", title)
+                        )),
                     }
                 }
             }
-        } else {
-            // Safety: step stack can never be empty [ref:step_stack_non_empty]
-            next_step = unsafe { step_stack.last().unwrap_unchecked().clone() };
         }
-    } else {
-        return Err(ServerError::InvalidAuthId.into());
     }
 
     if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
@@ -367,4 +121,128 @@ pub async fn handler(
         step: Some(next_step),
     })
     .into_response())
+}
+
+pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
+    let step = match choice {
+        "login" => AuthStep {
+            can_go_back: true,
+            fallback_url: String::default(),
+            step: Some(auth_step::Step::Form(auth_step::Form {
+                title: "login".to_string(),
+                fields: vec![
+                    auth_step::form::FormField {
+                        name: "email".to_string(),
+                        r#type: "email".to_string(),
+                    },
+                    auth_step::form::FormField {
+                        name: "password".to_string(),
+                        r#type: "password".to_string(),
+                    },
+                ],
+            })),
+        },
+        "register" => {
+            let mut fields = vec![
+                auth_step::form::FormField {
+                    name: "username".to_string(),
+                    r#type: "text".to_string(),
+                },
+                auth_step::form::FormField {
+                    name: "email".to_string(),
+                    r#type: "email".to_string(),
+                },
+                auth_step::form::FormField {
+                    name: "password".to_string(),
+                    r#type: "password".to_string(),
+                },
+            ];
+            if svc.deps.config.policy.disable_registration {
+                fields.push(auth_step::form::FormField {
+                    name: "token".to_string(),
+                    r#type: "password".to_string(),
+                });
+            }
+            AuthStep {
+                can_go_back: true,
+                fallback_url: String::default(),
+                step: Some(auth_step::Step::Form(auth_step::Form {
+                    title: "register".to_string(),
+                    fields,
+                })),
+            }
+        }
+        choice => bail!((
+            "h.invalid-choice",
+            format!("got invalid choice: {}", choice),
+        )),
+    };
+
+    Ok(step)
+}
+
+pub fn handle_fields(
+    _svc: &AuthServer,
+    values: &mut Vec<Field>,
+    fields: Vec<FormFields>,
+    auth_fields: Vec<FormField>,
+) -> ServerResult<()> {
+    for (index, field) in fields.into_iter().enumerate() {
+        let Some(afield) = auth_fields.get(index) else {
+            bail!(ServerError::NoSuchField);
+        };
+        let Some(field) = field.field else {
+            bail!(ServerError::NoFieldSpecified);
+        };
+
+        match afield.r#type.as_str() {
+            "password" | "new-password" => {
+                if matches!(field, Field::Bytes(_)) {
+                    values.push(field);
+                } else {
+                    bail!(ServerError::WrongTypeForField {
+                        name: afield.name.as_str().into(),
+                        expected: SmolStr::new_inline("bytes"),
+                    });
+                }
+            }
+            "text" => {
+                if matches!(field, Field::String(_)) {
+                    values.push(field);
+                } else {
+                    bail!(ServerError::WrongTypeForField {
+                        name: afield.name.as_str().into(),
+                        expected: SmolStr::new_inline("text"),
+                    });
+                }
+            }
+            "number" => {
+                if matches!(field, Field::Number(_)) {
+                    values.push(field);
+                } else {
+                    bail!(ServerError::WrongTypeForField {
+                        name: afield.name.as_str().into(),
+                        expected: SmolStr::new_inline("number"),
+                    });
+                }
+            }
+            "email" => {
+                if matches!(field, Field::String(_)) {
+                    // TODO: validate email here and return error if invalid
+                    values.push(field);
+                } else {
+                    bail!(ServerError::WrongTypeForField {
+                        name: afield.name.as_str().into(),
+                        expected: SmolStr::new_inline("email"),
+                    });
+                }
+            }
+            field => bail!((
+                "h.invalid-field-type",
+                format!("got invalid field type: {}", field)
+            )),
+        }
+    }
+
+    Ok(())
 }

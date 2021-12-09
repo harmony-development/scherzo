@@ -6,6 +6,10 @@ use syn::{parse_macro_input, AttributeArgs, ItemFn};
 pub fn impl_db_methods(input: TokenStream) -> TokenStream {
     let input = proc_macro2::TokenStream::from(input);
     (quote! {
+        pub async fn apply_batch(&self, batch: Batch) -> Result<(), ServerError> {
+            self. #input .apply_batch(batch).await.map_err(ServerError::DbError)
+        }
+
         pub async fn insert(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<Option<EVec>, ServerError> {
             self. #input .insert(key.as_ref(), value.as_ref()).await.map_err(ServerError::DbError)
         }
