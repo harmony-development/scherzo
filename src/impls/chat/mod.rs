@@ -9,7 +9,7 @@ use harmony_rust_sdk::api::{
         FormattedText, Message as HarmonyMessage, *,
     },
     emote::Emote,
-    exports::hrpc::{bail_result, server::socket::Socket, Request},
+    exports::hrpc::{server::socket::Socket, Request},
     harmonytypes::{item_position, Empty, ItemPosition, Metadata},
     rest::FileId,
     sync::{
@@ -21,19 +21,15 @@ use harmony_rust_sdk::api::{
     },
     Hmc,
 };
-use hrpc::server::socket::WriteSocket;
 use image::GenericImageView;
 use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
-    sync::{
-        broadcast::{Sender as BroadcastSend},
-        mpsc::{self, Receiver, UnboundedSender},
-        oneshot,
-    },
+    sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
     task::JoinHandle,
 };
+use tracing::Instrument;
 use triomphe::Arc;
 
 use crate::{
@@ -161,92 +157,130 @@ impl ChatServer {
     fn spawn_event_stream_processor(
         &self,
         user_id: u64,
-        mut sub_rx: Receiver<EventSub>,
-        mut tx: WriteSocket<StreamEventsResponse>,
-        mut close_by_recv_rx: oneshot::Receiver<()>,
-    ) -> JoinHandle<()> {
-        async fn send_event(
-            socket: &mut WriteSocket<StreamEventsResponse>,
-            broadcast: &EventBroadcast,
-            user_id: u64,
-        ) -> bool {
-            tracing::debug!({ user_id = %user_id }, "writing event to socket");
-
-            socket
-                .send_message(StreamEventsResponse {
-                    event: Some(broadcast.event.clone().into()),
-                })
-                .await
-                .map_or_else(
-                    |err| {
-                        tracing::error!(
-                            {
-                                user_id = %user_id,
-                            },
-                            "couldnt write to stream events socket: {}",
-                            err
-                        );
-                        true
-                    },
-                    |_| false,
-                )
-        }
+        socket: Socket<StreamEventsResponse, StreamEventsRequest>,
+    ) -> JoinHandle<Result<(), HrpcError>> {
+        let (mut sock_tx, mut sock_rx) = socket.split();
 
         let mut rx = self.deps.chat_event_sender.subscribe();
         let chat_tree = self.deps.chat_tree.clone();
 
-        tokio::spawn(async move {
+        let fut = async move {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
+            let mut failed_writes: u8 = 0;
+            let mut failed_reads: u8 = 0;
 
             loop {
                 tokio::select! {
-                    Some(sub) = sub_rx.recv() => {
-                        subs.insert(sub);
-                    }
-                    Ok(broadcast) = rx.recv() => {
-                        tracing::debug!({ user_id = %user_id }, "received event");
-                        let check_perms = || async {
-                            match broadcast.perm_check {
-                                Some(PermCheck {
-                                    guild_id,
-                                    channel_id,
-                                    check_for,
-                                    must_be_guild_owner,
-                                }) => {
-                                    let perm = chat_tree.check_perms(
-                                        guild_id,
-                                        channel_id,
-                                        user_id,
-                                        check_for,
-                                        must_be_guild_owner,
-                                    ).await;
+                    res = sock_rx.receive_message() => {
+                        let req = match res {
+                            Ok(req) => {
+                                failed_reads = 0;
+                                req
+                            },
+                            Err(err) => {
+                                tracing::error!(
+                                    { failed_reads = %failed_reads },
+                                    "failed to read from sub read socket: {}", err,
+                                );
 
-                                    matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
+                                failed_reads += 1;
+                                if failed_reads > 5 {
+                                    return Err(err.into());
+                                } else {
+                                    continue;
                                 }
-                                None => true,
                             }
                         };
+                        if let Some(req) = req.request {
+                            use stream_events_request::*;
 
-                        if subs.contains(&broadcast.sub) {
-                            if !broadcast.context.user_ids.is_empty() {
-                                if broadcast.context.user_ids.contains(&user_id)
-                                    && check_perms().await
-                                    && send_event(&mut tx, broadcast.as_ref(), user_id).await
-                                {
-                                    return;
+                            tracing::debug!("got new stream events request");
+
+                            let sub = match req {
+                                Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
+                                    match chat_tree.check_guild_user(guild_id, user_id).await {
+                                        Ok(_) => EventSub::Guild(guild_id),
+                                        Err(err) => {
+                                            tracing::error!("{}", err);
+                                            continue;
+                                        }
+                                    }
                                 }
-                            } else if check_perms().await
-                                && send_event(&mut tx, broadcast.as_ref(), user_id).await
-                            {
-                                return;
+                                Request::SubscribeToActions(SubscribeToActions {}) => EventSub::Actions,
+                                Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
+                                    EventSub::Homeserver
+                                }
+                            };
+
+                            subs.insert(sub);
+                        }
+                    }
+                    Ok(broadcast) = rx.recv() => {
+                        tracing::debug!("received event");
+
+                        if !subs.contains(&broadcast.sub) {
+                            continue;
+                        }
+
+                        if !broadcast.context.user_ids.is_empty() && !broadcast.context.user_ids.contains(&user_id) {
+                            continue;
+                        }
+
+                        let perm_check = match broadcast.perm_check {
+                            Some(PermCheck {
+                                guild_id,
+                                channel_id,
+                                check_for,
+                                must_be_guild_owner,
+                            }) => {
+                                let perm = chat_tree.check_perms(
+                                    guild_id,
+                                    channel_id,
+                                    user_id,
+                                    check_for,
+                                    must_be_guild_owner,
+                                ).await;
+
+                                matches!(perm, Ok(_) | Err(ServerError::EmptyPermissionQuery))
+                            }
+                            None => true,
+                        };
+
+                        if !perm_check {
+                            continue;
+                        }
+
+                        tracing::debug!("writing event to socket");
+
+                        let write_res = sock_tx
+                            .send_message(StreamEventsResponse {
+                                event: Some(broadcast.event.clone().into()),
+                            })
+                            .await;
+
+                        match write_res {
+                            Ok(_) => failed_writes = 0,
+                            Err(err) => {
+                                tracing::error!(
+                                    "couldnt write to stream events socket: {}",
+                                    err
+                                );
+                                failed_writes += 1;
+                                if failed_writes > 5 {
+                                    return Err(err.into());
+                                }
                             }
                         }
                     }
-                    _ = &mut close_by_recv_rx => return,
                     else => tokio::task::yield_now().await,
                 }
             }
-        })
+
+            #[allow(unreachable_code)]
+            Ok(())
+        };
+
+        tokio::spawn(fut)
     }
 
     #[inline(always)]
