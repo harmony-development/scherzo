@@ -28,7 +28,7 @@ use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
     sync::{
-        broadcast::{error::TryRecvError, Sender as BroadcastSend},
+        broadcast::{Sender as BroadcastSend},
         mpsc::{self, Receiver, UnboundedSender},
         oneshot,
     },
@@ -204,6 +204,7 @@ impl ChatServer {
                         subs.insert(sub);
                     }
                     Ok(broadcast) = rx.recv() => {
+                        tracing::debug!({ user_id = %user_id }, "received event");
                         let check_perms = || async {
                             match broadcast.perm_check {
                                 Some(PermCheck {
