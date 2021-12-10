@@ -409,20 +409,38 @@ macro_rules! impl_deser {
 }
 
 const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
+    // check if the lengths match.
+    {
+        let mut new_len = 0;
+        let mut arr_index = 0;
+        while arr_index < arrs.len() {
+            let arr = arrs[arr_index];
+            new_len += arr.len();
+            arr_index += 1;
+        }
+        if new_len != LEN {
+            panic!("concatted array len does not match the specified length");
+        }
+    }
+
     let mut new = [0_u8; LEN];
 
-    let mut new_index = 0;
     let mut arr_index = 0;
+    let mut padding = 0;
     while arr_index < arrs.len() {
         let arr = arrs[arr_index];
-        let mut arr_from_index = 0;
-        while arr_from_index < arr.len() {
-            new[new_index] = arr[arr_from_index];
-            new_index += 1;
-            arr_from_index += 1;
+        // SAFETY:
+        // - the pointers dont overlap because we use our own allocated array
+        // - the pointers are guaranteed to be not null (we create one in fn body
+        // others are gotten as references
+        // - the pointers are guaranteed to be aligned (are they?)
+        unsafe {
+            std::ptr::copy_nonoverlapping(arr.as_ptr(), new.as_mut_ptr().add(padding), arr.len());
         }
+        padding += arr.len();
         arr_index += 1;
     }
+
     new
 }
 
