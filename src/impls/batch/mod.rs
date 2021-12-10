@@ -58,26 +58,23 @@ impl BatchReq {
         let mut responses = Vec::with_capacity(self.bodies.len());
 
         let auth_header = &self.auth_header;
+        if !self.endpoint.is_valid_endpoint() {
+            bail!(ServerError::InvalidBatchEndpoint);
+        }
         match &self.endpoint {
             Endpoint::Same(endpoint) => {
-                tracing::info!(
+                tracing::debug!(
                     "batching {} requests for endpoint {}",
                     self.bodies.len(),
                     endpoint
                 );
-                if !is_valid_endpoint(endpoint) {
-                    return Err(ServerError::InvalidBatchEndpoint.into());
-                }
                 for body in self.bodies {
                     responses.push(process_request(body, endpoint, auth_header, service).await?);
                 }
             }
             Endpoint::Different(a) => {
                 for (body, endpoint) in self.bodies.into_iter().zip(a) {
-                    tracing::info!("batching request for endpoint {}", endpoint);
-                    if !is_valid_endpoint(endpoint) {
-                        return Err(ServerError::InvalidBatchEndpoint.into());
-                    }
+                    tracing::debug!("batching request for endpoint {}", endpoint);
                     responses.push(process_request(body, endpoint, auth_header, service).await?);
                 }
             }
@@ -105,9 +102,18 @@ enum Endpoint {
     Different(Vec<String>),
 }
 
-fn is_valid_endpoint(endpoint: &str) -> bool {
-    let endpoint = endpoint.trim_end_matches('/');
-    !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
+impl Endpoint {
+    fn is_valid_endpoint(&self) -> bool {
+        let check_one = |endpoint: &str| {
+            let endpoint = endpoint.trim_end_matches('/');
+            !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
+        };
+
+        match self {
+            Endpoint::Same(endpoint) => check_one(endpoint),
+            Endpoint::Different(endpoints) => endpoints.iter().map(String::as_str).all(check_one),
+        }
+    }
 }
 
 #[derive(Clone)]
