@@ -144,10 +144,10 @@ pub fn setup_server(
     let voice_server = self::voice::VoiceServer::new(deps.clone(), log_level);
 
     let profile = ProfileServiceServer::new(profile_server.clone());
-    let emote = EmoteServiceServer::new(emote_server.clone());
-    let auth = AuthServiceServer::new(auth_server.clone());
+    let emote = EmoteServiceServer::new(emote_server);
+    let auth = AuthServiceServer::new(auth_server);
     let chat = ChatServiceServer::new(chat_server.clone());
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
     let sync = PostboxServiceServer::new(sync_server);
     #[cfg(feature = "voice")]
     let voice =
@@ -155,11 +155,8 @@ pub fn setup_server(
 
     let batchable_services = {
         let profile = ProfileServiceServer::new(profile_server.batch());
-        let emote = EmoteServiceServer::new(emote_server.batch());
-        let auth = AuthServiceServer::new(auth_server.batch());
         let chat = ChatServiceServer::new(chat_server.batch());
-        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
-        combine_services!(profile, emote, auth, chat, mediaproxy)
+        combine_services!(profile, chat)
     };
 
     let rest = RestServiceLayer::new(deps.clone());

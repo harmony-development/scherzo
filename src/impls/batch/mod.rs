@@ -107,9 +107,18 @@ enum Endpoint {
 
 impl Endpoint {
     fn is_valid_endpoint(&self) -> bool {
+        const ACCEPTED_ENDPOINTS: [&str; 6] = [
+            "/protocol.profile.v1.ProfileService/GetProfile",
+            "/protocol.chat.v1.ChatService/QueryHasPermission",
+            "/protocol.chat.v1.ChatService/GetUserRoles",
+            "/protocol.chat.v1.ChatService/GetGuildRoles",
+            "/protocol.chat.v1.ChatService/GetGuild",
+            "/protocol.chat.v1.ChatService/GetGuildChannels",
+        ];
+
         let check_one = |endpoint: &str| {
             let endpoint = endpoint.trim_end_matches('/');
-            !(endpoint.ends_with("Batch") || endpoint.ends_with("BatchSame"))
+            ACCEPTED_ENDPOINTS.contains(&endpoint)
         };
 
         match self {
