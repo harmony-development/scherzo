@@ -11,7 +11,7 @@
 /.envrc
 
 /.vscode
-/db
+/db*
 /media_root
 /logs
 /media

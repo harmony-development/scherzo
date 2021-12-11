@@ -49,9 +49,13 @@ use tracing::Instrument;
 pub mod migration;
 #[cfg(feature = "sled")]
 pub mod sled;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 
 #[cfg(feature = "sled")]
 pub use self::sled::shared::*;
+#[cfg(all(feature = "sqlite", not(feature = "sled")))]
+pub use self::sqlite::shared::*;
 
 pub async fn open_db(db_path: String, db_config: DbConfig) -> Db {
     let span = tracing::info_span!("scherzo::db", path = %db_path);

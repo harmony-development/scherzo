@@ -67,8 +67,12 @@ pub mod shared {
             )
         }
 
-        pub async fn flush(&self) -> DbResult<usize> {
-            self.inner.flush_async().await.map_err(Into::into)
+        pub async fn flush(&self) -> DbResult<()> {
+            self.inner
+                .flush_async()
+                .await
+                .map(|_| ())
+                .map_err(Into::into)
         }
     }
 
