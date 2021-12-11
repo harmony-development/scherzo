@@ -25,10 +25,19 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "gen_client",
     "rkyv",
 ] }
-hrpc = { version = "0.33", features = ["http_server", "http_hyper_client", "client", "server"] }
+hrpc = { version = "0.33", features = [
+    "http_server",
+    "http_hyper_client",
+    "client",
+    "server",
+    "mock_client",
+    "mock_server",
+] }
 hyper = { version = "0.14", features = ["http1", "http2", "runtime", "stream"] }
 hyper-rustls = { version = "0.23", default-features = false, features = [
-    "native-tokio", "http1", "http2"
+    "native-tokio",
+    "http1",
+    "http2",
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
 tower-http = { version = "0.2", default-features = false, features = [
@@ -56,7 +65,13 @@ tokio-util = "0.6.7"
 swimmer = "0.3"
 
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["tracing-log", "smallvec", "fmt", "ansi", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "tracing-log",
+    "smallvec",
+    "fmt",
+    "ansi",
+    "std",
+] }
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main" }
 opentelemetry = { version = "0.16", features = ["rt-tokio"] }
 opentelemetry-jaeger = { version = "0.15", features = ["rt-tokio"] }

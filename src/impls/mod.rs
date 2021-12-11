@@ -25,7 +25,8 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
 
 use self::{
-    auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, sync::EventDispatch,
+    auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, rest::RestServiceLayer,
+    sync::EventDispatch,
 };
 
 pub mod prelude {
@@ -111,6 +112,74 @@ impl Dependencies {
 
         Ok((Arc::new(this), fed_event_receiver))
     }
+}
+
+pub fn setup_server(
+    deps: Arc<Dependencies>,
+    fed_event_receiver: tokio::sync::mpsc::UnboundedReceiver<EventDispatch>,
+    log_level: tracing::Level,
+) -> (impl MakeRoutes, RestServiceLayer) {
+    use self::{
+        auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
+        mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer,
+    };
+    use harmony_rust_sdk::api::{
+        auth::auth_service_server::AuthServiceServer,
+        batch::batch_service_server::BatchServiceServer,
+        chat::chat_service_server::ChatServiceServer,
+        emote::emote_service_server::EmoteServiceServer,
+        mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
+        profile::profile_service_server::ProfileServiceServer,
+        sync::postbox_service_server::PostboxServiceServer,
+    };
+    use hrpc::combine_services;
+
+    let profile_server = ProfileServer::new(deps.clone());
+    let emote_server = EmoteServer::new(deps.clone());
+    let auth_server = AuthServer::new(deps.clone());
+    let chat_server = ChatServer::new(deps.clone());
+    let mediaproxy_server = MediaproxyServer::new(deps.clone());
+    let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
+    #[cfg(feature = "voice")]
+    let voice_server = self::voice::VoiceServer::new(deps.clone(), log_level);
+
+    let profile = ProfileServiceServer::new(profile_server.clone());
+    let emote = EmoteServiceServer::new(emote_server.clone());
+    let auth = AuthServiceServer::new(auth_server.clone());
+    let chat = ChatServiceServer::new(chat_server.clone());
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
+    let sync = PostboxServiceServer::new(sync_server);
+    #[cfg(feature = "voice")]
+    let voice =
+        harmony_rust_sdk::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
+
+    let batchable_services = {
+        let profile = ProfileServiceServer::new(profile_server.batch());
+        let emote = EmoteServiceServer::new(emote_server.batch());
+        let auth = AuthServiceServer::new(auth_server.batch());
+        let chat = ChatServiceServer::new(chat_server.batch());
+        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
+        combine_services!(profile, emote, auth, chat, mediaproxy)
+    };
+
+    let rest = RestServiceLayer::new(deps.clone());
+
+    let batch_server = BatchServer::new(deps, batchable_services);
+    let batch = BatchServiceServer::new(batch_server);
+
+    let server = combine_services!(
+        profile,
+        emote,
+        auth,
+        chat,
+        mediaproxy,
+        sync,
+        #[cfg(feature = "voice")]
+        voice,
+        batch
+    );
+
+    (server, rest)
 }
 
 fn get_time_secs() -> u64 {

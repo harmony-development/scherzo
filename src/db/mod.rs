@@ -32,7 +32,7 @@ use std::{
     mem::size_of,
 };
 
-use crate::{config::DbConfig, travel_error, utils::evec::EVec};
+use crate::{config::DbConfig, error::travel_error, utils::evec::EVec};
 
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},

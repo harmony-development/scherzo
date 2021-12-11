@@ -10,27 +10,9 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "voice")]
-mod voice {
-    pub(super) use harmony_rust_sdk::api::voice::voice_service_server::VoiceServiceServer;
-    pub(super) use scherzo::impls::voice::VoiceServer;
-}
-
 use harmony_rust_sdk::api::{
-    auth::auth_service_server::AuthServiceServer,
-    batch::batch_service_server::BatchServiceServer,
-    chat::{
-        chat_service_server::ChatServiceServer, content, guild_kind, ChannelKind, FormattedText,
-        Permission,
-    },
-    emote::emote_service_server::EmoteServiceServer,
-    exports::hrpc::{
-        combine_services,
-        server::transport::{http::Hyper, Transport},
-    },
-    mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
-    profile::profile_service_server::ProfileServiceServer,
-    sync::postbox_service_server::PostboxServiceServer,
+    chat::{content, guild_kind, ChannelKind, FormattedText, Permission},
+    exports::hrpc::server::transport::{http::Hyper, Transport},
 };
 use hrpc::{
     common::layer::trace::TraceLayer as HrpcTraceLayer,
@@ -51,14 +33,8 @@ use scherzo::{
     },
     impls::{
         against,
-        auth::AuthServer,
-        batch::BatchServer,
-        chat::{AdminGuildKeys, ChatServer, DEFAULT_ROLE_ID},
-        emote::EmoteServer,
-        mediaproxy::MediaproxyServer,
-        profile::ProfileServer,
+        chat::{AdminGuildKeys, DEFAULT_ROLE_ID},
         rest::RestServiceLayer,
-        sync::{EventDispatch, SyncServer},
         Dependencies, HELP_TEXT,
     },
     utils, ServerError,
@@ -73,7 +49,6 @@ use tower_http::{
 };
 use tracing::{debug, error, info, info_span, warn, Instrument, Level};
 use tracing_subscriber::{filter::Targets, fmt, prelude::*};
-use triomphe::Arc;
 
 // in seconds
 // do once per hour
@@ -128,7 +103,18 @@ pub fn run(db_path: String, console: bool, jaeger: bool, log_level: Level) {
         .expect("keys must be created");
     let _ = deps.chat_tree.admin_guild_keys.set(admin_guild_keys);
 
-    let (server, rest) = setup_server(deps.clone(), fed_event_receiver, log_level);
+    let (server, rest) = scherzo::impls::setup_server(deps.clone(), fed_event_receiver, log_level);
+    let server = server
+        .layer(ErrorIdentifierToStatusLayer::new(
+            ServerError::identifier_to_status,
+        ))
+        .layer(HrpcTraceLayer::default_debug().span_fn(|req| {
+            let socket_addr = req
+                .extensions()
+                .get::<SocketAddr>()
+                .map_or_else(String::new, SocketAddr::to_string);
+            tracing::debug_span!("hrpc_request", socket_addr = %socket_addr)
+        }));
 
     let integrity = start_integrity_check_thread(deps.as_ref());
 
@@ -220,68 +206,6 @@ async fn setup_db(db_path: String, config: &Config) -> (Db, usize) {
             .expect("something went wrong while applying the migrations!!!");
     }
     (db, current_db_version)
-}
-
-fn setup_server(
-    deps: Arc<Dependencies>,
-    fed_event_receiver: tokio::sync::mpsc::UnboundedReceiver<EventDispatch>,
-    log_level: Level,
-) -> (impl MakeRoutes, RestServiceLayer) {
-    let profile_server = ProfileServer::new(deps.clone());
-    let emote_server = EmoteServer::new(deps.clone());
-    let auth_server = AuthServer::new(deps.clone());
-    let chat_server = ChatServer::new(deps.clone());
-    let mediaproxy_server = MediaproxyServer::new(deps.clone());
-    let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
-    #[cfg(feature = "voice")]
-    let voice_server = voice::VoiceServer::new(deps.clone(), log_level);
-
-    let profile = ProfileServiceServer::new(profile_server.clone());
-    let emote = EmoteServiceServer::new(emote_server.clone());
-    let auth = AuthServiceServer::new(auth_server.clone());
-    let chat = ChatServiceServer::new(chat_server.clone());
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
-    let sync = PostboxServiceServer::new(sync_server);
-    #[cfg(feature = "voice")]
-    let voice = voice::VoiceServiceServer::new(voice_server);
-
-    let batchable_services = {
-        let profile = ProfileServiceServer::new(profile_server.batch());
-        let emote = EmoteServiceServer::new(emote_server.batch());
-        let auth = AuthServiceServer::new(auth_server.batch());
-        let chat = ChatServiceServer::new(chat_server.batch());
-        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
-        combine_services!(profile, emote, auth, chat, mediaproxy)
-    };
-
-    let rest = RestServiceLayer::new(deps.clone());
-
-    let batch_server = BatchServer::new(deps, batchable_services);
-    let batch = BatchServiceServer::new(batch_server);
-
-    let server = combine_services!(
-        profile,
-        emote,
-        auth,
-        chat,
-        mediaproxy,
-        sync,
-        #[cfg(feature = "voice")]
-        voice,
-        batch
-    )
-    .layer(ErrorIdentifierToStatusLayer::new(
-        ServerError::identifier_to_status,
-    ))
-    .layer(HrpcTraceLayer::default_debug().span_fn(|req| {
-        let socket_addr = req
-            .extensions()
-            .get::<SocketAddr>()
-            .map_or_else(String::new, SocketAddr::to_string);
-        tracing::debug_span!("hrpc_request", socket_addr = %socket_addr)
-    }));
-
-    (server, rest)
 }
 
 fn setup_transport(

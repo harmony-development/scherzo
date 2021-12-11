@@ -879,6 +879,7 @@ dependencies = [
  "axum-server",
  "base64",
  "bytes",
+ "futures-channel",
  "futures-util",
  "hrpc-build",
  "hrpc-proc-macro",

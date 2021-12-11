@@ -43,6 +43,15 @@ pub mod shared {
         .unwrap()
     }
 
+    pub fn open_temp() -> Db {
+        let inner = sled::Config::new()
+            .temporary(true)
+            .open()
+            .expect("failed to create temp db");
+
+        Db { inner }
+    }
+
     #[derive(Debug, Clone)]
     pub struct Db {
         inner: sled::Db,
