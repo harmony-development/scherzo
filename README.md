@@ -3,9 +3,11 @@
 Harmony server implemented in Rust.
 
 It uses [hyper] for serving HTTP via [hrpc-rs], and currently supports [sled]
-as a database backend.
+and `sqlite` as a database backend.
 
 ## Deploy
+
+Note: the CI builds are currently compiled with `sled` DB backend.
 
 With docker (or podman):
 ```
