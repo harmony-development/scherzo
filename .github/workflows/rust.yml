@@ -51,8 +51,18 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}
         name: clippy
 
+    - name: Clippy
+      uses: actions-rs/clippy-check@v1
+      with:
+        args: "--target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice"
+        token: ${{ secrets.GITHUB_TOKEN }}
+        name: clippy
+
     - name: Test
       run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sled,voice
+
+    - name: Test
+      run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice
 
     - name: Build
       run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,voice,jemalloc
