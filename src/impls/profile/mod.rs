@@ -49,9 +49,9 @@ impl ProfileServer {
 
 impl ProfileService for ProfileServer {
     impl_unary_handlers! {
-        #[rate(5, 10)]
+        #[rate(8, 5)]
         get_profile, GetProfileRequest, GetProfileResponse;
-        #[rate(4, 1)]
+        #[rate(4, 2)]
         get_app_data, GetAppDataRequest, GetAppDataResponse;
         #[rate(2, 5)]
         set_app_data, SetAppDataRequest, SetAppDataResponse;

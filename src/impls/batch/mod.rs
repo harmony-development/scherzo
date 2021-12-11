@@ -158,9 +158,9 @@ impl BatchServer {
 
 impl BatchService for BatchServer {
     impl_unary_handlers! {
-        #[rate(5, 5)]
+        #[rate(10, 4)]
         batch, BatchRequest, BatchResponse;
-        #[rate(5, 5)]
+        #[rate(10, 4)]
         batch_same, BatchSameRequest, BatchSameResponse;
     }
 }
