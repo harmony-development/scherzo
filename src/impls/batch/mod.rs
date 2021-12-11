@@ -44,7 +44,10 @@ impl BatchReq {
                     .insert(header::AUTHORIZATION, auth.clone());
             }
 
-            let reply = service.call(req).await.unwrap();
+            let mut reply = service.call(req).await.unwrap();
+            if let Some(err) = reply.extensions_mut().remove::<HrpcError>() {
+                bail!(err);
+            }
 
             // This should be safe since we know we insert a message into responses
             // as whole chunks
