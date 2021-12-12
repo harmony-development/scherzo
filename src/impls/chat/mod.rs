@@ -1521,7 +1521,7 @@ impl ChatTree {
         content: Option<Content>,
         media_root: &Path,
         host: &str,
-    ) -> Result<Content, ServerError> {
+    ) -> ServerResult<Content> {
         use content::Content as MsgContent;
 
         let inner_content = content.and_then(|c| c.content);
@@ -1529,21 +1529,28 @@ impl ChatTree {
             let content = match content {
                 content::Content::TextMessage(text) => {
                     if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        bail!(ServerError::MessageContentCantBeEmpty);
                     }
                     content::Content::TextMessage(text)
                 }
                 content::Content::PhotoMessage(mut photos) => {
                     if photos.photos.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        bail!(ServerError::MessageContentCantBeEmpty);
                     }
                     for photo in photos.photos.drain(..).collect::<Vec<_>>() {
                         // TODO: return error for invalid hmc
-                        if let Ok(hmc) = Hmc::from_str(&photo.hmc) {
+                        if let Ok(file_id) = FileId::from_str(&photo.hmc) {
                             const FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
 
                             // TODO: check if the hmc host matches ours, if not fetch the image from the other host
-                            let id = hmc.id();
+                            let id = match &file_id {
+                                FileId::External(_) => bail!((
+                                    "h.photo-cant-have-external-url",
+                                    "message photo contents cant use external URL"
+                                )),
+                                FileId::Hmc(hmc) => hmc.id(),
+                                FileId::Id(id) => id.as_str(),
+                            };
 
                             let image_jpeg_id = format!("{}_{}", id, "jpeg");
                             let image_jpeg_path = media_root.join(&image_jpeg_id);
@@ -1642,7 +1649,7 @@ impl ChatTree {
                 }
                 content::Content::AttachmentMessage(mut files) => {
                     if files.files.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        bail!(ServerError::MessageContentCantBeEmpty);
                     }
                     for attachment in files.files.drain(..).collect::<Vec<_>>() {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
@@ -1703,21 +1710,21 @@ impl ChatTree {
                 }
                 content::Content::EmbedMessage(embed) => {
                     if embed.embeds.is_empty() {
-                        return Err(ServerError::MessageContentCantBeEmpty);
+                        bail!(ServerError::MessageContentCantBeEmpty);
                     }
                     content::Content::EmbedMessage(embed)
                 }
                 MsgContent::InviteAccepted(_)
                 | MsgContent::InviteRejected(_)
                 | MsgContent::RoomUpgradedToGuild(_) => {
-                    return Err(ServerError::ContentCantBeSentByUser)
+                    bail!(ServerError::ContentCantBeSentByUser);
                 }
             };
             Content {
                 content: Some(content),
             }
         } else {
-            return Err(ServerError::MessageContentCantBeEmpty);
+            bail!(ServerError::MessageContentCantBeEmpty);
         };
 
         Ok(content)
