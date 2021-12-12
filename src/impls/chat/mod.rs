@@ -5,8 +5,8 @@ use std::{
 
 use harmony_rust_sdk::api::{
     chat::{
-        get_channel_messages_request::Direction, permission::has_permission, stream_event,
-        FormattedText, Message as HarmonyMessage, *,
+        get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
+        stream_event, FormattedText, Message as HarmonyMessage, *,
     },
     emote::Emote,
     exports::hrpc::{server::socket::Socket, Request},
@@ -1487,6 +1487,33 @@ impl ChatTree {
         self.insert(key, value).await?;
 
         Ok((message_id, message))
+    }
+
+    pub fn process_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
+        if let Some(ov) = overrides {
+            if ov.avatar.as_ref().map_or(false, String::is_empty) {
+                bail!((
+                    "h.override-avatar-cant-be-empty",
+                    "message override avatar must not be empty if set"
+                ));
+            }
+            if ov.username.as_ref().map_or(false, String::is_empty) {
+                bail!((
+                    "h.override-username-cant-be-empty",
+                    "message override username must not be empty if set"
+                ));
+            }
+            if let Some(Reason::UserDefined(reason)) = ov.reason.as_ref() {
+                if reason.is_empty() {
+                    bail!((
+                        "h.override-custom-reason-cant-be-empty",
+                        "message override custom reason must not be empty if set"
+                    ));
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn process_message_content(

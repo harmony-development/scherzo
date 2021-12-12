@@ -20,6 +20,7 @@ pub async fn handler(
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
+    chat_tree.process_message_overrides(request.overrides.as_ref())?;
     let content = chat_tree
         .process_message_content(
             request.content.take(),
