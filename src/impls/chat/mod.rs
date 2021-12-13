@@ -892,20 +892,18 @@ impl ChatTree {
     ) -> ServerResult<GetChannelMessagesResponse> {
         let direction = direction.unwrap_or_default();
 
-        let maybe_last_message_id = self
-            .get_last_message_id(guild_id, channel_id)
-            .await?
-            .checked_sub(1);
-        let last_message_id = match maybe_last_message_id {
-            Some(id) => id,
-            None => {
-                return Ok(GetChannelMessagesResponse {
-                    messages: Vec::new(),
-                    reached_bottom: true,
-                    reached_top: true,
-                })
-            }
-        };
+        // this is misleading... its actually the *next* message id to be used.
+        // it doesnt matter here though.
+        let last_message_id = self.get_last_message_id(guild_id, channel_id).await?;
+
+        // if 1 it means that no messages have been sent yet
+        if last_message_id == 1 {
+            return Ok(GetChannelMessagesResponse {
+                messages: Vec::new(),
+                reached_bottom: true,
+                reached_top: true,
+            });
+        }
 
         let count = count.map_or_else(
             || {
