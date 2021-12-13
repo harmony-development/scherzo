@@ -127,9 +127,9 @@ checksum = "e91831deabf0d6d7ec49552e489aed63b7456a7a3c46cff62adad428110b0af0"
 
 [[package]]
 name = "async-trait"
-version = "0.1.51"
+version = "0.1.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44318e776df68115a881de9a8fd1b9e53368d7a4a5ce4cc48517da3393233a5e"
+checksum = "061a7acccaa286c011ddc30970520b98fa40e00c9d644633fb26b5fc63a265e3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -834,7 +834,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#ff20610beeade9f5c18aab6ce68049d1945ccb87"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e26cb3237389f5837bbd88ad04f4f3bc1e5cce9f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -844,7 +844,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.7.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#ff20610beeade9f5c18aab6ce68049d1945ccb87"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e26cb3237389f5837bbd88ad04f4f3bc1e5cce9f"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -923,9 +923,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hrpc"
-version = "0.33.7"
+version = "0.33.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae173d5da8d96a0960bb107e842aa9780c28a52642049ca0b7e2e50579cabec0"
+checksum = "50710e740262587131bf7a9c6f40afdef3d05c47aa0f28b573f9273936ae91bb"
 dependencies = [
  "axum-server",
  "base64",
@@ -1194,9 +1194,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.109"
+version = "0.2.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f98a04dce437184842841303488f70d0188c5f51437d2a834dc097eafa909a01"
+checksum = "8e167738f1866a7ec625567bae89ca0d44477232a4f7c52b1c7f2adc2c98804f"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -1512,7 +1512,7 @@ checksum = "28988d872ab76095a6e6ac88d99b54fd267702734fd7ffe610ca27f533ddb95a"
 [[package]]
 name = "opentelemetry"
 version = "0.16.0"
-source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#b3fa55361d233451c1e4f2c9c39f6557e83c47ec"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#5ed5f3e36475b639fe00c818e4199e03aeee3c33"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
@@ -1530,7 +1530,7 @@ dependencies = [
 [[package]]
 name = "opentelemetry-jaeger"
 version = "0.15.0"
-source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#b3fa55361d233451c1e4f2c9c39f6557e83c47ec"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#5ed5f3e36475b639fe00c818e4199e03aeee3c33"
 dependencies = [
  "async-trait",
  "lazy_static",
@@ -1544,7 +1544,7 @@ dependencies = [
 [[package]]
 name = "opentelemetry-semantic-conventions"
 version = "0.8.0"
-source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#b3fa55361d233451c1e4f2c9c39f6557e83c47ec"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?branch=main#5ed5f3e36475b639fe00c818e4199e03aeee3c33"
 dependencies = [
  "opentelemetry",
 ]
@@ -2033,9 +2033,9 @@ dependencies = [
 
 [[package]]
 name = "ryu"
-version = "1.0.6"
+version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c9613b5a66ab9ba26415184cfc41156594925a9cf3a2057e57f31ff145f6568"
+checksum = "73b4b750c782965c211b42f022f59af1fbceabdd026623714f104152f1ec149f"
 
 [[package]]
 name = "same-file"
@@ -2183,18 +2183,18 @@ checksum = "568a8e6258aa33c13358f81fd834adb854c6f7c9468520910a9b1e8fac068012"
 
 [[package]]
 name = "serde"
-version = "1.0.130"
+version = "1.0.131"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f12d06de37cf59146fbdecab66aa99f9fe4f78722e3607577a5375d66bd0c913"
+checksum = "b4ad69dfbd3e45369132cc64e6748c2d65cdfb001a2b1c232d128b4ad60561c1"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.130"
+version = "1.0.131"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7bc1a1ab1961464eae040d96713baa5a724a8152c1222492465b54322ec508b"
+checksum = "b710a83c4e0dff6a3d511946b95274ad9ca9e5d3ae497b63fda866ac955358d2"
 dependencies = [
  "proc-macro2",
  "quote",
