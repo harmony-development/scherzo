@@ -269,6 +269,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
             ("console_subscriber", Level::ERROR),
             ("h2", level_filter),
             ("h2::codec", Level::ERROR),
+            ("sqlx::query", level_filter),
         ])
         .with_default(level_filter);
 

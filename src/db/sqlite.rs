@@ -1,6 +1,6 @@
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteSynchronous},
-    SqlitePool,
+    ConnectOptions, SqlitePool,
 };
 
 use super::{DbError, DbResult};
@@ -8,7 +8,7 @@ use super::{DbError, DbResult};
 use crate::config::DbConfig;
 
 pub mod shared {
-    use std::ops::RangeInclusive;
+    use std::{ops::RangeInclusive, time::Duration};
 
     use hrpc::exports::futures_util::StreamExt;
     use itertools::Either;
@@ -20,13 +20,15 @@ pub mod shared {
     use super::*;
 
     pub async fn open_database(db_path: String, _db_config: DbConfig) -> DbResult<Db> {
-        let pool = SqlitePool::connect_with(
-            SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(true)
-                .synchronous(SqliteSynchronous::Normal),
-        )
-        .await?;
+        let mut conf = SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(true)
+            .synchronous(SqliteSynchronous::Normal);
+
+        conf.log_statements(tracing::log::LevelFilter::Trace)
+            .log_slow_statements(tracing::log::LevelFilter::Error, Duration::from_secs(2));
+
+        let pool = SqlitePool::connect_with(conf).await?;
 
         Ok(Db { pool })
     }
