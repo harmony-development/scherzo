@@ -1558,18 +1558,6 @@ impl ChatTree {
                             let ((file_size, isize), minithumbnail) = if image_jpeg_path.exists()
                                 && minithumbnail_jpeg_path.exists()
                             {
-                                let minifile = BufReader::new(
-                                    tokio::fs::File::open(&minithumbnail_jpeg_path)
-                                        .await
-                                        .map_err(ServerError::from)?
-                                        .into_std()
-                                        .await,
-                                );
-                                let mut minireader = image::io::Reader::new(minifile);
-                                minireader.set_format(FORMAT);
-                                let minisize = minireader
-                                    .into_dimensions()
-                                    .map_err(|_| ServerError::InternalServerError)?;
                                 let minithumbnail_jpeg = tokio::fs::read(&minithumbnail_jpeg_path)
                                     .await
                                     .map_err(ServerError::from)?;
@@ -1582,6 +1570,7 @@ impl ChatTree {
                                 let ifile = BufReader::new(ifile.into_std().await);
                                 let mut ireader = image::io::Reader::new(ifile);
                                 ireader.set_format(FORMAT);
+                                // this should be cheap and shouldnt block...
                                 let isize = ireader
                                     .into_dimensions()
                                     .map_err(|_| ServerError::InternalServerError)?;
@@ -1589,42 +1578,54 @@ impl ChatTree {
                                 (
                                     (file_size as u32, isize),
                                     Minithumbnail {
-                                        width: minisize.0,
-                                        height: minisize.1,
+                                        width: 64,
+                                        height: 64,
                                         data: minithumbnail_jpeg,
                                     },
                                 )
                             } else {
                                 let (_, _, data, _) = get_file_full(media_root, id).await?;
 
-                                let guessed_format = image::guess_format(&data)
-                                    .map_err(|_| ServerError::NotAnImage)?;
+                                let (image, image_jpeg) = tokio::task::spawn_blocking(move || {
+                                    let guessed_format = image::guess_format(&data)
+                                        .map_err(|_| ServerError::NotAnImage)?;
 
-                                let image =
-                                    image::load_from_memory_with_format(&data, guessed_format)
+                                    let image =
+                                        image::load_from_memory_with_format(&data, guessed_format)
+                                            .map_err(|_| ServerError::InternalServerError)?;
+                                    let mut image_jpeg = Vec::new();
+                                    image
+                                        .write_to(&mut image_jpeg, FORMAT)
                                         .map_err(|_| ServerError::InternalServerError)?;
-                                let image_size = image.dimensions();
-                                let mut image_jpeg = Vec::new();
-                                image
-                                    .write_to(&mut image_jpeg, FORMAT)
-                                    .map_err(|_| ServerError::InternalServerError)?;
-                                let file_size = image_jpeg.len();
-                                tokio::fs::write(&image_jpeg_path, image_jpeg)
+                                    ServerResult::Ok((image, image_jpeg))
+                                })
+                                .await
+                                .expect("failed to join task")?;
+
+                                tokio::fs::write(&image_jpeg_path, &image_jpeg)
                                     .await
                                     .map_err(ServerError::from)?;
 
-                                let minithumbnail = image.thumbnail(64, 64);
-                                let minithumb_size = minithumbnail.dimensions();
-                                let mut minithumbnail_jpeg = Vec::new();
-                                minithumbnail
-                                    .write_to(&mut minithumbnail_jpeg, FORMAT)
-                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let (image, minithumbnail, minithumbnail_jpeg) =
+                                    tokio::task::spawn_blocking(move || {
+                                        let minithumbnail = image.thumbnail(64, 64);
+                                        let mut minithumbnail_jpeg = Vec::new();
+                                        minithumbnail
+                                            .write_to(&mut minithumbnail_jpeg, FORMAT)
+                                            .map_err(|_| ServerError::InternalServerError)?;
+
+                                        ServerResult::Ok((image, minithumbnail, minithumbnail_jpeg))
+                                    })
+                                    .await
+                                    .expect("task panicked")?;
+
                                 tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
                                     .await
                                     .map_err(ServerError::from)?;
 
+                                let minithumb_size = minithumbnail.dimensions();
                                 (
-                                    (file_size as u32, image_size),
+                                    (image_jpeg.len() as u32, image.dimensions()),
                                     Minithumbnail {
                                         width: minithumb_size.0,
                                         height: minithumb_size.1,
