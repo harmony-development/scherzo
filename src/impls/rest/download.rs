@@ -168,7 +168,7 @@ pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
 // Safety: the `name` argument MUST ONLY contain ASCII characters.
 unsafe fn disposition_header(name: &str) -> HeaderValue {
     HeaderValue::from_maybe_shared_unchecked(Bytes::from(
-        format!("attachment; filename={}", name).into_bytes(),
+        format!("inline; filename={}", name).into_bytes(),
     ))
 }
 
