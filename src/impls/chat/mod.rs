@@ -805,13 +805,8 @@ impl ChatTree {
         role_id: u64,
         position: Option<ItemPosition>,
     ) -> Result<(), ServerError> {
-        self.update_order_logic(
-            role_id,
-            position,
-            |role_id| self.does_role_exist(guild_id, role_id),
-            &make_guild_role_ordering_key(guild_id),
-        )
-        .await
+        self.update_order_logic(role_id, position, &make_guild_role_ordering_key(guild_id))
+            .await
     }
 
     pub async fn update_channel_order_logic(
@@ -823,24 +818,18 @@ impl ChatTree {
         self.update_order_logic(
             channel_id,
             position,
-            |channel_id| self.does_channel_exist(guild_id, channel_id),
             &make_guild_chan_ordering_key(guild_id),
         )
         .await
     }
 
     #[inline(always)]
-    pub async fn update_order_logic<CheckFn, Fut>(
+    pub async fn update_order_logic(
         &self,
         id: u64,
         position: Option<ItemPosition>,
-        check_exists: CheckFn,
         key: &[u8],
-    ) -> Result<(), ServerError>
-    where
-        Fut: Future<Output = Result<(), ServerError>>,
-        CheckFn: Fn(u64) -> Fut,
-    {
+    ) -> Result<(), ServerError> {
         let mut ordering = self.get_list_u64_logic(key).await?;
 
         let maybe_ord_index = |id: u64| ordering.iter().position(|oid| id.eq(oid));
@@ -859,7 +848,6 @@ impl ChatTree {
 
         if let Some(position) = position {
             let item_id = position.item_id;
-            check_exists(item_id).await?;
             match position.position() {
                 item_position::Position::After => {
                     if let Some(index) = maybe_ord_index(item_id) {
@@ -1134,6 +1122,10 @@ impl ChatTree {
         metadata: Option<Metadata>,
         position: Option<ItemPosition>,
     ) -> Result<u64, ServerError> {
+        if let Some(chan_id) = position.as_ref().map(|pos| pos.item_id) {
+            self.does_channel_exist(guild_id, chan_id).await?;
+        }
+
         let (channel_id, key) = {
             let mut rng = rand::rngs::SmallRng::from_entropy();
             let mut channel_id = rng.gen_range(1..=u64::MAX);
