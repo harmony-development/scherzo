@@ -1597,10 +1597,12 @@ impl ChatTree {
                             } else {
                                 let (_, _, data, _) = get_file_full(media_root, id).await?;
 
-                                image::guess_format(&data).map_err(|_| ServerError::NotAnImage)?;
+                                let guessed_format = image::guess_format(&data)
+                                    .map_err(|_| ServerError::NotAnImage)?;
 
-                                let image = image::load_from_memory(&data)
-                                    .map_err(|_| ServerError::InternalServerError)?;
+                                let image =
+                                    image::load_from_memory_with_format(&data, guessed_format)
+                                        .map_err(|_| ServerError::InternalServerError)?;
                                 let image_size = image.dimensions();
                                 let mut image_jpeg = Vec::new();
                                 image
