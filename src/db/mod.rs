@@ -57,6 +57,8 @@ pub use self::sled::shared::*;
 #[cfg(all(feature = "sqlite", not(feature = "sled")))]
 pub use self::sqlite::shared::*;
 
+pub const TREES: [&[u8]; 6] = [b"auth", b"chat", b"sync", b"version", b"profile", b"emote"];
+
 pub async fn open_db(db_path: String, db_config: DbConfig) -> Db {
     let span = tracing::info_span!("scherzo::db", path = %db_path);
     let fut = async move {
