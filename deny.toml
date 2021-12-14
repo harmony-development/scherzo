@@ -208,7 +208,6 @@ unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    "https://github.com/jackthomson2/dashmap.git",
     "https://github.com/servo/html5ever.git",
 ]
 

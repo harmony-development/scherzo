@@ -322,7 +322,7 @@ dependencies = [
  "humantime",
  "serde",
  "serde_json",
- "thread_local 1.1.3",
+ "thread_local",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -427,17 +427,18 @@ dependencies = [
 
 [[package]]
 name = "crypto-common"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "567569e659735adb39ff2d4c20600f7cd78be5471f8c58ab162bce3c03fdbc5f"
+checksum = "683d6b536309245c849479fba3da410962a43ed8e51c26b729208ec0ac2798d0"
 dependencies = [
  "generic-array",
 ]
 
 [[package]]
 name = "dashmap"
-version = "4.0.2"
-source = "git+https://github.com/jackthomson2/dashmap.git?branch=master#5c470f5fbf7987a473097bff691958653b24eec1"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b799062aaf67eb976af3bdca031ee6f846d2f0a5710ddbb0d2efee33f3cc4760"
 dependencies = [
  "cfg-if",
  "num_cpus",
@@ -489,9 +490,9 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8549e6bfdecd113b7e221fe60b433087f6957387a20f8118ebca9b12af19143d"
+checksum = "b697d66081d42af4fba142d56918a3cb21dc8eb63372c6b85d14f44fb9c5979b"
 dependencies = [
  "block-buffer 0.10.0",
  "crypto-common",
@@ -834,7 +835,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e26cb3237389f5837bbd88ad04f4f3bc1e5cce9f"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#3abd1e0c7b2c24cad9312b9c14c7a186fb373238"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -844,7 +845,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.7.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e26cb3237389f5837bbd88ad04f4f3bc1e5cce9f"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#3abd1e0c7b2c24cad9312b9c14c7a186fb373238"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -923,9 +924,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hrpc"
-version = "0.33.10"
+version = "0.33.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50710e740262587131bf7a9c6f40afdef3d05c47aa0f28b573f9273936ae91bb"
+checksum = "a2c7902e5c28d7be186e12b3ef6d07346c2fa753b36e67ebde31ff554f39a595"
 dependencies = [
  "axum-server",
  "base64",
@@ -942,7 +943,7 @@ dependencies = [
  "pin-project-lite",
  "prost",
  "prost-build",
- "sha-1",
+ "sha-1 0.10.0",
  "tokio",
  "tokio-tungstenite",
  "tower",
@@ -989,7 +990,7 @@ checksum = "1323096b05d41827dadeaee54c9981958c0f94e670bc94ed80037d1a7b8b186b"
 dependencies = [
  "bytes",
  "fnv",
- "itoa",
+ "itoa 0.4.8",
 ]
 
 [[package]]
@@ -1042,7 +1043,7 @@ dependencies = [
  "http-body",
  "httparse",
  "httpdate",
- "itoa",
+ "itoa 0.4.8",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -1154,6 +1155,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71991ff56294aa922b450139ee08b3bfc70982c6b2c7562771375cf73542dd4"
 
 [[package]]
+name = "itoa"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aab8fc367588b89dcee83ab0fd66b72b50b72fa1904d7095045ace2b0c81c35"
+
+[[package]]
 name = "jobserver"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1194,9 +1201,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.111"
+version = "0.2.112"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e167738f1866a7ec625567bae89ca0d44477232a4f7c52b1c7f2adc2c98804f"
+checksum = "1b03d17f364a3a042d5e5d46b053bbbf82c92c9430c592dd4c064dc6ee997125"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -2203,11 +2210,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.72"
+version = "1.0.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0ffa0837f2dfa6fb90868c2b5468cad482e175f7dad97e7421951e663f2b527"
+checksum = "bcbd0344bc6533bc7ec56df11d42fb70f1b912351c0825ccb7211b59d8af7cf5"
 dependencies = [
- "itoa",
+ "itoa 1.0.1",
  "ryu",
  "serde",
 ]
@@ -2237,12 +2244,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha-1"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "028f48d513f9678cda28f6e4064755b3fbb2af6acd672f2c209b62323f7aea0f"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.10.1",
+]
+
+[[package]]
 name = "sha3"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "31f935e31cf406e8c0e96c2815a5516181b7004ae8c5f296293221e9b1e356bd"
 dependencies = [
- "digest 0.10.0",
+ "digest 0.10.1",
  "keccak",
 ]
 
@@ -2373,7 +2391,7 @@ dependencies = [
  "hashlink",
  "hex",
  "indexmap",
- "itoa",
+ "itoa 0.4.8",
  "libc",
  "libsqlite3-sys",
  "log",
@@ -2459,10 +2477,9 @@ dependencies = [
 [[package]]
 name = "swimmer"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "963def60929892c4b13817d852a02ae7516d43e5aa8e0eeb560f580b1ce1e157"
+source = "git+https://github.com/yusdacra/swimmer-rs.git?branch=master#5f5735a6f8a6e3c61624ab7756943c8fa0cc2793"
 dependencies = [
- "thread_local 0.3.6",
+ "thread_local",
 ]
 
 [[package]]
@@ -2519,15 +2536,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "thread_local"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6b53e329000edc2b34dbe8545fd20e55a333362d0a321909685a19bd28c3f1b"
-dependencies = [
- "lazy_static",
 ]
 
 [[package]]
@@ -2899,7 +2907,7 @@ dependencies = [
  "ansi_term",
  "sharded-slab",
  "smallvec",
- "thread_local 1.1.3",
+ "thread_local",
  "tracing-core",
  "tracing-log",
 ]
@@ -2933,7 +2941,7 @@ dependencies = [
  "log",
  "rand",
  "rustls 0.20.2",
- "sha-1",
+ "sha-1 0.9.8",
  "thiserror",
  "url",
  "utf-8",
