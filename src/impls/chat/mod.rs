@@ -1811,4 +1811,23 @@ impl ChatTree {
 
         Ok(reaction)
     }
+
+    pub async fn get_pinned_messages_logic(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+    ) -> Result<Vec<u64>, ServerError> {
+        let pinned_msgs_raw = self.get(make_pinned_msgs_key(guild_id, channel_id)).await?;
+
+        Ok(pinned_msgs_raw.map_or_else(Vec::new, |raw| {
+            raw.chunks_exact(size_of::<u64>())
+                .map(|chunk| {
+                    u64::from_be_bytes(
+                        // SAFETY: chunks exact guarantees that the chunks we get are u64 long
+                        unsafe { chunk.try_into().unwrap_unchecked() },
+                    )
+                })
+                .collect()
+        }))
+    }
 }

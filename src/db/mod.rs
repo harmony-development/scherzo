@@ -215,18 +215,6 @@ pub mod chat {
         ])
     }
 
-    pub const fn make_role_channel_perms_prefix(
-        guild_id: u64,
-        channel_id: u64,
-        role_id: u64,
-    ) -> [u8; 26] {
-        concat_static(&[
-            &make_chan_key(guild_id, channel_id),
-            &[8],
-            &role_id.to_be_bytes(),
-        ])
-    }
-
     pub const fn make_guild_role_key(guild_id: u64, role_id: u64) -> [u8; 17] {
         concat_static(&[&make_guild_role_prefix(guild_id), &role_id.to_be_bytes()])
     }
@@ -242,8 +230,24 @@ pub mod chat {
 
     // message
 
+    pub const fn make_pinned_msgs_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
+        concat_static(&[&make_chan_key(guild_id, channel_id), &[6]])
+    }
+
     pub const fn make_next_msg_id_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
         concat_static(&[&make_chan_key(guild_id, channel_id), &[7]])
+    }
+
+    pub const fn make_role_channel_perms_prefix(
+        guild_id: u64,
+        channel_id: u64,
+        role_id: u64,
+    ) -> [u8; 26] {
+        concat_static(&[
+            &make_chan_key(guild_id, channel_id),
+            &[8],
+            &role_id.to_be_bytes(),
+        ])
     }
 
     pub const fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
