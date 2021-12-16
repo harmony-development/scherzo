@@ -2914,9 +2914,9 @@ dependencies = [
 
 [[package]]
 name = "triomphe"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46bddb80ec09585c58022a2c55e6e7c11e713d9bb26895f1b56cd945c4040c54"
+checksum = "35fef050f3c98cd96f4c65940f4ba0c698d761b2495250d111422bed73803e82"
 dependencies = [
  "memoffset",
 ]
