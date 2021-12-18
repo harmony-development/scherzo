@@ -66,7 +66,10 @@ jobs:
 
     - name: Build
       run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,voice,jemalloc
-    
+
+    - name: Build migrate
+      run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,sqlite --bin scherzo_migrate
+
     #- name: UPX
     #  run: |
     #      ./upx target/x86_64-unknown-linux-gnu/release/scherzo
