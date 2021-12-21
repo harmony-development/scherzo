@@ -28,9 +28,20 @@ pub async fn handler(
         return Err(ServerError::MessageContentCantBeEmpty.into());
     }
 
-    let (mut message, key) = chat_tree
-        .get_message_logic(guild_id, channel_id, message_id)
-        .await?;
+    let key = make_msg_key(guild_id, channel_id, message_id);
+    let Some(message_raw) = chat_tree.get(key).await? else {
+        bail!(ServerError::NoSuchMessage { guild_id, channel_id, message_id });
+    };
+    let message_archived = rkyv_arch::<Message>(&message_raw);
+
+    if message_archived.author_id != user_id {
+        bail!((
+            "h.not-author",
+            "you must be the author of a message to edit it"
+        ));
+    }
+
+    let mut message: Message = message_archived.deserialize(&mut rkyv::Infallible).unwrap();
 
     let msg_content = if let Some(content) = &mut message.content {
         content
