@@ -277,7 +277,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
 
     let (console_serve_tx, console_serve_rx) = tokio::sync::oneshot::channel::<()>();
     let console_layer = if console {
-        let (console_layer, console_server) = console_subscriber::TasksLayer::new();
+        let (console_layer, console_server) = console_subscriber::ConsoleLayer::new();
         tokio::spawn(async move {
             if console_serve_rx.await.is_ok() {
                 info_span!("scherzo::tokio_console").in_scope(|| info!("spawning console server"));
