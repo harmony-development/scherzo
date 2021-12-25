@@ -44,7 +44,7 @@ pub enum ServerError {
         name: SmolStr,
         expected: SmolStr,
     },
-    WrongUserOrPassword {
+    WrongEmailOrPassword {
         email: SmolStr,
     },
     UserBanned,
@@ -175,8 +175,8 @@ impl Display for ServerError {
             ServerError::WrongTypeForField { name, expected } => {
                 write!(f, "wrong type for field {}, expected {}", name, expected)
             }
-            ServerError::WrongUserOrPassword { email } => {
-                write!(f, "wrong email or password for email {}", email)
+            ServerError::WrongEmailOrPassword { email } => {
+                write!(f, "invalid credentials for email {}", email)
             }
             ServerError::UserBanned => write!(f, "user banned in guild"),
             ServerError::UserNotInGuild { guild_id, user_id } => {
@@ -310,7 +310,7 @@ impl ServerError {
             | ServerError::NoSuchChoice { .. }
             | ServerError::WrongStep { .. }
             | ServerError::WrongTypeForField { .. }
-            | ServerError::WrongUserOrPassword { .. }
+            | ServerError::WrongEmailOrPassword { .. }
             | ServerError::UserAlreadyExists
             | ServerError::UserNotInGuild { .. }
             | ServerError::Unauthenticated
@@ -409,7 +409,7 @@ impl ServerError {
             ServerError::NoSuchChoice { .. } => "h.bad-auth-choice",
             ServerError::WrongStep { .. } => "h.bad-auth-choice",
             ServerError::WrongTypeForField { .. } => "h.missing-form",
-            ServerError::WrongUserOrPassword { .. } => "h.bad-password\nh.bad-email",
+            ServerError::WrongEmailOrPassword { .. } => "h.bad-password\nh.bad-email",
             ServerError::UserNotInGuild { .. } => "h.not-joined",
             ServerError::NotImplemented => HrpcErrorIdentifier::NotImplemented.as_id(),
             ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
