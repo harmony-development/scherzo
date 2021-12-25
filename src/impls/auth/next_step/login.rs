@@ -12,7 +12,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })
     });
     let Some(user_id) = maybe_user_id else {
-        bail!(ServerError::WrongUserOrPassword {
+        bail!(ServerError::WrongEmailOrPassword {
             email: email.into(),
         });
     };
@@ -23,7 +23,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         .await?
         .map_or(false, |pass| pass.as_ref() == password_hashed.as_ref());
     if !is_password_correct {
-        bail!(ServerError::WrongUserOrPassword {
+        bail!(ServerError::WrongEmailOrPassword {
             email: email.into(),
         });
     }
