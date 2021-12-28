@@ -7,15 +7,15 @@ use std::{
 
 use hrpc::{request::BoxRequest, server::layer::ratelimit::RateLimitLayer};
 
+pub type ExtractKey = impl Fn(&mut BoxRequest) -> Option<IpAddr> + Clone;
+pub type CheckKey = impl Fn(&IpAddr) -> bool + Clone;
+
 pub fn rate_limit(
     num: u64,
     per: Duration,
     check_header_for_ip: Option<String>,
     allowed_ips: Option<Vec<String>>,
-) -> RateLimitLayer<
-    impl Fn(&mut BoxRequest) -> Option<IpAddr> + Clone,
-    impl Fn(&IpAddr) -> bool + Clone,
-> {
+) -> RateLimitLayer<ExtractKey, CheckKey> {
     let allowed_ips = allowed_ips.map(|ips| {
         ips.into_iter()
             .map(|s| IpAddr::from_str(&s))

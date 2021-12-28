@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
-use tower::{limit::RateLimit, Service};
+use tower::Service;
 
 use crate::rest_error_response;
 
@@ -160,9 +160,15 @@ impl Service<HttpRequest> for DownloadService {
 }
 
 pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
-    ServiceBuilder::new()
-        .rate_limit(10, Duration::from_secs(5))
-        .service(DownloadService { deps })
+    let client_ip_header_name = deps.config.policy.ratelimit.client_ip_header_name.clone();
+    let allowed_ips = deps.config.policy.ratelimit.allowed_ips.clone();
+    RateLimit::new(
+        DownloadService { deps },
+        10,
+        Duration::from_secs(5),
+        client_ip_header_name,
+        allowed_ips,
+    )
 }
 
 // Safety: the `name` argument MUST ONLY contain ASCII characters.

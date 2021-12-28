@@ -1,4 +1,4 @@
-use crate::http;
+use crate::{http, utils::http_ratelimit::RateLimit};
 
 use self::{about::AboutService, download::DownloadService, upload::UploadService};
 
@@ -41,7 +41,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
 };
 use tokio_util::io::poll_read_buf;
-use tower::{limit::RateLimit, Layer, Service, ServiceBuilder};
+use tower::{Layer, Service};
 use tracing::info;
 
 pub mod about;
@@ -125,8 +125,8 @@ where
 #[pin_project(project = EnumProj)]
 pub enum RestFuture<Fut> {
     Inner(#[pin] Fut),
-    About(Ready<Out>),
-    Other(BoxFuture<'static, Out>),
+    About(crate::utils::http_ratelimit::RateLimitFuture<Ready<Out>>),
+    Other(crate::utils::http_ratelimit::RateLimitFuture<BoxFuture<'static, Out>>),
 }
 
 impl<Fut> Future for RestFuture<Fut>

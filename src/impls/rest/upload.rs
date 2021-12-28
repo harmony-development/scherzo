@@ -8,9 +8,15 @@ use crate::rest_error_response;
 use super::*;
 
 pub fn handler(deps: Arc<Dependencies>) -> RateLimit<UploadService> {
-    ServiceBuilder::new()
-        .rate_limit(3, Duration::from_secs(5))
-        .service(UploadService { deps })
+    let client_ip_header_name = deps.config.policy.ratelimit.client_ip_header_name.clone();
+    let allowed_ips = deps.config.policy.ratelimit.allowed_ips.clone();
+    RateLimit::new(
+        UploadService { deps },
+        3,
+        Duration::from_secs(5),
+        client_ip_header_name,
+        allowed_ips,
+    )
 }
 
 pub struct UploadService {

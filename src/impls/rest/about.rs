@@ -8,15 +8,18 @@ use hrpc::{
     common::future::{ready, Ready},
     server::transport::http::HttpResponse,
 };
-use tower::{
-    limit::{RateLimit, RateLimitLayer},
-    Service,
-};
+use tower::Service;
 
 pub fn handler(deps: Arc<Dependencies>) -> RateLimit<AboutService> {
-    ServiceBuilder::new()
-        .layer(RateLimitLayer::new(3, Duration::from_secs(5)))
-        .service(AboutService { deps })
+    let client_ip_header_name = deps.config.policy.ratelimit.client_ip_header_name.clone();
+    let allowed_ips = deps.config.policy.ratelimit.allowed_ips.clone();
+    RateLimit::new(
+        AboutService { deps },
+        3,
+        Duration::from_secs(5),
+        client_ip_header_name,
+        allowed_ips,
+    )
 }
 
 pub struct AboutService {
