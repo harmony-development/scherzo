@@ -99,13 +99,17 @@ impl Dependencies {
 
         let email_creds = if let Some(email) = &config.email {
             email.read_credentials().await.and_then(|res| match res {
-                Ok(creds) => Some(creds),
+                Ok(creds) => {
+                    tracing::info!("loaded credentials for email");
+                    Some(creds)
+                }
                 Err(err) => {
                     tracing::error!("error reading email credentials: {}", err);
                     None
                 }
             })
         } else {
+            tracing::debug!("email config wasn't defined, so not loading creds");
             None
         };
 
