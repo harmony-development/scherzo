@@ -22,6 +22,7 @@
 //! - `token prefix + user id` -> token
 //! - `atime prefix + user id` -> last valid time (what?)
 //! - email -> user id
+//! - user id -> hashed password
 //!
 //! TODO other stuff
 

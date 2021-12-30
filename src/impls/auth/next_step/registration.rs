@@ -21,6 +21,10 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         bail!(("h.invalid-username", "username can't be empty"));
     }
 
+    if email.is_empty() {
+        bail!(("h.invalid-email", "email can't be empty"));
+    }
+
     if auth_tree.get(email.as_bytes()).await?.is_some() {
         bail!(ServerError::UserAlreadyExists);
     }

@@ -5,6 +5,7 @@ use super::*;
 pub mod delete_user;
 pub mod login;
 pub mod registration;
+pub mod reset_password;
 
 // While implementing new choices / forms, make sure to:
 // - handle the choice / from in `handle_choice` or `handle_fields` respectively
@@ -91,6 +92,12 @@ pub async fn handler(
                         "delete-user-send-token" => {
                             next_step = delete_user::handle_send_token(svc, &mut values).await?
                         }
+                        "reset-password-input-token" => {
+                            next_step = reset_password::handle_input_token(svc, &mut values).await?
+                        }
+                        "reset-password-send-token" => {
+                            next_step = reset_password::handle_send_token(svc, &mut values).await?
+                        }
                         title => bail!((
                             "h.invalid-form",
                             format!("invalid form name used: {}", title)
@@ -139,7 +146,11 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
             let mut options = Vec::new();
 
             if svc.deps.config.email.is_some() {
-                options.push("delete-user".to_string());
+                options.extend(
+                    ["delete-user", "reset-password"]
+                        .iter()
+                        .map(ToString::to_string),
+                );
             }
 
             AuthStep {
@@ -151,11 +162,22 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
                 ))),
             }
         }
+        "reset-password" => AuthStep {
+            can_go_back: true,
+            fallback_url: String::default(),
+            step: Some(auth_step::Step::Form(auth_step::Form::new(
+                "reset-password-send-token".to_string(),
+                vec![auth_step::form::FormField::new(
+                    "email".to_string(),
+                    "email".to_string(),
+                )],
+            ))),
+        },
         "delete-user" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),
             step: Some(auth_step::Step::Form(auth_step::Form::new(
-                "delete-user-input-token".to_string(),
+                "delete-user-send-token".to_string(),
                 vec![auth_step::form::FormField::new(
                     "email".to_string(),
                     "email".to_string(),

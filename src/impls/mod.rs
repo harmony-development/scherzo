@@ -214,7 +214,7 @@ pub fn setup_server(
     (server, rest)
 }
 
-/// Only works if email is setup in config
+/// Panics if email is not setup in config.
 pub async fn send_email(
     deps: &Dependencies,
     to: &str,
