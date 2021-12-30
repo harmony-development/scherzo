@@ -1,3 +1,5 @@
+use rkyv::de::deserializers::SharedDeserializeMap;
+
 use super::*;
 
 pub async fn handler(
@@ -41,7 +43,9 @@ pub async fn handler(
         ));
     }
 
-    let mut message: Message = message_archived.deserialize(&mut rkyv::Infallible).unwrap();
+    let mut message: Message = message_archived
+        .deserialize(&mut SharedDeserializeMap::default())
+        .unwrap();
 
     let msg_content = if let Some(content) = &mut message.content {
         content

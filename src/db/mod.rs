@@ -41,6 +41,7 @@ use harmony_rust_sdk::api::{
 };
 use rkyv::{
     archived_root,
+    de::deserializers::SharedDeserializeMap,
     ser::{serializers::AllocSerializer, Serializer},
     AlignedVec, Archive, Deserialize, Serialize,
 };
@@ -427,7 +428,7 @@ macro_rules! impl_deser {
             $(
                 pub fn [<deser_ $name>](data: impl AsRef<[u8]>) -> $msg {
                     let archive = rkyv_arch::<$msg>(data.as_ref());
-                    unsafe { archive.deserialize(&mut rkyv::Infallible).unwrap_unchecked() }
+                    archive.deserialize(&mut SharedDeserializeMap::default()).expect("failed to deserialize")
                 }
             )*
         }
@@ -470,8 +471,8 @@ const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
     new
 }
 
-pub fn rkyv_ser<Value: Serialize<AllocSerializer<256>>>(value: &Value) -> AlignedVec {
-    let mut ser = AllocSerializer::<256>::default();
+pub fn rkyv_ser<Value: Serialize<AllocSerializer<1024>>>(value: &Value) -> AlignedVec {
+    let mut ser = AllocSerializer::<1024>::default();
     ser.serialize_value(value).unwrap();
     ser.into_serializer().into_inner()
 }
