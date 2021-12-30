@@ -25,6 +25,7 @@ use db::{
 
 pub mod begin_auth;
 pub mod check_logged_in;
+pub mod delete_user;
 pub mod federate;
 pub mod key;
 pub mod login_federated;

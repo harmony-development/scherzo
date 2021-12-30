@@ -131,6 +131,7 @@ impl EventBroadcast {
     }
 }
 
+pub type EventCanceller = BroadcastSend<u64>;
 pub type EventSender = BroadcastSend<Arc<EventBroadcast>>;
 pub type EventDispatcher = UnboundedSender<EventDispatch>;
 

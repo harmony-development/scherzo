@@ -1,3 +1,4 @@
+pub mod admin_action;
 pub mod against;
 pub mod auth;
 pub mod batch;
@@ -74,9 +75,9 @@ pub struct Dependencies {
 
     pub valid_sessions: SessionMap,
     pub chat_event_sender: chat::EventSender,
+    pub chat_event_canceller: chat::EventCanceller,
     pub fed_event_dispatcher: FedEventDispatcher,
     pub key_manager: Option<Arc<key::Manager>>,
-    pub action_processor: ActionProcesser,
     pub http: HttpClient,
 
     pub config: Config,
@@ -88,22 +89,23 @@ impl Dependencies {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
         let auth_tree = AuthTree::new(db).await?;
+        let profile_tree = ProfileTree::new(db).await?;
 
         let this = Self {
             auth_tree: auth_tree.clone(),
             chat_tree: ChatTree::new(db).await?,
-            profile_tree: ProfileTree::new(db).await?,
+            profile_tree: profile_tree.clone(),
             emote_tree: EmoteTree::new(db).await?,
             sync_tree: db.open_tree(b"sync").await?,
 
             valid_sessions: Arc::new(DashMap::default()),
             chat_event_sender: broadcast::channel(2048).0,
+            chat_event_canceller: broadcast::channel(2048).0,
             fed_event_dispatcher,
             key_manager: config
                 .federation
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
-            action_processor: ActionProcesser { auth_tree },
             http: http_client(&mut hyper::Client::builder()),
 
             config,
@@ -237,54 +239,6 @@ fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
         .unwrap_or_else(|| unsafe {
             http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
         })
-}
-
-pub struct AdminActionError;
-
-#[derive(Debug, Clone, Copy)]
-pub enum AdminAction {
-    GenerateRegistrationToken,
-    Help,
-}
-
-impl FromStr for AdminAction {
-    type Err = AdminActionError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let act = match s.trim_start_matches('/').trim() {
-            "generate registration-token" => AdminAction::GenerateRegistrationToken,
-            "help" => AdminAction::Help,
-            _ => return Err(AdminActionError),
-        };
-        Ok(act)
-    }
-}
-
-pub const HELP_TEXT: &str = r#"
-commands are:
-`generate registration-token` -> generates a registration token
-`help` -> shows help
-"#;
-
-#[derive(Clone)]
-pub struct ActionProcesser {
-    auth_tree: AuthTree,
-}
-
-impl ActionProcesser {
-    pub async fn run(&self, action: &str) -> ServerResult<String> {
-        let maybe_action = AdminAction::from_str(action);
-        match maybe_action {
-            Ok(action) => match action {
-                AdminAction::GenerateRegistrationToken => {
-                    let token = self.auth_tree.put_rand_reg_token().await?;
-                    Ok(token.into())
-                }
-                AdminAction::Help => Ok(HELP_TEXT.to_string()),
-            },
-            Err(_) => Ok(format!("invalid command: `{}`", action)),
-        }
-    }
 }
 
 macro_rules! impl_unary_handlers {

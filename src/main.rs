@@ -32,10 +32,10 @@ use scherzo::{
         Db,
     },
     impls::{
-        against,
+        admin_action, against,
         chat::{AdminGuildKeys, DEFAULT_ROLE_ID},
         rest::RestServiceLayer,
-        Dependencies, HELP_TEXT,
+        Dependencies,
     },
     utils, ServerError,
 };
@@ -365,7 +365,10 @@ async fn setup_admin_guild(deps: &Dependencies) {
             guild_id,
             cmd_id,
             content::Content::TextMessage(content::TextContent {
-                content: Some(FormattedText::new(HELP_TEXT.to_string(), Vec::new())),
+                content: Some(FormattedText::new(
+                    admin_action::HELP_TEXT.to_string(),
+                    Vec::new(),
+                )),
             }),
         )
         .await

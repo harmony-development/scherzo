@@ -32,7 +32,7 @@ use std::{
     mem::size_of,
 };
 
-use crate::{config::DbConfig, error::travel_error, utils::evec::EVec};
+use crate::{config::DbConfig, error::travel_error, utils::evec::EVec, ServerError, ServerResult};
 
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
@@ -143,10 +143,13 @@ pub mod profile {
         concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
     }
 
+    pub fn make_user_metadata_prefix(user_id: u64) -> [u8; 14] {
+        concat_static(&[make_user_profile_key(user_id).as_ref(), [1].as_ref()])
+    }
+
     pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
         [
-            make_user_profile_key(user_id).as_ref(),
-            &[1],
+            make_user_metadata_prefix(user_id).as_ref(),
             app_id.as_bytes(),
         ]
         .concat()
@@ -376,6 +379,19 @@ pub mod sync {
     pub fn make_host_key(host: &str) -> Vec<u8> {
         [HOST_PREFIX, host.as_bytes()].concat()
     }
+}
+
+pub async fn batch_delete_prefix(tree: &Tree, prefix: impl AsRef<[u8]>) -> ServerResult<()> {
+    let batch =
+        tree.scan_prefix(prefix.as_ref())
+            .await
+            .try_fold(Batch::default(), |mut batch, res| {
+                let (key, _) = res.map_err(ServerError::from)?;
+                batch.remove(key);
+                ServerResult::Ok(batch)
+            })?;
+    tree.apply_batch(batch).await?;
+    Ok(())
 }
 
 crate::impl_deser! {
