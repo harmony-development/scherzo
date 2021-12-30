@@ -83,26 +83,29 @@ pub async fn handler(
                     handle_fields(svc, &mut values, fields, auth_fields)?;
 
                     // handle new forms here
-                    match title.as_str() {
-                        "login" => next_step = login::handle(svc, &mut values).await?,
-                        "register" => next_step = registration::handle(svc, &mut values).await?,
+                    next_step = match title.as_str() {
+                        "login" => login::handle(svc, &mut values).await?,
+                        "register" => registration::handle(svc, &mut values).await?,
                         "delete-user-input-token" => {
-                            next_step = delete_user::handle_input_token(svc, &mut values).await?
+                            delete_user::handle_input_token(svc, &mut values).await?
                         }
                         "delete-user-send-token" => {
-                            next_step = delete_user::handle_send_token(svc, &mut values).await?
+                            delete_user::handle_send_token(svc, &mut values).await?
                         }
                         "reset-password-input-token" => {
-                            next_step = reset_password::handle_input_token(svc, &mut values).await?
+                            reset_password::handle_input_token(svc, &mut values).await?
                         }
                         "reset-password-send-token" => {
-                            next_step = reset_password::handle_send_token(svc, &mut values).await?
+                            reset_password::handle_send_token(svc, &mut values).await?
+                        }
+                        "register-input-token" => {
+                            registration::handle_input_token(svc, &mut values).await?
                         }
                         title => bail!((
                             "h.invalid-form",
                             format!("invalid form name used: {}", title)
                         )),
-                    }
+                    };
                 }
             }
         }
@@ -202,21 +205,22 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
             })),
         },
         "register" => {
+            let config = &svc.deps.config;
             let mut fields = vec![
-                auth_step::form::FormField {
-                    name: "username".to_string(),
-                    r#type: "text".to_string(),
-                },
                 auth_step::form::FormField {
                     name: "email".to_string(),
                     r#type: "email".to_string(),
+                },
+                auth_step::form::FormField {
+                    name: "username".to_string(),
+                    r#type: "text".to_string(),
                 },
                 auth_step::form::FormField {
                     name: "password".to_string(),
                     r#type: "password".to_string(),
                 },
             ];
-            if svc.deps.config.policy.disable_registration {
+            if config.policy.disable_registration {
                 fields.push(auth_step::form::FormField {
                     name: "token".to_string(),
                     r#type: "password".to_string(),

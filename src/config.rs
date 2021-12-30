@@ -88,6 +88,9 @@ pub struct PolicyConfig {
     pub ratelimit: RateLimitConfig,
     #[serde(default)]
     pub disable_registration: bool,
+    /// only takes effect if email config is set (duh)
+    #[serde(default)]
+    pub disable_registration_email_validation: bool,
     #[serde(default = "max_concurrent_requests_default")]
     pub max_concurrent_requests: usize,
 }
@@ -97,6 +100,7 @@ impl Default for PolicyConfig {
         Self {
             ratelimit: RateLimitConfig::default(),
             disable_registration: false,
+            disable_registration_email_validation: false,
             max_concurrent_requests: max_concurrent_requests_default(),
         }
     }
