@@ -26,7 +26,10 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
     let username = try_get_username(values)?;
     let email = try_get_email(values)?;
 
-    if config.email.is_none() || config.policy.disable_registration_email_validation {
+    if svc.deps.email.is_some()
+        && config.email.is_some()
+        && !config.policy.disable_registration_email_validation
+    {
         let reg_info = RegInfo {
             email,
             username,
