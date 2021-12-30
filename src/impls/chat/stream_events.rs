@@ -16,6 +16,17 @@ pub fn handler(
 
     let fut = async move {
         let user_id = user_id?;
+        // TODO: optimize local guild fetching
+        let local_guilds: Vec<u64> = svc
+            .deps
+            .chat_tree
+            .get_user_guilds(user_id)
+            .await?
+            .iter()
+            .filter(|g| g.server_id == "")
+            .map(|g| g.guild_id)
+            .collect();
+
         tracing::debug!("stream events validated");
 
         tracing::debug!("creating stream events");

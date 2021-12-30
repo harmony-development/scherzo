@@ -654,6 +654,33 @@ impl ChatTree {
         Ok((message, key))
     }
 
+    pub async fn get_user_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
+        let prefix = make_guild_list_key_prefix(user_id);
+        let guild_list = self
+            .scan_prefix(&prefix)
+            .await
+            .try_fold(Vec::new(), |mut all, res| {
+                let (guild_id_raw, _) = res?;
+                let (id_raw, host_raw) = guild_id_raw
+                    .split_at(prefix.len())
+                    .1
+                    .split_at(size_of::<u64>());
+
+                // Safety: this unwrap can never cause UB since we split at u64 boundary
+                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+                // Safety: we never store non UTF-8 hosts, so this can't cause UB
+                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+
+                all.push(GuildListEntry {
+                    guild_id,
+                    server_id: host.to_string(),
+                });
+
+                ServerResult::Ok(all)
+            })?;
+        Ok(guild_list)
+    }
+
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {
         let guild = if let Some(guild_raw) = self.get(guild_id.to_be_bytes().as_ref()).await? {
             db::deser_guild(guild_raw)
