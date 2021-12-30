@@ -11,14 +11,19 @@ pub mod sync;
 #[cfg(feature = "voice")]
 pub mod voice;
 
-use hrpc::client::transport::http::hyper::{http_client, HttpClient};
-use hyper::{http, Uri};
 use prelude::*;
 
 use std::{str::FromStr, time::UNIX_EPOCH};
 
 use dashmap::DashMap;
 use harmony_rust_sdk::api::{exports::prost::bytes::Bytes, HomeserverIdentifier};
+use hrpc::client::transport::http::hyper::{http_client, HttpClient};
+use hyper::{http, Uri};
+use lettre::{
+    message::Mailbox,
+    transport::smtp::client::{Tls, TlsParametersBuilder},
+    AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+};
 use parking_lot::Mutex;
 use rand::Rng;
 use tokio::sync::{broadcast, mpsc};
@@ -79,6 +84,7 @@ pub struct Dependencies {
     pub fed_event_dispatcher: FedEventDispatcher,
     pub key_manager: Option<Arc<key::Manager>>,
     pub http: HttpClient,
+    pub email: Option<AsyncSmtpTransport<Tokio1Executor>>,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
@@ -90,6 +96,18 @@ impl Dependencies {
 
         let auth_tree = AuthTree::new(db).await?;
         let profile_tree = ProfileTree::new(db).await?;
+
+        let email_creds = if let Some(email) = &config.email {
+            email.read_credentials().await.and_then(|res| match res {
+                Ok(creds) => Some(creds),
+                Err(err) => {
+                    tracing::error!("error reading email credentials: {}", err);
+                    None
+                }
+            })
+        } else {
+            None
+        };
 
         let this = Self {
             auth_tree: auth_tree.clone(),
@@ -107,6 +125,21 @@ impl Dependencies {
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
             http: http_client(&mut hyper::Client::builder()),
+            email: config.email.as_ref().map(|ec| {
+                let mut builder =
+                    AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&ec.server)
+                        .tls(Tls::Opportunistic(
+                            // TODO: let users add root certificates
+                            TlsParametersBuilder::new(ec.server.clone())
+                                .build_rustls()
+                                .unwrap(),
+                        ))
+                        .port(ec.port);
+                if let Some(creds) = email_creds {
+                    builder = builder.credentials(creds.into());
+                }
+                builder.build()
+            }),
 
             config,
             runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
@@ -179,6 +212,55 @@ pub fn setup_server(
     );
 
     (server, rest)
+}
+
+/// Only works if email is setup in config
+pub async fn send_email(
+    deps: &Dependencies,
+    to: &str,
+    subject: String,
+    body: String,
+) -> ServerResult<()> {
+    let to = to
+        .parse::<Mailbox>()
+        .map_err(|err| ("h.invalid-email", format!("email is invalid: {}", err)))?;
+    let from = deps
+        .config
+        .email
+        .as_ref()
+        .expect("must have email config")
+        .from
+        .parse::<Mailbox>()
+        .map_err(|err| err.to_string())?;
+
+    let email = lettre::Message::builder()
+        .from(from)
+        .to(to)
+        .subject(subject)
+        .date_now()
+        .body(body)
+        .expect("email must always be valid");
+
+    let response = deps
+        .email
+        .as_ref()
+        .expect("email client must be created for delete user option")
+        .send(email)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    if !response.is_positive() {
+        bail!((
+            "scherzo.mailserver-error",
+            format!(
+                "failed to send email (code {}): {}",
+                response.code(),
+                response.first_line().unwrap_or("unknown error")
+            )
+        ));
+    }
+
+    Ok(())
 }
 
 fn get_time_secs() -> u64 {

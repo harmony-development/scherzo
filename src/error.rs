@@ -125,6 +125,7 @@ pub enum ServerError {
     MustNotBeLastOwner,
     ContentCantBeSentByUser,
     InvalidProtoMessage(DecodeBodyError),
+    InvalidEmailConfig(toml::de::Error),
 }
 
 impl StdError for ServerError {
@@ -146,6 +147,7 @@ impl StdError for ServerError {
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
+            ServerError::InvalidEmailConfig(err) => write!(f, "invalid email config: {}", err),
             ServerError::InvalidProtoMessage(err) => {
                 write!(f, "couldn't decode a response body: {}", err)
             }
@@ -368,7 +370,8 @@ impl ServerError {
             | ServerError::CantGetHostKey(_)
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
-            | ServerError::MultipartError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::MultipartError(_)
+            | ServerError::InvalidEmailConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -386,7 +389,8 @@ impl ServerError {
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
             | ServerError::MultipartError(_)
-            | ServerError::InvalidProtoMessage(_) => {
+            | ServerError::InvalidProtoMessage(_)
+            | ServerError::InvalidEmailConfig(_) => {
                 HrpcErrorIdentifier::InternalServerError.as_id()
             }
             ServerError::Unauthenticated => "h.blank-session",

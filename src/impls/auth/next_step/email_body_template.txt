@@ -1,0 +1,1 @@
+Your token for {action} is {token}

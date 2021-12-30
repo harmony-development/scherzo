@@ -5,21 +5,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
 
     if svc.deps.config.policy.disable_registration {
         let token_raw = try_get_token(values)?;
-        if token_raw.is_empty() {
-            bail!((
-                "h.invalid-registration-token",
-                "registration token can't be empty"
-            ));
-        }
-
-        let token_hashed = hash_password(token_raw);
-        if auth_tree
-            .get(&reg_token_key(token_hashed.as_ref()))
-            .await?
-            .is_none()
-        {
-            bail!(ServerError::InvalidRegistrationToken);
-        }
+        auth_tree.validate_single_use_token(token_raw).await?;
     }
 
     let password_raw = try_get_password(values)?;

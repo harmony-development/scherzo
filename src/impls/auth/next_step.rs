@@ -85,11 +85,11 @@ pub async fn handler(
                     match title.as_str() {
                         "login" => next_step = login::handle(svc, &mut values).await?,
                         "register" => next_step = registration::handle(svc, &mut values).await?,
-                        "delete_user_token" => {
-                            next_step = delete_user::handle_token(svc, &mut values).await?
+                        "delete-user-input-token" => {
+                            next_step = delete_user::handle_input_token(svc, &mut values).await?
                         }
-                        "delete_user" => {
-                            next_step = delete_user::handle_delete(svc, &mut values).await?
+                        "delete-user-send-token" => {
+                            next_step = delete_user::handle_send_token(svc, &mut values).await?
                         }
                         title => bail!((
                             "h.invalid-form",
@@ -134,11 +134,28 @@ pub async fn handler(
 
 pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
     let step = match choice {
-        "delete_user" => AuthStep {
+        "back-to-initial" => initial_auth_step(),
+        "other-options" => {
+            let mut options = Vec::new();
+
+            if svc.deps.config.email.is_some() {
+                options.push("delete-user".to_string());
+            }
+
+            AuthStep {
+                can_go_back: true,
+                fallback_url: String::default(),
+                step: Some(auth_step::Step::new_choice(auth_step::Choice::new(
+                    "other-options".to_string(),
+                    options,
+                ))),
+            }
+        }
+        "delete-user" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),
             step: Some(auth_step::Step::Form(auth_step::Form::new(
-                "delete_user_token".to_string(),
+                "delete-user-input-token".to_string(),
                 vec![auth_step::form::FormField::new(
                     "email".to_string(),
                     "email".to_string(),

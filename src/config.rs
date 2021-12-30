@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use lettre::transport::smtp::authentication::Credentials;
 use serde::{Deserialize, Serialize};
 
-use crate::ServerError;
+use crate::{ServerError, ServerResult};
 
 const fn listen_on_localhost_default() -> bool {
     true
@@ -44,6 +45,8 @@ pub struct Config {
     pub tls: Option<TlsConfig>,
     #[serde(default = "federation_config_default")]
     pub federation: Option<FederationConfig>,
+    #[serde(default)]
+    pub email: Option<EmailConfig>,
 }
 
 impl Default for Config {
@@ -60,6 +63,7 @@ impl Default for Config {
             media: MediaConfig::default(),
             tls: None,
             federation: federation_config_default(),
+            email: None,
         }
     }
 }
@@ -189,6 +193,42 @@ impl Default for FederationConfig {
             host_allow_list: Vec::new(),
             host_block_list: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmailConfig {
+    pub server: String,
+    pub port: u16,
+    pub from: String,
+    credentials_file: Option<PathBuf>,
+}
+
+impl EmailConfig {
+    pub async fn read_credentials(&self) -> Option<ServerResult<EmailCredentials>> {
+        if let Some(path) = &self.credentials_file {
+            Some(Self::read_credentials_inner(path).await)
+        } else {
+            None
+        }
+    }
+
+    async fn read_credentials_inner(path: &Path) -> ServerResult<EmailCredentials> {
+        let raw = tokio::fs::read(path).await?;
+        let creds = toml::from_slice(&raw).map_err(ServerError::InvalidEmailConfig)?;
+        Ok(creds)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmailCredentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl From<EmailCredentials> for Credentials {
+    fn from(creds: EmailCredentials) -> Self {
+        Credentials::new(creds.username, creds.password)
     }
 }
 

@@ -56,9 +56,21 @@ tower-http = { version = "0.2", default-features = false, features = [
 ] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
+lettre = { version = "0.10.0-rc.4", default-features = false, features = [
+    "smtp-transport",
+    "pool",
+    "hostname",
+    "builder",
+    "tokio1-rustls-tls",
+] }
 
-sqlx = { version = "0.5", default-features = false, features = ["sqlite", "runtime-tokio-rustls"], optional = true }
-itertools = { version = "0.10", default-features = false, features = ["use_std"], optional = true }
+sqlx = { version = "0.5", default-features = false, features = [
+    "sqlite",
+    "runtime-tokio-rustls",
+], optional = true }
+itertools = { version = "0.10", default-features = false, features = [
+    "use_std",
+], optional = true }
 
 rand = "0.8"
 ed25519-compact = "1"

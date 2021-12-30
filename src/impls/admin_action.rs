@@ -49,7 +49,7 @@ pub async fn run_str(deps: &Dependencies, action: &str) -> ServerResult<String> 
 pub async fn run(deps: &Dependencies, action: AdminAction) -> ServerResult<String> {
     match action {
         AdminAction::GenerateRegistrationToken => {
-            let token = deps.auth_tree.put_rand_reg_token().await?;
+            let token = deps.auth_tree.generate_single_use_token([]).await?;
             Ok(token.into())
         }
         AdminAction::DeleteUser(user_id) => {

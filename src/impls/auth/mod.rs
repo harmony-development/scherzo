@@ -264,18 +264,48 @@ impl AuthTree {
         })
     }
 
-    pub async fn put_rand_reg_token(&self) -> ServerResult<SmolStr> {
+    pub async fn generate_single_use_token(&self, value: impl Into<EVec>) -> ServerResult<SmolStr> {
         // TODO: check if the token is already in tree
         let token = gen_rand_inline_str();
         {
             let hashed = hash_password(token.as_bytes());
             let key = reg_token_key(hashed.as_ref());
             self.inner
-                .insert(&key, &[])
+                .insert(&key, value.into())
                 .await
                 .map_err(ServerError::from)?;
         }
         Ok(token)
+    }
+
+    pub async fn validate_single_use_token(&self, token: Vec<u8>) -> ServerResult<EVec> {
+        if token.is_empty() {
+            bail!((
+                "h.invalid-registration-token",
+                "registration token can't be empty"
+            ));
+        }
+
+        let token_hashed = hash_password(token);
+        let val = self
+            .get(&reg_token_key(token_hashed.as_ref()))
+            .await?
+            .ok_or(ServerError::InvalidRegistrationToken)?;
+
+        Ok(val)
+    }
+
+    pub async fn get_user_id(&self, email: &str) -> ServerResult<u64> {
+        let maybe_user_id = self.get(email.as_bytes()).await?.map(|raw| {
+            // Safety: this unwrap can never cause UB since we only store u64
+            u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })
+        });
+
+        maybe_user_id
+            .ok_or_else(|| ServerError::WrongEmailOrPassword {
+                email: email.into(),
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -285,7 +315,21 @@ pub fn initial_auth_step() -> AuthStep {
         fallback_url: String::default(),
         step: Some(auth_step::Step::Choice(auth_step::Choice {
             title: "initial".to_string(),
-            options: ["login", "register"]
+            options: ["login", "register", "other-options"]
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        })),
+    }
+}
+
+pub fn back_to_inital_step() -> AuthStep {
+    AuthStep {
+        can_go_back: false,
+        fallback_url: String::default(),
+        step: Some(auth_step::Step::Choice(auth_step::Choice {
+            title: "success".to_string(),
+            options: ["back-to-initial"]
                 .iter()
                 .map(ToString::to_string)
                 .collect(),

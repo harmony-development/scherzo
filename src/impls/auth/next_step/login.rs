@@ -7,15 +7,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
     let password_hashed = hash_password(password_raw);
     let email = try_get_email(values)?;
 
-    let maybe_user_id = auth_tree.get(email.as_bytes()).await?.map(|raw| {
-        // Safety: this unwrap can never cause UB since we only store u64
-        u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })
-    });
-    let Some(user_id) = maybe_user_id else {
-        bail!(ServerError::WrongEmailOrPassword {
-            email: email.into(),
-        });
-    };
+    let user_id = auth_tree.get_user_id(&email).await?;
 
     // check password
     let is_password_correct = auth_tree

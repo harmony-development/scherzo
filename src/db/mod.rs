@@ -21,7 +21,7 @@
 //! `auth` service general struture:
 //! - `token prefix + user id` -> token
 //! - `atime prefix + user id` -> last valid time (what?)
-//! - email -> hashed password
+//! - email -> user id
 //!
 //! TODO other stuff
 
@@ -393,6 +393,10 @@ pub async fn batch_delete_prefix(tree: &Tree, prefix: impl AsRef<[u8]>) -> Serve
             })?;
     tree.apply_batch(batch).await?;
     Ok(())
+}
+
+pub fn deser_id(data: impl AsRef<[u8]>) -> u64 {
+    u64::from_be_bytes(data.as_ref().try_into().expect("length wasnt 8"))
 }
 
 crate::impl_deser! {
