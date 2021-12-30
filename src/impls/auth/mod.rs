@@ -265,16 +265,27 @@ impl AuthTree {
     }
 
     pub async fn generate_single_use_token(&self, value: impl Into<EVec>) -> ServerResult<SmolStr> {
-        // TODO: check if the token is already in tree
-        let token = gen_rand_inline_str();
-        {
-            let hashed = hash_password(token.as_bytes());
-            let key = reg_token_key(hashed.as_ref());
-            self.inner
-                .insert(&key, value.into())
-                .await
-                .map_err(ServerError::from)?;
+        fn generate() -> (SmolStr, Vec<u8>) {
+            let token = gen_rand_inline_str();
+            let key = {
+                let hashed = hash_password(token.as_bytes());
+                reg_token_key(hashed.as_ref())
+            };
+            (token, key)
         }
+
+        let (token, key) = {
+            let (mut token, mut key) = generate();
+            while self.contains_key(&key).await? {
+                (token, key) = generate();
+            }
+            (token, key)
+        };
+
+        self.insert(key, value.into())
+            .await
+            .map_err(ServerError::from)?;
+
         Ok(token)
     }
 
