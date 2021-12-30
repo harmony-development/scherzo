@@ -2,6 +2,7 @@ use harmony_rust_sdk::api::auth::{auth_step::form::FormField, next_step_request:
 
 use super::*;
 
+pub mod delete_user;
 pub mod login;
 pub mod registration;
 
@@ -84,6 +85,12 @@ pub async fn handler(
                     match title.as_str() {
                         "login" => next_step = login::handle(svc, &mut values).await?,
                         "register" => next_step = registration::handle(svc, &mut values).await?,
+                        "delete_user_token" => {
+                            next_step = delete_user::handle_token(svc, &mut values).await?
+                        }
+                        "delete_user" => {
+                            next_step = delete_user::handle_delete(svc, &mut values).await?
+                        }
                         title => bail!((
                             "h.invalid-form",
                             format!("invalid form name used: {}", title)
@@ -127,6 +134,17 @@ pub async fn handler(
 
 pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
     let step = match choice {
+        "delete_user" => AuthStep {
+            can_go_back: true,
+            fallback_url: String::default(),
+            step: Some(auth_step::Step::Form(auth_step::Form::new(
+                "delete_user_token".to_string(),
+                vec![auth_step::form::FormField::new(
+                    "email".to_string(),
+                    "email".to_string(),
+                )],
+            ))),
+        },
         "login" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),

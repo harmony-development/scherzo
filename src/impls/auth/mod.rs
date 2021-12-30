@@ -279,6 +279,20 @@ impl AuthTree {
     }
 }
 
+pub fn initial_auth_step() -> AuthStep {
+    AuthStep {
+        can_go_back: false,
+        fallback_url: String::default(),
+        step: Some(auth_step::Step::Choice(auth_step::Choice {
+            title: "initial".to_string(),
+            options: ["login", "register"]
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        })),
+    }
+}
+
 #[inline(always)]
 fn hash_password(raw: impl AsRef<[u8]>) -> impl AsRef<[u8]> {
     sha3::Sha3_512::digest(raw.as_ref())
