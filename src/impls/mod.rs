@@ -128,13 +128,15 @@ impl Dependencies {
             email: config.email.as_ref().map(|ec| {
                 let mut builder =
                     AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&ec.server)
-                        .tls(Tls::Opportunistic(
-                            // TODO: let users add root certificates
-                            TlsParametersBuilder::new(ec.server.clone())
-                                .build_rustls()
-                                .unwrap(),
-                        ))
                         .port(ec.port);
+                if ec.tls {
+                    builder = builder.tls(Tls::Required(
+                        // TODO: let users add root certificates
+                        TlsParametersBuilder::new(ec.server.clone())
+                            .build_rustls()
+                            .unwrap(),
+                    ));
+                }
                 if let Some(creds) = email_creds {
                     builder = builder.credentials(creds.into());
                 }

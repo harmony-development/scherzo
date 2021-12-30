@@ -205,6 +205,7 @@ pub struct EmailConfig {
     pub server: String,
     pub port: u16,
     pub from: String,
+    pub tls: bool,
     credentials_file: Option<PathBuf>,
 }
 
