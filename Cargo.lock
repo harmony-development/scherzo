@@ -507,9 +507,9 @@ checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "ed25519-compact"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ef48e534dc9c84a7194ee4831546acb5517bf52b23d29f31d6a143f49c2685d"
+checksum = "85424599b04c7251cd887b95b13c2bb853f3050a2619f40fbf9c23d0baf47223"
 dependencies = [
  "getrandom",
 ]
