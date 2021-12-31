@@ -32,4 +32,4 @@ jobs:
         name: harmony
         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
     - name: Tests
-      run: nix develop -c check
+      run: nix build .#scherzo
