@@ -16,7 +16,7 @@ use tracing::error;
 
 use crate::key::{self, Manager as KeyManager};
 
-use super::{get_time_secs, http, prelude::*};
+use super::{http, prelude::*};
 use db::sync::*;
 
 pub mod notify_new_id;
