@@ -86,6 +86,9 @@ pub async fn handler(
                     next_step = match title.as_str() {
                         "login" => login::handle(svc, &mut values).await?,
                         "register" => registration::handle(svc, &mut values).await?,
+                        "register-input-token" => {
+                            registration::handle_input_token(svc, &mut values).await?
+                        }
                         "delete-user-input-token" => {
                             delete_user::handle_input_token(svc, &mut values).await?
                         }
@@ -97,9 +100,6 @@ pub async fn handler(
                         }
                         "reset-password-send-token" => {
                             reset_password::handle_send_token(svc, &mut values).await?
-                        }
-                        "register-input-token" => {
-                            registration::handle_input_token(svc, &mut values).await?
                         }
                         title => bail!((
                             "h.invalid-form",
@@ -142,6 +142,21 @@ pub async fn handler(
     .into_response())
 }
 
+fn form<'a>(
+    title: impl std::fmt::Display,
+    steps: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Option<auth_step::Step> {
+    Some(auth_step::Step::Form(auth_step::Form::new(
+        title.to_string(),
+        steps
+            .into_iter()
+            .map(|(name, r#type)| {
+                auth_step::form::FormField::new(name.to_string(), r#type.to_string())
+            })
+            .collect(),
+    )))
+}
+
 pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
     let step = match choice {
         "back-to-initial" => initial_auth_step(),
@@ -168,71 +183,32 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
         "reset-password" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),
-            step: Some(auth_step::Step::Form(auth_step::Form::new(
-                "reset-password-send-token".to_string(),
-                vec![auth_step::form::FormField::new(
-                    "email".to_string(),
-                    "email".to_string(),
-                )],
-            ))),
+            step: form("reset-password-send-token", [("email", "email")]),
         },
         "delete-user" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),
-            step: Some(auth_step::Step::Form(auth_step::Form::new(
-                "delete-user-send-token".to_string(),
-                vec![auth_step::form::FormField::new(
-                    "email".to_string(),
-                    "email".to_string(),
-                )],
-            ))),
+            step: form("delete-user-send-token", [("email", "email")]),
         },
         "login" => AuthStep {
             can_go_back: true,
             fallback_url: String::default(),
-            step: Some(auth_step::Step::Form(auth_step::Form {
-                title: "login".to_string(),
-                fields: vec![
-                    auth_step::form::FormField {
-                        name: "email".to_string(),
-                        r#type: "email".to_string(),
-                    },
-                    auth_step::form::FormField {
-                        name: "password".to_string(),
-                        r#type: "password".to_string(),
-                    },
-                ],
-            })),
+            step: form("login", [("email", "email"), ("password", "password")]),
         },
         "register" => {
             let config = &svc.deps.config;
             let mut fields = vec![
-                auth_step::form::FormField {
-                    name: "email".to_string(),
-                    r#type: "email".to_string(),
-                },
-                auth_step::form::FormField {
-                    name: "username".to_string(),
-                    r#type: "text".to_string(),
-                },
-                auth_step::form::FormField {
-                    name: "password".to_string(),
-                    r#type: "password".to_string(),
-                },
+                ("email", "email"),
+                ("username", "text"),
+                ("password", "password"),
             ];
             if config.policy.disable_registration {
-                fields.push(auth_step::form::FormField {
-                    name: "token".to_string(),
-                    r#type: "password".to_string(),
-                });
+                fields.push(("token", "password"));
             }
             AuthStep {
                 can_go_back: true,
                 fallback_url: String::default(),
-                step: Some(auth_step::Step::Form(auth_step::Form {
-                    title: "register".to_string(),
-                    fields,
-                })),
+                step: form("register", fields),
             }
         }
         choice => bail!((

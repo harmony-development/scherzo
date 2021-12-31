@@ -48,13 +48,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         return Ok(AuthStep {
             can_go_back: false,
             fallback_url: String::default(),
-            step: Some(auth_step::Step::new_form(auth_step::Form::new(
-                "register-input-token".to_string(),
-                vec![auth_step::form::FormField::new(
-                    "token".to_string(),
-                    "password".to_string(),
-                )],
-            ))),
+            step: form("register-input-token", [("token", "password")]),
         });
     }
 

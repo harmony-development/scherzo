@@ -42,12 +42,6 @@ pub async fn handle_send_token(
     Ok(AuthStep {
         can_go_back: false,
         fallback_url: String::default(),
-        step: Some(auth_step::Step::new_form(auth_step::Form::new(
-            "delete-user-input-token".to_string(),
-            vec![auth_step::form::FormField::new(
-                "token".to_string(),
-                "password".to_string(),
-            )],
-        ))),
+        step: form("delete-user-input-token", [("token", "password")]),
     })
 }
