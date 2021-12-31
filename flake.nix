@@ -13,7 +13,7 @@
 
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
     root = ./.;
-    buildPlatform = "naersk";
+    buildPlatform = "crate2nix";
     overrides = {
       crateOverrides = common: _: {
         mediasoup-sys = prev:
