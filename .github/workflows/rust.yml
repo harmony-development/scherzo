@@ -19,6 +19,11 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CI: 1
+  RUST_BACKTRACE: short
+  RUSTFLAGS: "-W unreachable-pub"
 
 jobs:
   build:
@@ -44,31 +49,33 @@ jobs:
     - name: Cargo Deny
       run: cargo deny check
 
-    - name: Clippy
+    - name: Clippy (with sled DB)
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--target x86_64-unknown-linux-gnu --no-default-features --features sled,voice"
+        args: "--no-default-features --features sled,voice"
         token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy
+        name: clippy-sled
 
-    - name: Clippy
+    - name: Clippy (with SQLite DB)
       uses: actions-rs/clippy-check@v1
       with:
-        args: "--target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice"
+        args: "--no-default-features --features sqlite,voice"
         token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy
+        name: clippy-sqlite
 
-    - name: Test
-      run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sled,voice
+    - name: Test (with sled DB)
+      run: cargo test --no-default-features --features sled,voice
 
-    - name: Test
-      run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice
+    - name: Test (with sqlite DB)
+      run: cargo test --no-default-features --features sqlite,voice
 
-    - name: Build
-      run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,voice,jemalloc
+    - name: Build release
+      if: github.event_name == 'push'
+      run: cargo build --release --no-default-features --features sled,voice,jemalloc
 
-    - name: Build migrate
-      run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,sqlite --bin scherzo_migrate
+    - name: Build release (migrate binary)
+      if: github.event_name == 'push'
+      run: cargo build --release --no-default-features --features sled,sqlite,jemalloc --bin scherzo_migrate
 
     #- name: UPX
     #  run: |
