@@ -23,7 +23,7 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     name: Build scherzo
     steps:
@@ -40,7 +40,7 @@ jobs:
     - name: Cache rust
       uses: Swatinem/rust-cache@v1
       with:
-        key: bump1
+        key: cache-debug
 
     - name: Install Cargo Deny
       run: cargo install --locked cargo-deny
@@ -48,25 +48,31 @@ jobs:
     - name: Cargo Deny
       run: cargo deny check
 
-    - name: Clippy (with sled DB)
-      uses: actions-rs/clippy-check@v1
-      with:
-        args: "--no-default-features --features sled,voice"
-        token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy-sled
-
-    - name: Clippy (with SQLite DB)
-      uses: actions-rs/clippy-check@v1
-      with:
-        args: "--no-default-features --features sqlite,voice"
-        token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy-sqlite
-
     - name: Test (with sled DB)
-      run: cargo test --no-default-features --features sled,voice
+      run: cargo test -no-default-features --features sled,voice
 
     - name: Test (with sqlite DB)
       run: cargo test --no-default-features --features sqlite,voice
+  
+  build-release:
+    needs: check
+    runs-on: ubuntu-latest
+    name: Build release binaries
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        sudo apt update -yy
+        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+    - name: Install rust
+      run: rustup update && rustup component add rustfmt clippy
+
+    - name: Cache rust
+      uses: Swatinem/rust-cache@v1
+      with:
+        key: cache-release
 
     - name: Build release
       if: github.event_name == 'push'
@@ -91,7 +97,7 @@ jobs:
           ./pyuploadtool-x86_64.AppImage target/x86_64-unknown-linux-gnu/release/scherzo target/x86_64-unknown-linux-gnu/release/scherzo_cmd target/x86_64-unknown-linux-gnu/release/scherzo_migrate
 
   update:
-    needs: build
+    needs: build-release
     name: Update Scherzo at harmonyapp.io
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
@@ -121,7 +127,7 @@ jobs:
           event-type: dep-updated
 
   docker:
-    needs: build
+    needs: build-release
     name: Update scherzo docker image
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
