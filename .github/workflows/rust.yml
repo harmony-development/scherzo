@@ -49,7 +49,7 @@ jobs:
       run: cargo deny check
 
     - name: Test (with sled DB)
-      run: cargo test -no-default-features --features sled,voice
+      run: cargo test --no-default-features --features sled,voice
 
     - name: Test (with sqlite DB)
       run: cargo test --no-default-features --features sqlite,voice
