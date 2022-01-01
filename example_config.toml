@@ -89,3 +89,27 @@ host_allow_list = []
 
 # Which hosts to block.
 host_block_list = []
+
+# Email settings
+[email]
+
+# Server address of the mailserver.
+server = "localhost"
+
+# Port the mailserver is on on the specified address.
+port = 25
+
+# Name and email adress to use for sending the emails.
+from = "Harmony <noreply@harmonyapp.io>"
+
+# (optional) Credentials file for the mailserver.
+#
+# Example:
+# ```
+# username = "username"
+# password = "password"
+# ```
+credentials_file = "./email_creds.toml"
+
+# Whether to use TLS or not while connecting to the mailserver.
+tls = false
