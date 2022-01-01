@@ -117,7 +117,7 @@ pub async fn handler(
         drop(step_stack);
 
         if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
-            tracing::debug!("sending next step");
+            tracing::debug!("sending next step: {:?}", next_step);
             if let Err(err) = chan.send(next_step.clone()).await {
                 tracing::error!("failed to send auth step: {}", err);
             }
