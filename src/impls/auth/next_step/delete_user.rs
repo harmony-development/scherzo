@@ -1,8 +1,4 @@
-use crate::impls::send_email;
-
 use super::*;
-
-const EMAIL_BODY_TEMPLATE: &str = include_str!("email_body_template.txt");
 
 // "delete-user-input-token"
 pub async fn handle_input_token(
@@ -33,11 +29,14 @@ pub async fn handle_send_token(
     let token = auth_tree
         .generate_single_use_token(user_id.to_be_bytes())
         .await?;
-    let body = EMAIL_BODY_TEMPLATE
-        .replace("{action}", "deleting your account")
-        .replace("{token}", token.as_str());
-    let subject = format!("Harmony - Account Deletion for {}", &svc.deps.config.host);
-    send_email(svc.deps.as_ref(), &user_email, subject, body).await?;
+
+    email::send_token_email(
+        svc.deps.as_ref(),
+        &user_email,
+        token.as_ref(),
+        "delete account",
+    )
+    .await?;
 
     Ok(AuthStep {
         can_go_back: false,

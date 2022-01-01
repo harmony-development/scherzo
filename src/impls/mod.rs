@@ -19,7 +19,7 @@ use harmony_rust_sdk::api::HomeserverIdentifier;
 use hrpc::client::transport::http::hyper::{http_client, HttpClient};
 use hyper::{http, Uri};
 use lettre::{
-    message::Mailbox,
+    message::{header, Mailbox, MultiPart, SinglePart},
     transport::smtp::client::{Tls, TlsParametersBuilder},
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
@@ -218,7 +218,9 @@ pub async fn send_email(
     deps: &Dependencies,
     to: &str,
     subject: String,
-    body: String,
+    plain: String,
+    html: Option<String>,
+    files: Vec<(Vec<u8>, String, String, bool)>,
 ) -> ServerResult<()> {
     let to = to
         .parse::<Mailbox>()
@@ -232,12 +234,29 @@ pub async fn send_email(
         .parse::<Mailbox>()
         .map_err(|err| err.to_string())?;
 
+    let mut multipart = MultiPart::related().singlepart(SinglePart::plain(plain));
+    if let Some(html) = html {
+        multipart = multipart.singlepart(SinglePart::html(html));
+    }
+    for (file_body, file_id, file_type, is_inline) in files {
+        let disposition = is_inline
+            .then(|| header::ContentDisposition::inline())
+            .unwrap_or_else(|| header::ContentDisposition::attachment(file_id.as_str()));
+        multipart = multipart.singlepart(
+            SinglePart::builder()
+                .header(header::ContentType::parse(&file_type).unwrap())
+                .header(disposition)
+                .header(header::ContentId::from(file_id))
+                .body(file_body),
+        );
+    }
+
     let email = lettre::Message::builder()
         .from(from)
         .to(to)
         .subject(subject)
         .date_now()
-        .body(body)
+        .multipart(multipart)
         .expect("email must always be valid");
 
     let response = deps

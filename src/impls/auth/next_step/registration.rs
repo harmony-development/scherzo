@@ -1,10 +1,6 @@
 use rkyv::{de::deserializers::SharedDeserializeMap, Archive, Deserialize, Serialize};
 
-use crate::impls::send_email;
-
 use super::*;
-
-const EMAIL_BODY_TEMPLATE: &str = include_str!("email_body_template.txt");
 
 #[derive(Debug, Archive, Serialize, Deserialize)]
 struct RegInfo {
@@ -36,14 +32,18 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
             password_raw,
         };
         let reg_info_serialized = rkyv_ser(&reg_info);
+
         let token = auth_tree
             .generate_single_use_token(reg_info_serialized)
             .await?;
-        let body = EMAIL_BODY_TEMPLATE
-            .replace("{action}", "registering")
-            .replace("{token}", token.as_str());
-        let subject = format!("Harmony - Register for {}", &svc.deps.config.host);
-        send_email(svc.deps.as_ref(), &reg_info.email, subject, body).await?;
+
+        email::send_token_email(
+            svc.deps.as_ref(),
+            &reg_info.email,
+            token.as_ref(),
+            "register",
+        )
+        .await?;
 
         return Ok(AuthStep {
             can_go_back: false,

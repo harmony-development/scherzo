@@ -3,6 +3,7 @@ use harmony_rust_sdk::api::auth::{auth_step::form::FormField, next_step_request:
 use super::*;
 
 pub mod delete_user;
+pub mod email;
 pub mod login;
 pub mod registration;
 pub mod reset_password;
