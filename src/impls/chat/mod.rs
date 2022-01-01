@@ -210,14 +210,16 @@ impl ChatServer {
                                 Request::SubscribeToHomeserverEvents(SubscribeToHomeserverEvents {}) => {
                                     EventSub::Homeserver
                                 }
+                                Request::UnsubscribeFromAll(UnsubscribeFromAll {}) => {
+                                    subs.clear();
+                                    continue;
+                                }
                             };
 
                             subs.insert(sub);
                         }
                     }
                     Ok(broadcast) = rx.recv() => {
-                        tracing::debug!("received event");
-
                         if !subs.contains(&broadcast.sub) {
                             continue;
                         }
