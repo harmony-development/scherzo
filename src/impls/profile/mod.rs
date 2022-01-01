@@ -137,7 +137,7 @@ impl ProfileTree {
         Ok(self.get(key).await?.map(|raw| {
             let (raw_id, raw_host) = raw.split_at(size_of::<u64>());
             // Safety: safe since we split at u64 boundary.
-            let foreign_id = u64::from_be_bytes(unsafe { raw_id.try_into().unwrap_unchecked() });
+            let foreign_id = deser_id(raw_id);
             // Safety: all stored hosts are valid UTF-8
             let host = (unsafe { std::str::from_utf8_unchecked(raw_host) }).into();
             (foreign_id, host)
@@ -152,10 +152,7 @@ impl ProfileTree {
     ) -> ServerResult<Option<u64>> {
         let key = make_foreign_to_local_user_key(foreign_id, host);
 
-        Ok(self
-            .get(key)
-            .await?
-            // Safety: we store u64's only for these keys
-            .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })))
+        // Safety: we store u64's only for these keys
+        Ok(self.get(key).await?.map(deser_id))
     }
 }

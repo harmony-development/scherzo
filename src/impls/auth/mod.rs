@@ -89,8 +89,7 @@ impl AuthServer {
             (async move {
                 tracing::info!("starting auth session expiration check thread");
 
-                // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-                async unsafe fn scan_tree_for(
+                async fn scan_tree_for(
                     att: &Tree,
                     prefix: &[u8],
                 ) -> ServerResult<Vec<(u64, EVec)>> {
@@ -100,9 +99,8 @@ impl AuthServer {
                         .try_fold(Vec::new(), move |mut all, res| {
                             let (key, val) = res.map_err(ServerError::from)?;
                             all.push((
-                                u64::from_be_bytes(
-                                    key.split_at(len).1.try_into().unwrap_unchecked(),
-                                ),
+                                // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
+                                deser_id(key.split_at(len).1),
                                 val,
                             ));
                             ServerResult::Ok(all)
@@ -111,9 +109,9 @@ impl AuthServer {
 
                 loop {
                     // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                    let tokens = unsafe { scan_tree_for(&att.inner, TOKEN_PREFIX).await };
+                    let tokens = scan_tree_for(&att.inner, TOKEN_PREFIX).await;
                     // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                    let atimes = unsafe { scan_tree_for(&att.inner, ATIME_PREFIX).await };
+                    let atimes = scan_tree_for(&att.inner, ATIME_PREFIX).await;
 
                     match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
                         Ok((tokens, atimes)) => {
@@ -123,9 +121,7 @@ impl AuthServer {
                                     for (oid, raw_atime) in &atimes {
                                         if id.eq(oid) {
                                             // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
-                                            let secs = u64::from_be_bytes(unsafe {
-                                                raw_atime.as_ref().try_into().unwrap_unchecked()
-                                            });
+                                            let secs = deser_id(raw_atime);
                                             let auth_how_old = get_time_secs() - secs;
                                             // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
                                             let token = unsafe {
@@ -307,10 +303,7 @@ impl AuthTree {
     }
 
     pub async fn get_user_id(&self, email: &str) -> ServerResult<u64> {
-        let maybe_user_id = self.get(email.as_bytes()).await?.map(|raw| {
-            // Safety: this unwrap can never cause UB since we only store u64
-            u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() })
-        });
+        let maybe_user_id = self.get(email.as_bytes()).await?.map(deser_id);
 
         maybe_user_id
             .ok_or_else(|| ServerError::WrongEmailOrPassword {

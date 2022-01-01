@@ -29,7 +29,7 @@ pub async fn handler(
         .try_fold(Vec::new(), |mut all, res| {
             let (key, _) = res?;
             if key.len() == prefix.len() + size_of::<u64>() {
-                all.push(unsafe { u64::from_be_bytes(key.try_into().unwrap_unchecked()) });
+                all.push(deser_id(key.split_at(prefix.len()).1));
             }
             ServerResult::Ok(all)
         })?;

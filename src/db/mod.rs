@@ -117,8 +117,7 @@ impl StdError for DbError {
 pub type DbResult<T> = Result<T, DbError>;
 
 pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
-    raw.chunks_exact(size_of::<u64>())
-        .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+    raw.chunks_exact(size_of::<u64>()).map(deser_id)
 }
 
 pub mod profile {

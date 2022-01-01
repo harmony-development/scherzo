@@ -16,11 +16,8 @@ pub async fn handler(
         .try_fold(Vec::new(), |mut all, res| {
             let (key, _) = res.map_err(ServerError::from)?;
             if key.len() == make_equipped_emote_key(user_id, 0).len() {
-                let pack_id =
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                    });
+                // Safety: since it will always be 8 bytes left afterwards
+                let pack_id = deser_id(key.split_at(prefix.len()).1);
                 all.push(pack_id);
             }
             ServerResult::Ok(all)
@@ -35,14 +32,8 @@ pub async fn handler(
         .try_fold(Vec::new(), |mut all, res| {
             let (key, val) = res.map_err(ServerError::from)?;
             if key.len() == make_emote_pack_key(0).len() {
-                let pack_id =
-                    // Safety: since it will always be 8 bytes left afterwards
-                    u64::from_be_bytes(unsafe {
-                        key.split_at(EMOTEPACK_PREFIX.len())
-                            .1
-                            .try_into()
-                            .unwrap_unchecked()
-                    });
+                // Safety: since it will always be 8 bytes left afterwards
+                let pack_id = deser_id(key.split_at(EMOTEPACK_PREFIX.len()).1);
                 if equipped_packs.contains(&pack_id) {
                     all.push(db::deser_emote_pack(val));
                 }

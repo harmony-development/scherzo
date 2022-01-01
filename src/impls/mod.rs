@@ -38,7 +38,7 @@ pub mod prelude {
     pub use std::{convert::TryInto, mem::size_of};
 
     pub use crate::{
-        db::{self, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
+        db::{self, deser_id, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
         utils::{evec::EVec, *},
         ServerError,
     };
