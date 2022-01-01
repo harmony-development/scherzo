@@ -30,10 +30,13 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v2
 
-    - name: Install dependencies
-      run: |
-        sudo apt update -yy
-        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+    - name: Install nix
+      uses: cachix/install-nix-action@v16
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+        nix_path: nixpkgs=channel:nixos-unstable
+
     - name: Install rust
       run: rustup update && rustup component add rustfmt clippy
 
@@ -49,10 +52,10 @@ jobs:
       run: cargo deny check
 
     - name: Test (with sled DB)
-      run: cargo test --no-default-features --features sled,voice
+      run: nix-shell -p mold protobuf clang_13 --run "cargo test --no-default-features --features sled,voice"
 
     - name: Test (with sqlite DB)
-      run: cargo test --no-default-features --features sqlite,voice
+      run: nix-shell -p mold protobuf clang_13 --run "cargo test --no-default-features --features sqlite,voice"
   
   build-release:
     needs: check
@@ -79,10 +82,10 @@ jobs:
         key: cache-release-1
 
     - name: Build release
-      run: nix-shell -p mold protobuf --run "cargo build --release --no-default-features --features sled,voice,jemalloc"
+      run: nix-shell -p mold protobuf clang_13 --run "cargo build --release --no-default-features --features sled,voice,jemalloc"
 
     - name: Build release (migrate binary)
-      run: nix-shell -p mold protobuf --run "cargo build --release --no-default-features --features sled,sqlite,jemalloc --bin scherzo_migrate"
+      run: nix-shell -p mold protobuf clang_13 --run "cargo build --release --no-default-features --features sled,sqlite,jemalloc --bin scherzo_migrate"
 
     #- name: UPX
     #  run: |
