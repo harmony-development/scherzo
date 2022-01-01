@@ -24,8 +24,8 @@ pub async fn handler(
     let fut = async {
         // get step stack for this auth id (the stack is initialized in begin_auth)
         let Some(mut step_stack) = svc.step_map.get_mut(auth_id.as_str()) else {
-        bail!(ServerError::InvalidAuthId);
-    };
+            bail!(ServerError::InvalidAuthId);
+        };
 
         // get the next step if possible
         let next_step;
@@ -109,6 +109,8 @@ pub async fn handler(
                                 format!("invalid form name used: {}", title)
                             )),
                         };
+
+                        step_stack.push(next_step.clone());
                     }
                 }
             }
