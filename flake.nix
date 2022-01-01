@@ -35,6 +35,7 @@
           musl.dev
           mold
           mkcert
+          cargo-deny
           /*(common.lib.buildCrate {
             memberName = "tokio-console";
 

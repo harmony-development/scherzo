@@ -152,9 +152,7 @@ library = true
 
 [workspace.metadata.nix]
 systems = ["x86_64-linux"]
-devshell.packages = ["cargo-deny", "mkcert"]
-nativeBuildInputs = ["lld_12"]
-env.RUSTC_FORCE_INCREMENTAL = "1"
+cCompiler = "clang_13"
 
 [package.metadata.nix.cachix]
 name = "harmony"
