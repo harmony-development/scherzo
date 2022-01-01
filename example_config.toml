@@ -21,6 +21,9 @@ log_headers = false
 # Whether to disable registration and only allow it using admin generated tokens.
 disable_registration = false
 
+# Whether to disable email validation for registration.
+disable_registration_email_validation = false
+
 # Maximum amount of requests that should be processed concurrently.
 # If set to 0, it will be disabled.
 # Note: you'll want to increase this if your server has 100+ members.
