@@ -56,6 +56,7 @@ jobs:
   
   build-release:
     needs: check
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     name: Build release binaries
     steps:
@@ -75,11 +76,9 @@ jobs:
         key: cache-release
 
     - name: Build release
-      if: github.event_name == 'push'
       run: cargo build --release --no-default-features --features sled,voice,jemalloc
 
     - name: Build release (migrate binary)
-      if: github.event_name == 'push'
       run: cargo build --release --no-default-features --features sled,sqlite,jemalloc --bin scherzo_migrate
 
     #- name: UPX
@@ -88,7 +87,6 @@ jobs:
     #      ./upx target/x86_64-unknown-linux-gnu/release/scherzo_cmd
     
     - name: Upload release
-      if: github.event_name == 'push'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
