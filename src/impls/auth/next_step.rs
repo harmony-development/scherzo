@@ -49,11 +49,11 @@ pub async fn handler(
                 match step {
                     next_step_request::Step::Choice(next_step_request::Choice { choice }) => {
                         let auth_step::Step::Choice(auth_step::Choice { options, .. }) = current_step else {
-                        bail!(ServerError::WrongStep {
-                            expected: SmolStr::new_inline("form"),
-                            got: SmolStr::new_inline("choice"),
-                        });
-                    };
+                            bail!(ServerError::WrongStep {
+                                expected: SmolStr::new_inline("form"),
+                                got: SmolStr::new_inline("choice"),
+                            });
+                        };
 
                         tracing::debug!("handling choices: {:?}", options);
                         tracing::debug!("user chose {}", choice);
@@ -70,14 +70,14 @@ pub async fn handler(
                     }
                     next_step_request::Step::Form(next_step_request::Form { fields }) => {
                         let auth_step::Step::Form(auth_step::Form {
-                        fields: auth_fields,
-                        title,
-                    }) = current_step else {
-                        bail!(ServerError::WrongStep {
-                            expected: SmolStr::new_inline("choice"),
-                            got: SmolStr::new_inline("form"),
-                        });
-                    };
+                            fields: auth_fields,
+                            title,
+                        }) = current_step else {
+                            bail!(ServerError::WrongStep {
+                                expected: SmolStr::new_inline("choice"),
+                                got: SmolStr::new_inline("form"),
+                            });
+                        };
 
                         tracing::debug!("handling form '{}'", title);
 
