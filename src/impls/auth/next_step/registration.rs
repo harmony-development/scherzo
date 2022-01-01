@@ -101,7 +101,7 @@ pub async fn logic(
     }
 
     let user_id = svc.gen_user_id().await?;
-    let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
+    let session_token = svc.gen_auth_token().await?; // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 
     let mut batch = Batch::default();
     batch.insert(email.into_bytes(), user_id.to_be_bytes());
@@ -127,9 +127,9 @@ pub async fn logic(
 
     tracing::debug!("new user {} registered", user_id);
 
-    svc.deps
-        .valid_sessions
-        .insert(session_token.clone(), user_id);
+    auth_tree
+        .insert(auth_key(session_token.as_str()), user_id.to_be_bytes())
+        .await?;
 
     Ok(AuthStep {
         can_go_back: false,

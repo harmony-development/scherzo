@@ -10,7 +10,7 @@ pub async fn handler(
     request: Request<()>,
     mut socket: Socket<StreamMessageResponse, StreamMessageRequest>,
 ) -> Result<(), HrpcServerError> {
-    let user_id = svc.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let fut = async move {
         let wait_for_initialize = socket.receive_message().map(|res| match res {
@@ -34,7 +34,8 @@ pub async fn handler(
             span.record("channel", &channel_id);
         }
 
-        svc.chat_tree
+        svc.deps
+            .chat_tree
             .check_guild_user_channel(guild_id, user_id, channel_id)
             .await?;
 

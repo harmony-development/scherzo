@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<DeleteGuildRoleRequest>,
 ) -> ServerResult<Response<DeleteGuildRoleResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let DeleteGuildRoleRequest { guild_id, role_id } = request.into_message().await?;
 

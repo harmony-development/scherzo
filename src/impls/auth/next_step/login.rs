@@ -20,7 +20,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         });
     }
 
-    let session_token = svc.gen_auth_token(); // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
+    let session_token = svc.gen_auth_token().await?; // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
     let mut batch = Batch::default();
     // [ref:token_u64_key]
     batch.insert(token_key(user_id), session_token.as_str().as_bytes());
@@ -34,9 +34,9 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
 
     tracing::debug!("user {} logged in with email {}", user_id, email);
 
-    svc.deps
-        .valid_sessions
-        .insert(session_token.clone(), user_id);
+    auth_tree
+        .insert(auth_key(session_token.as_str()), user_id.to_be_bytes())
+        .await?;
 
     Ok(AuthStep {
         can_go_back: false,

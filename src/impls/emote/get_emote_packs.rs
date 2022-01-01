@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &EmoteServer,
     request: Request<GetEmotePacksRequest>,
 ) -> ServerResult<Response<GetEmotePacksResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let prefix = make_equipped_emote_prefix(user_id);
     let equipped_packs = svc

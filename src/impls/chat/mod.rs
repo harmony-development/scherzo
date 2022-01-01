@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, convert::TryInto, future::Future, io::BufReader, lazy::SyncOnceCell,
-    mem::size_of, ops::Not, path::Path, str::FromStr,
+    collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
+    str::FromStr,
 };
 
 use harmony_rust_sdk::api::{

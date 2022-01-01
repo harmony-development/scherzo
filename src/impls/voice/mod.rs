@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use super::{chat::ChatTree, prelude::*};
+use super::prelude::*;
 
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -52,10 +52,8 @@ enum Event {
 
 #[derive(Clone)]
 pub struct VoiceServer {
-    valid_sessions: SessionMap,
     worker_pool: WorkerPool,
     channels: Channels,
-    chat_tree: ChatTree,
     disable_ratelimits: bool,
     deps: Arc<Dependencies>,
 }
@@ -63,10 +61,8 @@ pub struct VoiceServer {
 impl VoiceServer {
     pub fn new(deps: Arc<Dependencies>, log_level: Level) -> Self {
         Self {
-            valid_sessions: deps.valid_sessions.clone(),
             worker_pool: WorkerPool::new(log_level),
             channels: Channels::new(),
-            chat_tree: deps.chat_tree.clone(),
             disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }

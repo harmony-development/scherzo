@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<SetPermissionsRequest>,
 ) -> ServerResult<Response<SetPermissionsResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let SetPermissionsRequest {
         guild_id,

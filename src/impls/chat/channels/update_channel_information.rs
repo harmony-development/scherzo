@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<UpdateChannelInformationRequest>,
 ) -> ServerResult<Response<UpdateChannelInformationResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let UpdateChannelInformationRequest {
         guild_id,

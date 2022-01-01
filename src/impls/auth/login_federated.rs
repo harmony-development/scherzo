@@ -62,12 +62,18 @@ pub async fn handler(
             local_id
         };
 
-        let session_token = svc.gen_auth_token();
+        let session_token = svc.gen_auth_token().await?;
         let session = Session {
             session_token: session_token.to_string(),
             user_id: local_user_id,
         };
-        svc.deps.valid_sessions.insert(session_token, local_user_id);
+        svc.deps
+            .auth_tree
+            .insert(
+                auth_key(session_token.as_str()),
+                local_user_id.to_be_bytes(),
+            )
+            .await?;
 
         return Ok((LoginFederatedResponse {
             session: Some(session),

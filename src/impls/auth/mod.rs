@@ -6,6 +6,7 @@ use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
     profile::{Profile, UserStatus},
 };
+use hrpc::server::gen_prelude::BoxFuture;
 use hyper::{http, HeaderMap};
 use rand::{Rng, SeedableRng};
 use sha3::Digest;
@@ -35,39 +36,46 @@ pub mod stream_steps;
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
-pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
+pub fn get_token_from_header_map(headers: &HeaderMap) -> &str {
+    headers
+        .get(http::header::AUTHORIZATION)
+        .map_or_else(
+            || {
+                // Specific handling for web clients
+                headers
+                    .get(http::header::SEC_WEBSOCKET_PROTOCOL)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|v| v.split(',').map(str::trim).last())
+            },
+            |val| val.to_str().ok(),
+        )
+        .unwrap_or("")
+}
 
 pub trait AuthExt {
-    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError>;
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
-        request
+    fn auth_with<'a>(&'a self, auth_id: &'a str) -> BoxFuture<'a, Result<u64, ServerError>>;
+    fn auth<'a, T>(&'a self, request: &'a Request<T>) -> BoxFuture<'a, Result<u64, ServerError>> {
+        let auth_id = request
             .header_map()
-            .map_or(Err(ServerError::Unauthenticated), |h| {
-                self.auth_header_map(h)
-            })
+            .map_or(Err(ServerError::Unauthenticated), |headers| {
+                Ok(get_token_from_header_map(headers))
+            });
+
+        match auth_id {
+            Ok(auth_id) => self.auth_with(auth_id),
+            Err(err) => Box::pin(std::future::ready(Err(err))),
+        }
     }
 }
 
-impl AuthExt for DashMap<SmolStr, u64, RandomState> {
-    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError> {
-        let auth_id = headers
-            .get(http::header::AUTHORIZATION)
-            .map_or_else(
-                || {
-                    // Specific handling for web clients
-                    headers
-                        .get(http::header::SEC_WEBSOCKET_PROTOCOL)
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|v| v.split(',').map(str::trim).last())
-                },
-                |val| val.to_str().ok(),
-            )
-            .unwrap_or("");
-
-        self.get(auth_id)
-            .as_deref()
-            .copied()
-            .map_or(Err(ServerError::Unauthenticated), Ok)
+impl AuthExt for Dependencies {
+    fn auth_with<'a>(&'a self, token: &'a str) -> BoxFuture<'a, Result<u64, ServerError>> {
+        Box::pin(async move {
+            self.auth_tree
+                .get(auth_key(token))
+                .await?
+                .map_or(Err(ServerError::Unauthenticated), |raw| Ok(deser_id(raw)))
+        })
     }
 }
 #[derive(Clone)]
@@ -83,7 +91,6 @@ impl AuthServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         let att = deps.auth_tree.clone();
         let ptt = deps.profile_tree.clone();
-        let vs = deps.valid_sessions.clone();
 
         tokio::spawn(
             (async move {
@@ -127,23 +134,22 @@ impl AuthServer {
                                             let token = unsafe {
                                                 std::str::from_utf8_unchecked(raw_token.as_ref())
                                             };
+                                            let auth_key = auth_key(token);
 
-                                            if vs.contains_key(token) {
+                                            let Ok(token_exists) = att.contains_key(&auth_key).await else { continue; };
+                                            if token_exists {
                                                 // [ref:atime_u64_key] [ref:atime_u64_value]
                                                 batch.insert(
-                                                    atime_key(id).to_vec(),
-                                                    get_time_secs().to_be_bytes().to_vec(),
+                                                    atime_key(id),
+                                                    get_time_secs().to_be_bytes(),
                                                 );
                                             } else if !profile.is_bot
                                                 && auth_how_old >= SESSION_EXPIRE
                                             {
                                                 tracing::debug!("user {} session has expired", id);
-                                                batch.remove(token_key(id).to_vec());
-                                                batch.remove(atime_key(id).to_vec());
-                                                vs.remove(token);
-                                            } else {
-                                                // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
-                                                vs.insert(SmolStr::new_inline(token), id);
+                                                batch.remove(auth_key);
+                                                batch.remove(token_key(id));
+                                                batch.remove(atime_key(id));
                                             }
                                         }
                                     }
@@ -183,16 +189,29 @@ impl AuthServer {
         self
     }
 
+    async fn is_token_valid(&self, token: &str) -> Result<bool, ServerError> {
+        self.deps.auth_with(token).await.map_or_else(
+            |err| {
+                matches!(err, ServerError::Unauthenticated)
+                    .then(|| Ok(false))
+                    .unwrap_or(Err(err))
+            },
+            |_| Ok(true),
+        )
+    }
+
     // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
-    fn gen_auth_token(&self) -> SmolStr {
-        let mut rng = rand::thread_rng();
+    async fn gen_auth_token(&self) -> Result<SmolStr, ServerError> {
+        let mut rng = rand::rngs::SmallRng::from_entropy();
         let mut raw = gen_rand_arr::<_, 22>(&mut rng);
         let mut token = unsafe { std::str::from_utf8_unchecked(&raw) };
-        while self.deps.valid_sessions.contains_key(token) {
+
+        while self.is_token_valid(token).await? {
             raw = gen_rand_arr::<_, 22>(&mut rng);
             token = unsafe { std::str::from_utf8_unchecked(&raw) };
         }
-        SmolStr::new_inline(token)
+
+        Ok(SmolStr::new_inline(token))
     }
 
     async fn gen_user_id(&self) -> Result<u64, ServerError> {

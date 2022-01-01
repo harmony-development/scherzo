@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &AuthServer,
     request: Request<FederateRequest>,
 ) -> Result<Response<FederateResponse>, HrpcServerError> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let keys_manager = svc.keys_manager()?;
 

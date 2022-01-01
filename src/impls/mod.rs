@@ -15,7 +15,6 @@ use prelude::*;
 
 use std::str::FromStr;
 
-use dashmap::DashMap;
 use harmony_rust_sdk::api::HomeserverIdentifier;
 use hrpc::client::transport::http::hyper::{http_client, HttpClient};
 use hyper::{http, Uri};
@@ -59,10 +58,7 @@ pub mod prelude {
     pub use smol_str::SmolStr;
     pub use triomphe::Arc;
 
-    pub use super::{
-        auth::{AuthExt, SessionMap},
-        Dependencies,
-    };
+    pub use super::{auth::AuthExt, Dependencies};
 
     pub(crate) use super::{impl_unary_handlers, impl_ws_handlers};
 }
@@ -77,7 +73,6 @@ pub struct Dependencies {
     pub emote_tree: EmoteTree,
     pub sync_tree: Tree,
 
-    pub valid_sessions: SessionMap,
     pub chat_event_sender: chat::EventSender,
     pub chat_event_canceller: chat::EventCanceller,
     pub fed_event_dispatcher: FedEventDispatcher,
@@ -119,7 +114,6 @@ impl Dependencies {
             emote_tree: EmoteTree::new(db).await?,
             sync_tree: db.open_tree(b"sync").await?,
 
-            valid_sessions: Arc::new(DashMap::default()),
             chat_event_sender: broadcast::channel(2048).0,
             chat_event_canceller: broadcast::channel(2048).0,
             fed_event_dispatcher,

@@ -6,7 +6,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<SendMessageRequest>,
 ) -> ServerResult<Response<SendMessageResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let mut request = request.into_message().await?;
     let guild_id = request.guild_id;

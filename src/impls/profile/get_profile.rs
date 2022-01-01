@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ProfileServer,
     request: Request<GetProfileRequest>,
 ) -> ServerResult<Response<GetProfileResponse>> {
-    svc.deps.valid_sessions.auth(&request)?;
+    svc.deps.auth(&request).await?;
 
     let GetProfileRequest { user_id } = request.into_message().await?;
 

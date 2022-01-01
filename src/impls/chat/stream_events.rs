@@ -2,25 +2,19 @@ use tracing::Instrument;
 
 use super::*;
 
-pub fn handler(
+pub async fn handler(
     svc: &ChatServer,
     request: Request<()>,
     socket: Socket<StreamEventsResponse, StreamEventsRequest>,
-) -> impl Future<Output = Result<(), HrpcServerError>> + Send + '_ {
-    let user_id = svc.deps.valid_sessions.auth(&request);
-
-    let span = match &user_id {
-        Ok(user_id) => tracing::debug_span!("stream_events", user_id = %user_id),
-        Err(_) => tracing::debug_span!("stream_events"),
-    };
-
-    let mut cancel_recv = svc.deps.chat_event_canceller.subscribe();
+) -> Result<(), HrpcServerError> {
+    let user_id = svc.deps.auth(&request).await?;
 
     let fut = async move {
-        let user_id = user_id?;
         tracing::debug!("stream events validated");
 
-        tracing::debug!("creating stream events");
+        let mut cancel_recv = svc.deps.chat_event_canceller.subscribe();
+
+        tracing::debug!("creating stream events processor");
         let mut send_task = svc.spawn_event_stream_processor(user_id, socket);
 
         loop {
@@ -45,5 +39,6 @@ pub fn handler(
         Ok(())
     };
 
-    fut.instrument(span)
+    fut.instrument(tracing::debug_span!("stream_events", user_id = %user_id))
+        .await
 }

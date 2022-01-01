@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<CreateInviteRequest>,
 ) -> ServerResult<Response<CreateInviteResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let CreateInviteRequest {
         guild_id,

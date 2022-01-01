@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<GetBannedUsersRequest>,
 ) -> ServerResult<Response<GetBannedUsersResponse>> {
-    svc.deps.valid_sessions.auth(&request)?;
+    svc.deps.auth(&request).await?;
 
     let GetBannedUsersRequest { guild_id } = request.into_message().await?;
 

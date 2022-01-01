@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<PinMessageRequest>,
 ) -> ServerResult<Response<PinMessageResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let PinMessageRequest {
         guild_id,
