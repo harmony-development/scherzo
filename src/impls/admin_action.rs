@@ -4,7 +4,7 @@ pub const HELP_TEXT: &str = r#"
 all commands should be prefixed with `/`.
 
 commands are:
-`generate registration-token` -> generates a registration token
+`generate token` -> generates a single use token
 `delete user <user_id>` -> deletes a user from the server
 `set motd <new_motd>` -> sets the server MOTD
 `help` -> shows help
@@ -16,7 +16,7 @@ pub struct AdminActionError;
 pub enum AdminAction {
     SetMotd(String),
     DeleteUser(u64),
-    GenerateRegistrationToken,
+    GenerateToken,
     Help,
 }
 
@@ -25,7 +25,7 @@ impl FromStr for AdminAction {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let act = match s.strip_prefix('/').ok_or(AdminActionError)? {
-            "generate registration-token" => AdminAction::GenerateRegistrationToken,
+            "generate token" => AdminAction::GenerateToken,
             "help" => AdminAction::Help,
             s => {
                 if let Some(s) = s.strip_prefix("delete user") {
@@ -53,7 +53,7 @@ pub async fn run_str(deps: &Dependencies, action: &str) -> ServerResult<String> 
 
 pub async fn run(deps: &Dependencies, action: AdminAction) -> ServerResult<String> {
     match action {
-        AdminAction::GenerateRegistrationToken => {
+        AdminAction::GenerateToken => {
             let token = deps.auth_tree.generate_single_use_token([]).await?;
             Ok(token.into())
         }

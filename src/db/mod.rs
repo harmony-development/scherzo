@@ -360,7 +360,7 @@ pub mod auth {
     pub const ATIME_PREFIX: &[u8] = b"atime_";
     pub const TOKEN_PREFIX: &[u8] = b"token_";
     pub const AUTH_PREFIX: &[u8] = b"auth_";
-    pub const REG_TOKEN_PREFIX: &[u8] = b"reg_token_";
+    pub const SU_TOKEN_PREFIX: &[u8] = b"reg_token_";
 
     pub fn auth_key(token: &str) -> Vec<u8> {
         [AUTH_PREFIX, token.as_bytes()].concat()
@@ -374,8 +374,8 @@ pub mod auth {
         concat_static(&[ATIME_PREFIX, &user_id.to_be_bytes()])
     }
 
-    pub fn reg_token_key(token_hashed: &[u8]) -> Vec<u8> {
-        [REG_TOKEN_PREFIX, token_hashed].concat()
+    pub fn single_use_token_key(token_hashed: &[u8]) -> Vec<u8> {
+        [SU_TOKEN_PREFIX, token_hashed].concat()
     }
 }
 

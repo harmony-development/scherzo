@@ -283,7 +283,7 @@ impl AuthTree {
             let token = gen_rand_inline_str();
             let key = {
                 let hashed = hash_token(token.as_bytes());
-                reg_token_key(hashed.as_ref())
+                single_use_token_key(hashed.as_ref())
             };
             (token, key)
         }
@@ -313,7 +313,7 @@ impl AuthTree {
 
         let token_hashed = hash_token(token);
         let val = self
-            .remove(&reg_token_key(token_hashed.as_ref()))
+            .remove(&single_use_token_key(token_hashed.as_ref()))
             .await?
             .ok_or(ServerError::InvalidRegistrationToken)?;
 
