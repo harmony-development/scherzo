@@ -4,16 +4,19 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
     let auth_tree = &svc.deps.auth_tree;
 
     let password_raw = try_get_password(values)?;
-    let password_hashed = hash_password(password_raw);
     let email = try_get_email(values)?;
 
     let user_id = auth_tree.get_user_id(&email).await?;
 
     // check password
-    let is_password_correct = auth_tree
-        .get(user_id.to_be_bytes().as_ref())
-        .await?
-        .map_or(false, |pass| pass.as_ref() == password_hashed.as_ref());
+    let is_password_correct =
+        auth_tree
+            .get(user_id.to_be_bytes().as_ref())
+            .await?
+            .map_or(false, |pass_hash| {
+                let pass_hash = unsafe { std::str::from_utf8_unchecked(pass_hash.as_ref()) };
+                verify_password(password_raw, pass_hash)
+            });
     if !is_password_correct {
         bail!(ServerError::WrongEmailOrPassword {
             email: email.into(),

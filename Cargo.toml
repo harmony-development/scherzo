@@ -73,6 +73,7 @@ itertools = { version = "0.10", default-features = false, features = [
 ], optional = true }
 
 rand = "0.8"
+argon2 = "0.3"
 ed25519-compact = "1"
 sha3 = "0.10"
 ahash = { version = "0.7", default-features = false }

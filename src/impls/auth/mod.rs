@@ -9,7 +9,6 @@ use harmony_rust_sdk::api::{
 use hrpc::server::gen_prelude::BoxFuture;
 use hyper::{http, HeaderMap};
 use rand::{Rng, SeedableRng};
-use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::Instrument;
 
@@ -283,7 +282,7 @@ impl AuthTree {
         fn generate() -> (SmolStr, Vec<u8>) {
             let token = gen_rand_inline_str();
             let key = {
-                let hashed = hash_password(token.as_bytes());
+                let hashed = hash_token(token.as_bytes());
                 reg_token_key(hashed.as_ref())
             };
             (token, key)
@@ -307,12 +306,12 @@ impl AuthTree {
     pub async fn validate_single_use_token(&self, token: Vec<u8>) -> ServerResult<EVec> {
         if token.is_empty() {
             bail!((
-                "h.invalid-registration-token",
-                "registration token can't be empty"
+                "h.invalid-single-use-token",
+                "single use token can't be empty"
             ));
         }
 
-        let token_hashed = hash_password(token);
+        let token_hashed = hash_token(token);
         let val = self
             .remove(&reg_token_key(token_hashed.as_ref()))
             .await?
@@ -360,9 +359,45 @@ pub fn back_to_inital_step() -> AuthStep {
     }
 }
 
-#[inline(always)]
-fn hash_password(raw: impl AsRef<[u8]>) -> impl AsRef<[u8]> {
-    sha3::Sha3_512::digest(raw.as_ref())
+// this uses a constant salt because we want the output to be deterministic
+fn hash_token(token: impl AsRef<[u8]>) -> String {
+    use argon2::{
+        password_hash::{PasswordHasher, Salt, SaltString},
+        Argon2,
+    };
+
+    let salt = SaltString::b64_encode(&[0; Salt::RECOMMENDED_LENGTH]).expect("cant fail");
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(token.as_ref(), &salt)
+        .expect("todo handle failure")
+        .to_string()
+}
+
+fn hash_password(pass: impl AsRef<[u8]>) -> String {
+    use argon2::{
+        password_hash::{PasswordHasher, SaltString},
+        Argon2,
+    };
+
+    let salt = SaltString::generate(&mut rand::thread_rng());
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(pass.as_ref(), &salt)
+        .expect("todo handle failure")
+        .to_string()
+}
+
+fn verify_password(pass: impl AsRef<[u8]>, hash: &str) -> bool {
+    use argon2::{
+        password_hash::{PasswordHash, PasswordVerifier},
+        Argon2,
+    };
+
+    let pass_hash = PasswordHash::new(hash).expect("our hashes must be correct");
+    Argon2::default()
+        .verify_password(pass.as_ref(), &pass_hash)
+        .is_ok()
 }
 
 const PASSWORD_FIELD_ERR: ServerError = ServerError::WrongTypeForField {

@@ -105,7 +105,7 @@ pub async fn logic(
 
     let mut batch = Batch::default();
     batch.insert(email.into_bytes(), user_id.to_be_bytes());
-    batch.insert(user_id.to_be_bytes(), password_hashed.as_ref());
+    batch.insert(user_id.to_be_bytes(), password_hashed.into_bytes());
     // [ref:token_u64_key]
     batch.insert(token_key(user_id), session_token.as_str().as_bytes());
     batch.insert(
