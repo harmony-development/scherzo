@@ -40,7 +40,7 @@ with all options available.
 - Clone this repo
 - Make sure you have the toolchain described in `rust-toolchain.toml` installed
     - This will be installed automatically for you if you have rustup setup!
-- Make sure you have `lld` installed
+- Make sure you have `mold`, `clang` and `protoc` installed
 - Run `cargo build`
 
 If you have Nix, you can just do:
