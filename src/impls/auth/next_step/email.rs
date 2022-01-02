@@ -16,14 +16,14 @@ pub async fn send_token_email(
     token: &str,
     action: &str,
 ) -> ServerResult<()> {
-    let html_body = EMAIL_BODY_TEMPLATE_HTML
-        .replace("{{action}}", action)
-        .replace("{{token}}", token);
+    /*let html_body = EMAIL_BODY_TEMPLATE_HTML
+    .replace("{{action}}", action)
+    .replace("{{token}}", token);*/
     let plain_body = EMAIL_BODY_TEMPLATE_PLAIN
         .replace("{{action}}", action)
         .replace("{{token}}", token);
 
-    let files = vec![
+    /*let files = vec![
         (
             LILLIES_SVG.to_vec(),
             "lillies".to_string(),
@@ -36,11 +36,11 @@ pub async fn send_token_email(
             "image/svg+xml".to_string(),
             true,
         ),
-    ];
+    ];*/
 
     let subject = format!("Harmony - {} for {}", action, &deps.config.host);
 
-    send_email(deps, to, subject, plain_body, Some(html_body), files).await?;
+    send_email(deps, to, subject, plain_body, None, Vec::new()).await?;
 
     Ok(())
 }

@@ -240,7 +240,7 @@ pub async fn send_email(
     }
     for (file_body, file_id, file_type, is_inline) in files {
         let disposition = is_inline
-            .then(|| header::ContentDisposition::inline())
+            .then(header::ContentDisposition::inline)
             .unwrap_or_else(|| header::ContentDisposition::attachment(file_id.as_str()));
         multipart = multipart.singlepart(
             SinglePart::builder()

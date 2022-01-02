@@ -6,13 +6,15 @@ all commands should be prefixed with `/`.
 commands are:
 `generate registration-token` -> generates a registration token
 `delete user <user_id>` -> deletes a user from the server
+`set motd <new_motd>` -> sets the server MOTD
 `help` -> shows help
 "#;
 
 pub struct AdminActionError;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum AdminAction {
+    SetMotd(String),
     DeleteUser(u64),
     GenerateRegistrationToken,
     Help,
@@ -29,6 +31,9 @@ impl FromStr for AdminAction {
                 if let Some(s) = s.strip_prefix("delete user") {
                     let user_id = s.trim().parse::<u64>().map_err(|_| AdminActionError)?;
                     AdminAction::DeleteUser(user_id)
+                } else if let Some(s) = s.strip_prefix("set motd") {
+                    let new_motd = s.trim().to_string();
+                    AdminAction::SetMotd(new_motd)
                 } else {
                     return Err(AdminActionError);
                 }
@@ -55,6 +60,10 @@ pub async fn run(deps: &Dependencies, action: AdminAction) -> ServerResult<Strin
         AdminAction::DeleteUser(user_id) => {
             auth::delete_user::logic(deps, user_id).await?;
             Ok(format!("deleted user {}", user_id))
+        }
+        AdminAction::SetMotd(new_motd) => {
+            deps.runtime_config.lock().motd = new_motd;
+            Ok("new MOTD set".to_string())
         }
         AdminAction::Help => Ok(HELP_TEXT.to_string()),
     }
