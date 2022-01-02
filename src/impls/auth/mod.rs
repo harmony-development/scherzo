@@ -394,7 +394,9 @@ fn verify_password(pass: impl AsRef<[u8]>, hash: &str) -> bool {
         Argon2,
     };
 
-    let pass_hash = PasswordHash::new(hash).expect("our hashes must be correct");
+    let Ok(pass_hash) = PasswordHash::new(hash) else {
+        return false;
+    };
     Argon2::default()
         .verify_password(pass.as_ref(), &pass_hash)
         .is_ok()
