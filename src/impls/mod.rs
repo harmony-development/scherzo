@@ -140,8 +140,10 @@ impl Dependencies {
                 builder.build()
             }),
 
+            runtime_config: Arc::new(Mutex::new(SharedConfigData {
+                motd: config.motd.clone(),
+            })),
             config,
-            runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
         };
 
         Ok((Arc::new(this), fed_event_receiver))

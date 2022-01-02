@@ -8,6 +8,13 @@ listen_on_localhost = true
 # The port to listen on.
 port = 2289
 
+# Why this server is hosted or info about the server.
+server_description = ""
+
+# Message of the day. Can also be changed at runtime, so it is suitable for
+# putting recent information (maintanance etc.).
+motd = ""
+
 # Whether to support CORS requests. Should only be used for
 # development purposes, since this allows everything.
 cors_dev = false

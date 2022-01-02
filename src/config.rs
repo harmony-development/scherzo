@@ -29,6 +29,8 @@ pub struct Config {
     pub host: String,
     #[serde(default)]
     pub server_description: String,
+    #[serde(default)]
+    pub motd: String,
     #[serde(default = "listen_on_localhost_default")]
     pub listen_on_localhost: bool,
     #[serde(default)]
@@ -55,6 +57,7 @@ impl Default for Config {
             cors_dev: false,
             host: String::new(),
             server_description: String::new(),
+            motd: String::new(),
             log_headers: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
