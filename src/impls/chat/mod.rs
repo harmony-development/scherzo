@@ -1470,12 +1470,6 @@ impl ChatTree {
 
     pub fn process_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
         if let Some(ov) = overrides {
-            if ov.avatar.as_ref().map_or(false, String::is_empty) {
-                bail!((
-                    "h.override-avatar-cant-be-empty",
-                    "message override avatar must not be empty if set"
-                ));
-            }
             if ov.username.as_ref().map_or(false, String::is_empty) {
                 bail!((
                     "h.override-username-cant-be-empty",
