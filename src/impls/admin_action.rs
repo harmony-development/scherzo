@@ -5,6 +5,7 @@ all commands should be prefixed with `/`.
 
 commands are:
 `generate token` -> generates a single use token
+`check token <token>` -> checks if a token is valid without using it
 `delete user <user_id>` -> deletes a user from the server
 `set motd <new_motd>` -> sets the server MOTD
 `help` -> shows help
@@ -17,6 +18,7 @@ pub enum AdminAction {
     SetMotd(String),
     DeleteUser(u64),
     GenerateToken,
+    CheckToken(String),
     Help,
 }
 
@@ -34,6 +36,9 @@ impl FromStr for AdminAction {
                 } else if let Some(s) = s.strip_prefix("set motd") {
                     let new_motd = s.trim().to_string();
                     AdminAction::SetMotd(new_motd)
+                } else if let Some(s) = s.strip_prefix("check token") {
+                    let token = s.trim();
+                    AdminAction::CheckToken(token.to_string())
                 } else {
                     return Err(AdminActionError);
                 }
@@ -60,6 +65,13 @@ pub async fn run(deps: &Dependencies, action: AdminAction) -> ServerResult<Strin
         AdminAction::DeleteUser(user_id) => {
             auth::delete_user::logic(deps, user_id).await?;
             Ok(format!("deleted user {}", user_id))
+        }
+        AdminAction::CheckToken(token) => {
+            let token_valid = deps.auth_tree.check_single_use_token(token).await.is_ok();
+            let msg = token_valid
+                .then(|| "token is valid")
+                .unwrap_or("token is invalid");
+            Ok(msg.to_string())
         }
         AdminAction::SetMotd(new_motd) => {
             deps.runtime_config.lock().motd = new_motd;

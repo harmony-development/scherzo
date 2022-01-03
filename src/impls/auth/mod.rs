@@ -303,7 +303,8 @@ impl AuthTree {
         Ok(token)
     }
 
-    pub async fn validate_single_use_token(&self, token: Vec<u8>) -> ServerResult<EVec> {
+    pub async fn validate_single_use_token(&self, token: impl AsRef<[u8]>) -> ServerResult<EVec> {
+        let token = token.as_ref();
         if token.is_empty() {
             bail!((
                 "h.invalid-single-use-token",
@@ -314,6 +315,24 @@ impl AuthTree {
         let token_hashed = hash_token(token);
         let val = self
             .remove(&single_use_token_key(token_hashed.as_ref()))
+            .await?
+            .ok_or(ServerError::InvalidRegistrationToken)?;
+
+        Ok(val)
+    }
+
+    pub async fn check_single_use_token(&self, token: impl AsRef<[u8]>) -> ServerResult<EVec> {
+        let token = token.as_ref();
+        if token.is_empty() {
+            bail!((
+                "h.invalid-single-use-token",
+                "single use token can't be empty"
+            ));
+        }
+
+        let token_hashed = hash_token(token);
+        let val = self
+            .get(&single_use_token_key(token_hashed.as_ref()))
             .await?
             .ok_or(ServerError::InvalidRegistrationToken)?;
 
