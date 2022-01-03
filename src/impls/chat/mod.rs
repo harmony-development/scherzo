@@ -1807,4 +1807,9 @@ impl ChatTree {
             raw.chunks_exact(size_of::<u64>()).map(deser_id).collect()
         }))
     }
+
+    pub async fn delete_invite_logic(&self, invite_id: String) -> Result<(), ServerError> {
+        self.remove(make_invite_key(invite_id.as_str())).await?;
+        Ok(())
+    }
 }

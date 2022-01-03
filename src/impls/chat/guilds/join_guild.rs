@@ -39,6 +39,11 @@ pub async fn handler(
     chat_tree.add_default_role_to(guild_id, user_id).await?;
     invite.use_count += 1;
 
+    let is_invite_consumed = is_infinite.not() && invite.use_count >= invite.possible_uses;
+    if is_invite_consumed {
+        chat_tree.delete_invite_logic(invite_id).await?;
+    }
+
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
         stream_event::Event::JoinedMember(stream_event::MemberJoined {
@@ -51,13 +56,15 @@ pub async fn handler(
 
     svc.dispatch_guild_join(guild_id, user_id).await?;
 
-    let buf = rkyv_ser(&invite);
-    chat_tree
-        .insert(
-            key,
-            [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
-        )
-        .await?;
+    if !is_invite_consumed {
+        let buf = rkyv_ser(&invite);
+        chat_tree
+            .insert(
+                key,
+                [guild_id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+            )
+            .await?;
+    }
 
     Ok((JoinGuildResponse { guild_id }).into_response())
 }

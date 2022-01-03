@@ -12,6 +12,14 @@ pub async fn handler(
         picture,
     } = request.into_message().await?;
 
+    if name.is_empty() {
+        bail!(("h.bad-guild-name", "guild name can't be empty"));
+    }
+
+    if picture.as_ref().map_or(false, String::is_empty) {
+        bail!(("h.bad-guild-picture", "guild picture can't be empty if set"));
+    }
+
     let guild_id = svc
         .deps
         .chat_tree

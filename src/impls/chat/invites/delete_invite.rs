@@ -18,11 +18,7 @@ pub async fn handler(
         .check_perms(guild_id, None, user_id, "invites.manage.delete", false)
         .await?;
 
-    chat_tree
-        .chat_tree
-        .remove(&make_invite_key(invite_id.as_str()))
-        .await
-        .map_err(ServerError::DbError)?;
+    chat_tree.delete_invite_logic(invite_id).await?;
 
     Ok((DeleteInviteResponse {}).into_response())
 }

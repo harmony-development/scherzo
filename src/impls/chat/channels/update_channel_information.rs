@@ -38,6 +38,9 @@ pub async fn handler(
     };
 
     if let Some(new_name) = new_name.clone() {
+        if new_name.is_empty() {
+            bail!(("h.bad-channel-name", "channel name can't be empty"));
+        }
         chan_info.channel_name = new_name;
     }
     if let Some(new_metadata) = new_metadata.clone() {
