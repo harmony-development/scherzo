@@ -21,7 +21,8 @@
 //! `auth` service general struture:
 //! - `token prefix + user id` -> token
 //! - `atime prefix + user id` -> last valid time (what?)
-//! - email -> hashed password
+//! - email -> user id
+//! - user id -> hashed password
 //!
 //! TODO other stuff
 
@@ -32,7 +33,7 @@ use std::{
     mem::size_of,
 };
 
-use crate::{config::DbConfig, error::travel_error, utils::evec::EVec};
+use crate::{config::DbConfig, error::travel_error, utils::evec::EVec, ServerError, ServerResult};
 
 use harmony_rust_sdk::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
@@ -41,6 +42,7 @@ use harmony_rust_sdk::api::{
 };
 use rkyv::{
     archived_root,
+    de::deserializers::SharedDeserializeMap,
     ser::{serializers::AllocSerializer, Serializer},
     AlignedVec, Archive, Deserialize, Serialize,
 };
@@ -115,8 +117,7 @@ impl StdError for DbError {
 pub type DbResult<T> = Result<T, DbError>;
 
 pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
-    raw.chunks_exact(size_of::<u64>())
-        .map(|raw| u64::from_be_bytes(unsafe { raw.try_into().unwrap_unchecked() }))
+    raw.chunks_exact(size_of::<u64>()).map(deser_id)
 }
 
 pub mod profile {
@@ -143,10 +144,13 @@ pub mod profile {
         concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
     }
 
+    pub fn make_user_metadata_prefix(user_id: u64) -> [u8; 14] {
+        concat_static(&[make_user_profile_key(user_id).as_ref(), [1].as_ref()])
+    }
+
     pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
         [
-            make_user_profile_key(user_id).as_ref(),
-            &[1],
+            make_user_metadata_prefix(user_id).as_ref(),
             app_id.as_bytes(),
         ]
         .concat()
@@ -355,7 +359,12 @@ pub mod auth {
 
     pub const ATIME_PREFIX: &[u8] = b"atime_";
     pub const TOKEN_PREFIX: &[u8] = b"token_";
-    pub const REG_TOKEN_PREFIX: &[u8] = b"reg_token_";
+    pub const AUTH_PREFIX: &[u8] = b"auth_";
+    pub const SU_TOKEN_PREFIX: &[u8] = b"reg_token_";
+
+    pub fn auth_key(token: &str) -> Vec<u8> {
+        [AUTH_PREFIX, token.as_bytes()].concat()
+    }
 
     pub const fn token_key(user_id: u64) -> [u8; 14] {
         concat_static(&[TOKEN_PREFIX, &user_id.to_be_bytes()])
@@ -365,8 +374,8 @@ pub mod auth {
         concat_static(&[ATIME_PREFIX, &user_id.to_be_bytes()])
     }
 
-    pub fn reg_token_key(token_hashed: &[u8]) -> Vec<u8> {
-        [REG_TOKEN_PREFIX, token_hashed].concat()
+    pub fn single_use_token_key(token_hashed: &[u8]) -> Vec<u8> {
+        [SU_TOKEN_PREFIX, token_hashed].concat()
     }
 }
 
@@ -376,6 +385,23 @@ pub mod sync {
     pub fn make_host_key(host: &str) -> Vec<u8> {
         [HOST_PREFIX, host.as_bytes()].concat()
     }
+}
+
+pub async fn batch_delete_prefix(tree: &Tree, prefix: impl AsRef<[u8]>) -> ServerResult<()> {
+    let batch =
+        tree.scan_prefix(prefix.as_ref())
+            .await
+            .try_fold(Batch::default(), |mut batch, res| {
+                let (key, _) = res.map_err(ServerError::from)?;
+                batch.remove(key);
+                ServerResult::Ok(batch)
+            })?;
+    tree.apply_batch(batch).await?;
+    Ok(())
+}
+
+pub fn deser_id(data: impl AsRef<[u8]>) -> u64 {
+    u64::from_be_bytes(data.as_ref().try_into().expect("length wasnt 8"))
 }
 
 crate::impl_deser! {
@@ -391,7 +417,7 @@ crate::impl_deser! {
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
     let (id_raw, _) = data.split_at(size_of::<u64>());
-    u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() })
+    deser_id(id_raw)
 }
 
 pub fn deser_invite_entry(data: EVec) -> (u64, Invite) {
@@ -411,7 +437,7 @@ macro_rules! impl_deser {
             $(
                 pub fn [<deser_ $name>](data: impl AsRef<[u8]>) -> $msg {
                     let archive = rkyv_arch::<$msg>(data.as_ref());
-                    unsafe { archive.deserialize(&mut rkyv::Infallible).unwrap_unchecked() }
+                    archive.deserialize(&mut SharedDeserializeMap::default()).expect("failed to deserialize")
                 }
             )*
         }
@@ -454,8 +480,8 @@ const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
     new
 }
 
-pub fn rkyv_ser<Value: Serialize<AllocSerializer<256>>>(value: &Value) -> AlignedVec {
-    let mut ser = AllocSerializer::<256>::default();
+pub fn rkyv_ser<Value: Serialize<AllocSerializer<1024>>>(value: &Value) -> AlignedVec {
+    let mut ser = AllocSerializer::<1024>::default();
     ser.serialize_value(value).unwrap();
     ser.into_serializer().into_inner()
 }

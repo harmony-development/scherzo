@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<GetGuildListRequest>,
 ) -> ServerResult<Response<GetGuildListResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let prefix = make_guild_list_key_prefix(user_id);
     let guilds =
@@ -20,7 +20,7 @@ pub async fn handler(
                     .split_at(size_of::<u64>());
 
                 // Safety: this unwrap can never cause UB since we split at u64 boundary
-                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+                let guild_id = deser_id(id_raw);
                 // Safety: we never store non UTF-8 hosts, so this can't cause UB
                 let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
 

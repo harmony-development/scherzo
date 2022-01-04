@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<UpdateChannelInformationRequest>,
 ) -> ServerResult<Response<UpdateChannelInformationResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let UpdateChannelInformationRequest {
         guild_id,
@@ -38,6 +38,9 @@ pub async fn handler(
     };
 
     if let Some(new_name) = new_name.clone() {
+        if new_name.is_empty() {
+            bail!(("h.bad-channel-name", "channel name can't be empty"));
+        }
         chan_info.channel_name = new_name;
     }
     if let Some(new_metadata) = new_metadata.clone() {

@@ -2,20 +2,14 @@ use tracing::Instrument;
 
 use super::*;
 
-pub fn handler(
+pub async fn handler(
     svc: &ChatServer,
     request: Request<()>,
     socket: Socket<StreamEventsResponse, StreamEventsRequest>,
-) -> impl Future<Output = Result<(), HrpcServerError>> + Send + '_ {
-    let user_id = svc.deps.valid_sessions.auth(&request);
-
-    let span = match &user_id {
-        Ok(user_id) => tracing::debug_span!("stream_events", user_id = %user_id),
-        Err(_) => tracing::debug_span!("stream_events"),
-    };
+) -> Result<(), HrpcServerError> {
+    let user_id = svc.deps.auth(&request).await?;
 
     let fut = async move {
-        let user_id = user_id?;
         // TODO: optimize local guild fetching
         let local_guilds: Vec<u64> = svc
             .deps
@@ -26,14 +20,28 @@ pub fn handler(
             .filter(|g| g.server_id == "")
             .map(|g| g.guild_id)
             .collect();
-
         tracing::debug!("stream events validated");
 
-        tracing::debug!("creating stream events");
-        let send_task = svc.spawn_event_stream_processor(user_id, socket);
+        let mut cancel_recv = svc.deps.chat_event_canceller.subscribe();
 
-        if let Err(err) = send_task.await {
-            return Err(format!("stream events send loop task panicked: {}, aborting", err).into());
+        tracing::debug!("creating stream events processor");
+        let mut send_task = svc.spawn_event_stream_processor(user_id, socket);
+
+        loop {
+            tokio::select! {
+                Ok(cancelled_user_id) = cancel_recv.recv() => {
+                    if cancelled_user_id == user_id {
+                        return Err(("scherzo.stream-cancelled", "stream events cancelled manually").into());
+                    }
+                }
+                res = &mut send_task => {
+                    match res {
+                        Err(err) => return Err(format!("stream events send loop task panicked: {}, aborting", err).into()),
+                        Ok(_) => break,
+                    }
+                }
+                else => tokio::task::yield_now().await,
+            }
         }
 
         tracing::debug!("stream events ended");
@@ -41,5 +49,6 @@ pub fn handler(
         Ok(())
     };
 
-    fut.instrument(span)
+    fut.instrument(tracing::debug_span!("stream_events", user_id = %user_id))
+        .await
 }

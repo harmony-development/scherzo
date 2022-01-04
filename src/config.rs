@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
+use lettre::transport::smtp::authentication::Credentials;
 use serde::{Deserialize, Serialize};
 
-use crate::ServerError;
+use crate::{ServerError, ServerResult};
 
 const fn listen_on_localhost_default() -> bool {
     true
@@ -28,6 +29,8 @@ pub struct Config {
     pub host: String,
     #[serde(default)]
     pub server_description: String,
+    #[serde(default)]
+    pub motd: String,
     #[serde(default = "listen_on_localhost_default")]
     pub listen_on_localhost: bool,
     #[serde(default)]
@@ -44,6 +47,8 @@ pub struct Config {
     pub tls: Option<TlsConfig>,
     #[serde(default = "federation_config_default")]
     pub federation: Option<FederationConfig>,
+    #[serde(default)]
+    pub email: Option<EmailConfig>,
 }
 
 impl Default for Config {
@@ -52,6 +57,7 @@ impl Default for Config {
             cors_dev: false,
             host: String::new(),
             server_description: String::new(),
+            motd: String::new(),
             log_headers: false,
             listen_on_localhost: listen_on_localhost_default(),
             port: port_default(),
@@ -60,6 +66,7 @@ impl Default for Config {
             media: MediaConfig::default(),
             tls: None,
             federation: federation_config_default(),
+            email: None,
         }
     }
 }
@@ -84,6 +91,9 @@ pub struct PolicyConfig {
     pub ratelimit: RateLimitConfig,
     #[serde(default)]
     pub disable_registration: bool,
+    /// only takes effect if email config is set (duh)
+    #[serde(default)]
+    pub disable_registration_email_validation: bool,
     #[serde(default = "max_concurrent_requests_default")]
     pub max_concurrent_requests: usize,
 }
@@ -93,6 +103,7 @@ impl Default for PolicyConfig {
         Self {
             ratelimit: RateLimitConfig::default(),
             disable_registration: false,
+            disable_registration_email_validation: false,
             max_concurrent_requests: max_concurrent_requests_default(),
         }
     }
@@ -189,6 +200,43 @@ impl Default for FederationConfig {
             host_allow_list: Vec::new(),
             host_block_list: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmailConfig {
+    pub server: String,
+    pub port: u16,
+    pub from: String,
+    pub tls: bool,
+    credentials_file: Option<PathBuf>,
+}
+
+impl EmailConfig {
+    pub async fn read_credentials(&self) -> Option<ServerResult<EmailCredentials>> {
+        if let Some(path) = &self.credentials_file {
+            Some(Self::read_credentials_inner(path).await)
+        } else {
+            None
+        }
+    }
+
+    async fn read_credentials_inner(path: &Path) -> ServerResult<EmailCredentials> {
+        let raw = tokio::fs::read(path).await?;
+        let creds = toml::from_slice(&raw).map_err(ServerError::InvalidEmailConfig)?;
+        Ok(creds)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EmailCredentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl From<EmailCredentials> for Credentials {
+    fn from(creds: EmailCredentials) -> Self {
+        Credentials::new(creds.username, creds.password)
     }
 }
 

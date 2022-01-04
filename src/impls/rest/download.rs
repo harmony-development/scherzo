@@ -164,7 +164,7 @@ pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
     let allowed_ips = deps.config.policy.ratelimit.allowed_ips.clone();
     RateLimit::new(
         DownloadService { deps },
-        10,
+        30,
         Duration::from_secs(5),
         client_ip_header_name,
         allowed_ips,

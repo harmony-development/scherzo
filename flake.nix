@@ -13,7 +13,7 @@
 
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
     root = ./.;
-    buildPlatform = "naersk";
+    buildPlatform = "crate2nix";
     overrides = {
       crateOverrides = common: _: {
         mediasoup-sys = prev:
@@ -31,8 +31,11 @@
           };
       };
       shell = common: prev: {
-        packages = prev.packages ++ [
-          common.pkgs.musl.dev
+        packages = prev.packages ++ (with common.pkgs; [
+          musl.dev
+          mold
+          mkcert
+          cargo-deny
           /*(common.lib.buildCrate {
             memberName = "tokio-console";
 
@@ -45,7 +48,7 @@
             inherit (common) nativeBuildInputs buildInputs;
             CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
             })*/
-        ];
+        ]);
         commands = prev.commands ++ [
           {
             name = "generate-cert";

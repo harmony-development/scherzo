@@ -1,3 +1,4 @@
+pub mod admin_action;
 pub mod against;
 pub mod auth;
 pub mod batch;
@@ -10,16 +11,19 @@ pub mod sync;
 #[cfg(feature = "voice")]
 pub mod voice;
 
-use hrpc::client::transport::http::hyper::{http_client, HttpClient};
-use hyper::{http, Uri};
 use prelude::*;
 
-use std::{str::FromStr, time::UNIX_EPOCH};
+use std::str::FromStr;
 
-use dashmap::DashMap;
-use harmony_rust_sdk::api::{exports::prost::bytes::Bytes, HomeserverIdentifier};
+use harmony_rust_sdk::api::HomeserverIdentifier;
+use hrpc::client::transport::http::hyper::{http_client, HttpClient};
+use hyper::{http, Uri};
+use lettre::{
+    message::{header, Mailbox, MultiPart, SinglePart},
+    transport::smtp::client::{Tls, TlsParametersBuilder},
+    AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+};
 use parking_lot::Mutex;
-use rand::Rng;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
@@ -33,8 +37,8 @@ pub mod prelude {
     pub use std::{convert::TryInto, mem::size_of};
 
     pub use crate::{
-        db::{self, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
-        utils::evec::EVec,
+        db::{self, deser_id, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
+        utils::{evec::EVec, *},
         ServerError,
     };
 
@@ -54,10 +58,7 @@ pub mod prelude {
     pub use smol_str::SmolStr;
     pub use triomphe::Arc;
 
-    pub use super::{
-        auth::{AuthExt, SessionMap},
-        Dependencies,
-    };
+    pub use super::{auth::AuthExt, Dependencies};
 
     pub(crate) use super::{impl_unary_handlers, impl_ws_handlers};
 }
@@ -72,12 +73,12 @@ pub struct Dependencies {
     pub emote_tree: EmoteTree,
     pub sync_tree: Tree,
 
-    pub valid_sessions: SessionMap,
     pub chat_event_sender: chat::EventSender,
+    pub chat_event_canceller: chat::EventCanceller,
     pub fed_event_dispatcher: FedEventDispatcher,
     pub key_manager: Option<Arc<key::Manager>>,
-    pub action_processor: ActionProcesser,
     pub http: HttpClient,
+    pub email: Option<AsyncSmtpTransport<Tokio1Executor>>,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
@@ -88,26 +89,61 @@ impl Dependencies {
         let (fed_event_dispatcher, fed_event_receiver) = mpsc::unbounded_channel();
 
         let auth_tree = AuthTree::new(db).await?;
+        let profile_tree = ProfileTree::new(db).await?;
+
+        let email_creds = if let Some(email) = &config.email {
+            email.read_credentials().await.and_then(|res| match res {
+                Ok(creds) => {
+                    tracing::info!("loaded credentials for email");
+                    Some(creds)
+                }
+                Err(err) => {
+                    tracing::error!("error reading email credentials: {}", err);
+                    None
+                }
+            })
+        } else {
+            tracing::debug!("email config wasn't defined, so not loading creds");
+            None
+        };
 
         let this = Self {
             auth_tree: auth_tree.clone(),
             chat_tree: ChatTree::new(db).await?,
-            profile_tree: ProfileTree::new(db).await?,
+            profile_tree: profile_tree.clone(),
             emote_tree: EmoteTree::new(db).await?,
             sync_tree: db.open_tree(b"sync").await?,
 
-            valid_sessions: Arc::new(DashMap::default()),
             chat_event_sender: broadcast::channel(2048).0,
+            chat_event_canceller: broadcast::channel(2048).0,
             fed_event_dispatcher,
             key_manager: config
                 .federation
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
-            action_processor: ActionProcesser { auth_tree },
             http: http_client(&mut hyper::Client::builder()),
+            email: config.email.as_ref().map(|ec| {
+                let mut builder =
+                    AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&ec.server)
+                        .port(ec.port);
+                if ec.tls {
+                    builder = builder.tls(Tls::Required(
+                        // TODO: let users add root certificates
+                        TlsParametersBuilder::new(ec.server.clone())
+                            .build_rustls()
+                            .unwrap(),
+                    ));
+                }
+                if let Some(creds) = email_creds {
+                    builder = builder.credentials(creds.into());
+                }
+                builder.build()
+            }),
 
+            runtime_config: Arc::new(Mutex::new(SharedConfigData {
+                motd: config.motd.clone(),
+            })),
             config,
-            runtime_config: Arc::new(Mutex::new(SharedConfigData::default())),
         };
 
         Ok((Arc::new(this), fed_event_receiver))
@@ -179,112 +215,72 @@ pub fn setup_server(
     (server, rest)
 }
 
-fn get_time_secs() -> u64 {
-    UNIX_EPOCH
-        .elapsed()
-        .expect("time is before unix epoch")
-        .as_secs()
-}
+/// Panics if email is not setup in config.
+pub async fn send_email(
+    deps: &Dependencies,
+    to: &str,
+    subject: String,
+    plain: String,
+    html: Option<String>,
+    files: Vec<(Vec<u8>, String, String, bool)>,
+) -> ServerResult<()> {
+    let to = to
+        .parse::<Mailbox>()
+        .map_err(|err| ("h.invalid-email", format!("email is invalid: {}", err)))?;
+    let from = deps
+        .config
+        .email
+        .as_ref()
+        .expect("must have email config")
+        .from
+        .parse::<Mailbox>()
+        .map_err(|err| err.to_string())?;
 
-fn gen_rand_inline_str() -> SmolStr {
-    // Safety: arrays generated by gen_rand_arr are alphanumeric, so they are valid ASCII chars as well as UTF-8 chars [ref:alphanumeric_array_gen]
-    let arr = gen_rand_arr::<_, 22>(&mut rand::thread_rng());
-    let str = unsafe { std::str::from_utf8_unchecked(&arr) };
-    // Safety: generated array is exactly 22 u8s long
-    SmolStr::new_inline(str)
-}
-
-#[allow(dead_code)]
-fn gen_rand_str<const LEN: usize>() -> SmolStr {
-    let arr = gen_rand_arr::<_, LEN>(&mut rand::thread_rng());
-    // Safety: arrays generated by gen_rand_arr are alphanumeric, so they are valid ASCII chars as well as UTF-8 chars [ref:alphanumeric_array_gen]
-    let str = unsafe { std::str::from_utf8_unchecked(&arr) };
-    SmolStr::new(str)
-}
-
-fn gen_rand_arr<RNG: Rng, const LEN: usize>(rng: &mut RNG) -> [u8; LEN] {
-    let mut res = [0_u8; LEN];
-
-    let random = rng
-        .sample_iter(rand::distributions::Alphanumeric) // [tag:alphanumeric_array_gen]
-        .take(LEN);
-
-    random
-        .zip(res.iter_mut())
-        .for_each(|(new_ch, ch)| *ch = new_ch);
-
-    res
-}
-
-fn gen_rand_u64() -> u64 {
-    rand::thread_rng().gen_range(1..u64::MAX)
-}
-
-fn get_mimetype<T>(response: &http::Response<T>) -> &str {
-    response
-        .headers()
-        .get(&http::header::CONTENT_TYPE)
-        .and_then(|val| val.to_str().ok())
-        .and_then(|s| s.split(';').next())
-        .unwrap_or("application/octet-stream")
-}
-
-fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
-    response
-        .headers()
-        .get(&http::header::CONTENT_LENGTH)
-        .cloned()
-        .unwrap_or_else(|| unsafe {
-            http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
-        })
-}
-
-pub struct AdminActionError;
-
-#[derive(Debug, Clone, Copy)]
-pub enum AdminAction {
-    GenerateRegistrationToken,
-    Help,
-}
-
-impl FromStr for AdminAction {
-    type Err = AdminActionError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let act = match s.trim_start_matches('/').trim() {
-            "generate registration-token" => AdminAction::GenerateRegistrationToken,
-            "help" => AdminAction::Help,
-            _ => return Err(AdminActionError),
-        };
-        Ok(act)
+    let mut multipart = MultiPart::related().singlepart(SinglePart::plain(plain));
+    if let Some(html) = html {
+        multipart = multipart.singlepart(SinglePart::html(html));
     }
-}
-
-pub const HELP_TEXT: &str = r#"
-commands are:
-`generate registration-token` -> generates a registration token
-`help` -> shows help
-"#;
-
-#[derive(Clone)]
-pub struct ActionProcesser {
-    auth_tree: AuthTree,
-}
-
-impl ActionProcesser {
-    pub async fn run(&self, action: &str) -> ServerResult<String> {
-        let maybe_action = AdminAction::from_str(action);
-        match maybe_action {
-            Ok(action) => match action {
-                AdminAction::GenerateRegistrationToken => {
-                    let token = self.auth_tree.put_rand_reg_token().await?;
-                    Ok(token.into())
-                }
-                AdminAction::Help => Ok(HELP_TEXT.to_string()),
-            },
-            Err(_) => Ok(format!("invalid command: `{}`", action)),
-        }
+    for (file_body, file_id, file_type, is_inline) in files {
+        let disposition = is_inline
+            .then(header::ContentDisposition::inline)
+            .unwrap_or_else(|| header::ContentDisposition::attachment(file_id.as_str()));
+        multipart = multipart.singlepart(
+            SinglePart::builder()
+                .header(header::ContentType::parse(&file_type).unwrap())
+                .header(disposition)
+                .header(header::ContentId::from(file_id))
+                .body(file_body),
+        );
     }
+
+    let email = lettre::Message::builder()
+        .from(from)
+        .to(to)
+        .subject(subject)
+        .date_now()
+        .multipart(multipart)
+        .expect("email must always be valid");
+
+    let response = deps
+        .email
+        .as_ref()
+        .expect("email client must be created for delete user option")
+        .send(email)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    if !response.is_positive() {
+        bail!((
+            "scherzo.mailserver-error",
+            format!(
+                "failed to send email (code {}): {}",
+                response.code(),
+                response.first_line().unwrap_or("unknown error")
+            )
+        ));
+    }
+
+    Ok(())
 }
 
 macro_rules! impl_unary_handlers {

@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ProfileServer,
     request: Request<GetAppDataRequest>,
 ) -> ServerResult<Response<GetAppDataResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let GetAppDataRequest { app_id } = request.into_message().await?;
     let app_data = svc

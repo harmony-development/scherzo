@@ -19,24 +19,36 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     name: Build scherzo
     steps:
     - name: Checkout repo
       uses: actions/checkout@v2
 
+    - name: Install nix
+      uses: cachix/install-nix-action@v16
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+        nix_path: nixpkgs=channel:nixos-unstable
+
     - name: Install dependencies
       run: |
         sudo apt update -yy
-        sudo apt install -yy --no-install-recommends protobuf-compiler lld
+        sudo apt install -yy --no-install-recommends protobuf-compiler clang
+
     - name: Install rust
       run: rustup update && rustup component add rustfmt clippy
 
     - name: Cache rust
       uses: Swatinem/rust-cache@v1
+      with:
+        key: cache-debug
 
     - name: Install Cargo Deny
       run: cargo install --locked cargo-deny
@@ -44,31 +56,46 @@ jobs:
     - name: Cargo Deny
       run: cargo deny check
 
-    - name: Clippy
-      uses: actions-rs/clippy-check@v1
+    - name: Test (with sled DB)
+      run: nix-shell -p mold --run "cargo test --no-default-features --features sled,voice"
+
+    - name: Test (with sqlite DB)
+      run: nix-shell -p mold --run "cargo test --no-default-features --features sqlite,voice"
+  
+  build-release:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    name: Build release binaries
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+    - name: Install nix
+      uses: cachix/install-nix-action@v16
       with:
-        args: "--target x86_64-unknown-linux-gnu --no-default-features --features sled,voice"
-        token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+        nix_path: nixpkgs=channel:nixos-unstable
 
-    - name: Clippy
-      uses: actions-rs/clippy-check@v1
+    - name: Install dependencies
+      run: |
+        sudo apt update -yy
+        sudo apt install -yy --no-install-recommends protobuf-compiler clang
+
+    - name: Install rust
+      run: rustup update && rustup component add rustfmt clippy
+
+    - name: Cache rust
+      uses: Swatinem/rust-cache@v1
       with:
-        args: "--target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice"
-        token: ${{ secrets.GITHUB_TOKEN }}
-        name: clippy
+        key: cache-release-1
 
-    - name: Test
-      run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sled,voice
+    - name: Build release
+      run: nix-shell -p mold --run "cargo build --release --no-default-features --features sled,voice,jemalloc"
 
-    - name: Test
-      run: cargo test --target x86_64-unknown-linux-gnu --no-default-features --features sqlite,voice
-
-    - name: Build
-      run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,voice,jemalloc
-
-    - name: Build migrate
-      run: cargo build --target x86_64-unknown-linux-gnu --release --no-default-features --features sled,sqlite --bin scherzo_migrate
+    - name: Build release (migrate binary)
+      run: nix-shell -p mold --run "cargo build --release --no-default-features --features sled,sqlite,jemalloc --bin scherzo_migrate"
 
     #- name: UPX
     #  run: |
@@ -76,16 +103,15 @@ jobs:
     #      ./upx target/x86_64-unknown-linux-gnu/release/scherzo_cmd
     
     - name: Upload release
-      if: github.event_name == 'push'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
           wget -q https://github.com/TheAssassin/pyuploadtool/releases/download/continuous/pyuploadtool-x86_64.AppImage
           chmod +x pyuploadtool-x86_64.AppImage
-          ./pyuploadtool-x86_64.AppImage target/x86_64-unknown-linux-gnu/release/scherzo target/x86_64-unknown-linux-gnu/release/scherzo_cmd target/x86_64-unknown-linux-gnu/release/scherzo_migrate
+          ./pyuploadtool-x86_64.AppImage target/release/scherzo target/release/scherzo_cmd target/release/scherzo_migrate
 
   update:
-    needs: build
+    needs: build-release
     name: Update Scherzo at harmonyapp.io
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
@@ -115,7 +141,7 @@ jobs:
           event-type: dep-updated
 
   docker:
-    needs: build
+    needs: build-release
     name: Update scherzo docker image
     runs-on: ubuntu-latest
     if: github.event_name == 'push'

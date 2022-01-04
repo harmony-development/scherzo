@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &EmoteServer,
     request: Request<DeleteEmoteFromPackRequest>,
 ) -> ServerResult<Response<DeleteEmoteFromPackResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let DeleteEmoteFromPackRequest { pack_id, name } = request.into_message().await?;
 

@@ -56,11 +56,24 @@ tower-http = { version = "0.2", default-features = false, features = [
 ] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
+lettre = { version = "0.10.0-rc.4", default-features = false, features = [
+    "smtp-transport",
+    "pool",
+    "hostname",
+    "builder",
+    "tokio1-rustls-tls",
+] }
 
-sqlx = { version = "0.5", default-features = false, features = ["sqlite", "runtime-tokio-rustls"], optional = true }
-itertools = { version = "0.10", default-features = false, features = ["use_std"], optional = true }
+sqlx = { version = "0.5", default-features = false, features = [
+    "sqlite",
+    "runtime-tokio-rustls",
+], optional = true }
+itertools = { version = "0.10", default-features = false, features = [
+    "use_std",
+], optional = true }
 
 rand = "0.8"
+argon2 = "0.3"
 ed25519-compact = "1"
 sha3 = "0.10"
 ahash = { version = "0.7", default-features = false }
@@ -140,9 +153,7 @@ library = true
 
 [workspace.metadata.nix]
 systems = ["x86_64-linux"]
-devshell.packages = ["cargo-deny", "mkcert"]
-nativeBuildInputs = ["lld_12"]
-env.RUSTC_FORCE_INCREMENTAL = "1"
+cCompiler = "clang_13"
 
 [package.metadata.nix.cachix]
 name = "harmony"

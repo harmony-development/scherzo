@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<CreateChannelRequest>,
 ) -> ServerResult<Response<CreateChannelResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let CreateChannelRequest {
         guild_id,
@@ -20,6 +20,14 @@ pub async fn handler(
     chat_tree
         .check_perms(guild_id, None, user_id, "channels.manage.create", false)
         .await?;
+
+    if channel_name.is_empty() {
+        bail!(("h.bad-channel-name", "channel name can't be empty"));
+    }
+
+    if position.as_ref().map_or(false, |pos| pos.item_id == 0) {
+        bail!(("h.bad-item-position", "channel position can't be empty"));
+    }
 
     let channel_id = chat_tree
         .create_channel_logic(

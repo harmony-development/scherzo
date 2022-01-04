@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &MediaproxyServer,
     request: Request<FetchLinkMetadataRequest>,
 ) -> ServerResult<Response<FetchLinkMetadataResponse>> {
-    svc.deps.valid_sessions.auth(&request)?;
+    svc.deps.auth(&request).await?;
 
     let FetchLinkMetadataRequest { url } = request.into_message().await?;
 

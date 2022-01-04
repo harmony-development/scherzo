@@ -6,9 +6,9 @@ use harmony_rust_sdk::api::{
     auth::{next_step_request::form_fields::Field, *},
     profile::{Profile, UserStatus},
 };
+use hrpc::server::gen_prelude::BoxFuture;
 use hyper::{http, HeaderMap};
 use rand::{Rng, SeedableRng};
-use sha3::Digest;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::Instrument;
 
@@ -25,6 +25,7 @@ use db::{
 
 pub mod begin_auth;
 pub mod check_logged_in;
+pub mod delete_user;
 pub mod federate;
 pub mod key;
 pub mod login_federated;
@@ -34,39 +35,46 @@ pub mod stream_steps;
 
 const SESSION_EXPIRE: u64 = 60 * 60 * 24 * 2;
 
-pub type SessionMap = Arc<DashMap<SmolStr, u64, RandomState>>;
+pub fn get_token_from_header_map(headers: &HeaderMap) -> &str {
+    headers
+        .get(http::header::AUTHORIZATION)
+        .map_or_else(
+            || {
+                // Specific handling for web clients
+                headers
+                    .get(http::header::SEC_WEBSOCKET_PROTOCOL)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|v| v.split(',').map(str::trim).last())
+            },
+            |val| val.to_str().ok(),
+        )
+        .unwrap_or("")
+}
 
 pub trait AuthExt {
-    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError>;
-    fn auth<T>(&self, request: &Request<T>) -> Result<u64, ServerError> {
-        request
+    fn auth_with<'a>(&'a self, auth_id: &'a str) -> BoxFuture<'a, Result<u64, ServerError>>;
+    fn auth<'a, T>(&'a self, request: &'a Request<T>) -> BoxFuture<'a, Result<u64, ServerError>> {
+        let auth_id = request
             .header_map()
-            .map_or(Err(ServerError::Unauthenticated), |h| {
-                self.auth_header_map(h)
-            })
+            .map_or(Err(ServerError::Unauthenticated), |headers| {
+                Ok(get_token_from_header_map(headers))
+            });
+
+        match auth_id {
+            Ok(auth_id) => self.auth_with(auth_id),
+            Err(err) => Box::pin(std::future::ready(Err(err))),
+        }
     }
 }
 
-impl AuthExt for DashMap<SmolStr, u64, RandomState> {
-    fn auth_header_map(&self, headers: &HeaderMap) -> Result<u64, ServerError> {
-        let auth_id = headers
-            .get(http::header::AUTHORIZATION)
-            .map_or_else(
-                || {
-                    // Specific handling for web clients
-                    headers
-                        .get(http::header::SEC_WEBSOCKET_PROTOCOL)
-                        .and_then(|h| h.to_str().ok())
-                        .and_then(|v| v.split(',').map(str::trim).last())
-                },
-                |val| val.to_str().ok(),
-            )
-            .unwrap_or("");
-
-        self.get(auth_id)
-            .as_deref()
-            .copied()
-            .map_or(Err(ServerError::Unauthenticated), Ok)
+impl AuthExt for Dependencies {
+    fn auth_with<'a>(&'a self, token: &'a str) -> BoxFuture<'a, Result<u64, ServerError>> {
+        Box::pin(async move {
+            self.auth_tree
+                .get(auth_key(token))
+                .await?
+                .map_or(Err(ServerError::Unauthenticated), |raw| Ok(deser_id(raw)))
+        })
     }
 }
 #[derive(Clone)]
@@ -82,14 +90,12 @@ impl AuthServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         let att = deps.auth_tree.clone();
         let ptt = deps.profile_tree.clone();
-        let vs = deps.valid_sessions.clone();
 
         tokio::spawn(
             (async move {
                 tracing::info!("starting auth session expiration check thread");
 
-                // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
-                async unsafe fn scan_tree_for(
+                async fn scan_tree_for(
                     att: &Tree,
                     prefix: &[u8],
                 ) -> ServerResult<Vec<(u64, EVec)>> {
@@ -99,9 +105,8 @@ impl AuthServer {
                         .try_fold(Vec::new(), move |mut all, res| {
                             let (key, val) = res.map_err(ServerError::from)?;
                             all.push((
-                                u64::from_be_bytes(
-                                    key.split_at(len).1.try_into().unwrap_unchecked(),
-                                ),
+                                // Safety: the right portion of the key after split at the prefix length MUST be a valid u64
+                                deser_id(key.split_at(len).1),
                                 val,
                             ));
                             ServerResult::Ok(all)
@@ -110,9 +115,9 @@ impl AuthServer {
 
                 loop {
                     // Safety: we never insert non u64 keys for tokens [tag:token_u64_key]
-                    let tokens = unsafe { scan_tree_for(&att.inner, TOKEN_PREFIX).await };
+                    let tokens = scan_tree_for(&att.inner, TOKEN_PREFIX).await;
                     // Safety: we never insert non u64 keys for atimes [tag:atime_u64_key]
-                    let atimes = unsafe { scan_tree_for(&att.inner, ATIME_PREFIX).await };
+                    let atimes = scan_tree_for(&att.inner, ATIME_PREFIX).await;
 
                     match tokens.and_then(|tokens| Ok((tokens, atimes?))) {
                         Ok((tokens, atimes)) => {
@@ -122,31 +127,28 @@ impl AuthServer {
                                     for (oid, raw_atime) in &atimes {
                                         if id.eq(oid) {
                                             // Safety: raw_atime's we store are always u64s [tag:atime_u64_value]
-                                            let secs = u64::from_be_bytes(unsafe {
-                                                raw_atime.as_ref().try_into().unwrap_unchecked()
-                                            });
+                                            let secs = deser_id(raw_atime);
                                             let auth_how_old = get_time_secs() - secs;
                                             // Safety: all of our tokens are valid str's, we never generate invalid ones [ref:alphanumeric_auth_token_gen]
                                             let token = unsafe {
                                                 std::str::from_utf8_unchecked(raw_token.as_ref())
                                             };
+                                            let auth_key = auth_key(token);
 
-                                            if vs.contains_key(token) {
+                                            let Ok(token_exists) = att.contains_key(&auth_key).await else { continue; };
+                                            if token_exists {
                                                 // [ref:atime_u64_key] [ref:atime_u64_value]
                                                 batch.insert(
-                                                    atime_key(id).to_vec(),
-                                                    get_time_secs().to_be_bytes().to_vec(),
+                                                    atime_key(id),
+                                                    get_time_secs().to_be_bytes(),
                                                 );
                                             } else if !profile.is_bot
                                                 && auth_how_old >= SESSION_EXPIRE
                                             {
                                                 tracing::debug!("user {} session has expired", id);
-                                                batch.remove(token_key(id).to_vec());
-                                                batch.remove(atime_key(id).to_vec());
-                                                vs.remove(token);
-                                            } else {
-                                                // Safety: all of our tokens are 22 chars long, so this can never panic [ref:auth_token_length]
-                                                vs.insert(SmolStr::new_inline(token), id);
+                                                batch.remove(auth_key);
+                                                batch.remove(token_key(id));
+                                                batch.remove(atime_key(id));
                                             }
                                         }
                                     }
@@ -186,16 +188,29 @@ impl AuthServer {
         self
     }
 
+    async fn is_token_valid(&self, token: &str) -> Result<bool, ServerError> {
+        self.deps.auth_with(token).await.map_or_else(
+            |err| {
+                matches!(err, ServerError::Unauthenticated)
+                    .then(|| Ok(false))
+                    .unwrap_or(Err(err))
+            },
+            |_| Ok(true),
+        )
+    }
+
     // [tag:alphanumeric_auth_token_gen] [tag:auth_token_length]
-    fn gen_auth_token(&self) -> SmolStr {
-        let mut rng = rand::thread_rng();
+    async fn gen_auth_token(&self) -> Result<SmolStr, ServerError> {
+        let mut rng = rand::rngs::SmallRng::from_entropy();
         let mut raw = gen_rand_arr::<_, 22>(&mut rng);
         let mut token = unsafe { std::str::from_utf8_unchecked(&raw) };
-        while self.deps.valid_sessions.contains_key(token) {
+
+        while self.is_token_valid(token).await? {
             raw = gen_rand_arr::<_, 22>(&mut rng);
             token = unsafe { std::str::from_utf8_unchecked(&raw) };
         }
-        SmolStr::new_inline(token)
+
+        Ok(SmolStr::new_inline(token))
     }
 
     async fn gen_user_id(&self) -> Result<u64, ServerError> {
@@ -263,24 +278,147 @@ impl AuthTree {
         })
     }
 
-    pub async fn put_rand_reg_token(&self) -> ServerResult<SmolStr> {
-        // TODO: check if the token is already in tree
-        let token = gen_rand_inline_str();
-        {
-            let hashed = hash_password(token.as_bytes());
-            let key = reg_token_key(hashed.as_ref());
-            self.inner
-                .insert(&key, &[])
-                .await
-                .map_err(ServerError::from)?;
+    pub async fn generate_single_use_token(&self, value: impl Into<EVec>) -> ServerResult<SmolStr> {
+        fn generate() -> (SmolStr, Vec<u8>) {
+            let token = gen_rand_inline_str();
+            let key = {
+                let hashed = hash_token(token.as_bytes());
+                single_use_token_key(hashed.as_ref())
+            };
+            (token, key)
         }
+
+        let (token, key) = {
+            let (mut token, mut key) = generate();
+            while self.contains_key(&key).await? {
+                (token, key) = generate();
+            }
+            (token, key)
+        };
+
+        self.insert(key, value.into())
+            .await
+            .map_err(ServerError::from)?;
+
         Ok(token)
+    }
+
+    pub async fn validate_single_use_token(&self, token: impl AsRef<[u8]>) -> ServerResult<EVec> {
+        let token = token.as_ref();
+        if token.is_empty() {
+            bail!((
+                "h.invalid-single-use-token",
+                "single use token can't be empty"
+            ));
+        }
+
+        let token_hashed = hash_token(token);
+        let val = self
+            .remove(&single_use_token_key(token_hashed.as_ref()))
+            .await?
+            .ok_or(ServerError::InvalidRegistrationToken)?;
+
+        Ok(val)
+    }
+
+    pub async fn check_single_use_token(&self, token: impl AsRef<[u8]>) -> ServerResult<EVec> {
+        let token = token.as_ref();
+        if token.is_empty() {
+            bail!((
+                "h.invalid-single-use-token",
+                "single use token can't be empty"
+            ));
+        }
+
+        let token_hashed = hash_token(token);
+        let val = self
+            .get(&single_use_token_key(token_hashed.as_ref()))
+            .await?
+            .ok_or(ServerError::InvalidRegistrationToken)?;
+
+        Ok(val)
+    }
+
+    pub async fn get_user_id(&self, email: &str) -> ServerResult<u64> {
+        let maybe_user_id = self.get(email.as_bytes()).await?.map(deser_id);
+
+        maybe_user_id
+            .ok_or_else(|| ServerError::WrongEmailOrPassword {
+                email: email.into(),
+            })
+            .map_err(Into::into)
     }
 }
 
-#[inline(always)]
-fn hash_password(raw: impl AsRef<[u8]>) -> impl AsRef<[u8]> {
-    sha3::Sha3_512::digest(raw.as_ref())
+pub fn initial_auth_step() -> AuthStep {
+    AuthStep {
+        can_go_back: false,
+        fallback_url: String::default(),
+        step: Some(auth_step::Step::Choice(auth_step::Choice {
+            title: "initial".to_string(),
+            options: ["login", "register", "other-options"]
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        })),
+    }
+}
+
+pub fn back_to_inital_step() -> AuthStep {
+    AuthStep {
+        can_go_back: false,
+        fallback_url: String::default(),
+        step: Some(auth_step::Step::Choice(auth_step::Choice {
+            title: "success".to_string(),
+            options: ["back-to-initial"]
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        })),
+    }
+}
+
+// this uses a constant salt because we want the output to be deterministic
+fn hash_token(token: impl AsRef<[u8]>) -> String {
+    use argon2::{
+        password_hash::{PasswordHasher, Salt, SaltString},
+        Argon2,
+    };
+
+    let salt = SaltString::b64_encode(&[0; Salt::RECOMMENDED_LENGTH]).expect("cant fail");
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(token.as_ref(), &salt)
+        .expect("todo handle failure")
+        .to_string()
+}
+
+fn hash_password(pass: impl AsRef<[u8]>) -> String {
+    use argon2::{
+        password_hash::{PasswordHasher, SaltString},
+        Argon2,
+    };
+
+    let salt = SaltString::generate(&mut rand::thread_rng());
+    let argon2 = Argon2::default();
+    argon2
+        .hash_password(pass.as_ref(), &salt)
+        .expect("todo handle failure")
+        .to_string()
+}
+
+fn verify_password(pass: impl AsRef<[u8]>, hash: &str) -> bool {
+    use argon2::{
+        password_hash::{PasswordHash, PasswordVerifier},
+        Argon2,
+    };
+
+    let Ok(pass_hash) = PasswordHash::new(hash) else {
+        return false;
+    };
+    Argon2::default()
+        .verify_password(pass.as_ref(), &pass_hash)
+        .is_ok()
 }
 
 const PASSWORD_FIELD_ERR: ServerError = ServerError::WrongTypeForField {

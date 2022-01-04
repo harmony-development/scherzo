@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<GrantOwnershipRequest>,
 ) -> ServerResult<Response<GrantOwnershipResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let GrantOwnershipRequest {
         new_owner_id,

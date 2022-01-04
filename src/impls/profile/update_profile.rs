@@ -5,7 +5,7 @@ pub async fn handler(
     request: Request<UpdateProfileRequest>,
 ) -> ServerResult<Response<UpdateProfileResponse>> {
     #[allow(unused_variables)]
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let UpdateProfileRequest {
         new_user_name,

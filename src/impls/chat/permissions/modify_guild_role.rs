@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<ModifyGuildRoleRequest>,
 ) -> ServerResult<Response<ModifyGuildRoleResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let ModifyGuildRoleRequest {
         guild_id,

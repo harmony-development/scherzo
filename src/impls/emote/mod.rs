@@ -133,12 +133,7 @@ impl EmoteTree {
                 .try_fold(Vec::new(), |mut all, res| {
                     let (key, _) = res.map_err(ServerError::from)?;
                     if key.len() == make_user_profile_key(0).len() {
-                        all.push(u64::from_be_bytes(unsafe {
-                            key.split_at(USER_PREFIX.len())
-                                .1
-                                .try_into()
-                                .unwrap_unchecked()
-                        }));
+                        all.push(deser_id(key.split_at(USER_PREFIX.len()).1));
                     }
                     ServerResult::Ok(all)
                 })?
@@ -148,9 +143,7 @@ impl EmoteTree {
             for res in self.inner.scan_prefix(&prefix).await {
                 let (key, _) = res.map_err(ServerError::from)?;
                 if key.len() == make_equipped_emote_key(user_id, 0).len() {
-                    let id = u64::from_be_bytes(unsafe {
-                        key.split_at(prefix.len()).1.try_into().unwrap_unchecked()
-                    });
+                    let id = deser_id(key.split_at(prefix.len()).1);
                     if id == pack_id {
                         has = true;
                         break;

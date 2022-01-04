@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &EmoteServer,
     request: Request<AddEmoteToPackRequest>,
 ) -> ServerResult<Response<AddEmoteToPackResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let AddEmoteToPackRequest { pack_id, emote } = request.into_message().await?;
 

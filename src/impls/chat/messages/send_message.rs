@@ -1,10 +1,12 @@
+use crate::impls::admin_action;
+
 use super::*;
 
 pub async fn handler(
     svc: &ChatServer,
     request: Request<SendMessageRequest>,
 ) -> ServerResult<Response<SendMessageResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let mut request = request.into_message().await?;
     let guild_id = request.guild_id;
@@ -41,7 +43,10 @@ pub async fn handler(
             content: Some(FormattedText { text, .. }),
         })) = message.content.as_ref().and_then(|c| c.content.as_ref())
         {
-            svc.deps.action_processor.run(text).await.ok()
+            let msg = admin_action::run_str(svc.deps.as_ref(), text)
+                .await
+                .unwrap_or_else(|err| format!("error: {}", err));
+            Some(msg)
         } else {
             None
         }

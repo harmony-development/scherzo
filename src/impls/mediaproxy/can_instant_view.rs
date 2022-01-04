@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &MediaproxyServer,
     request: Request<CanInstantViewRequest>,
 ) -> ServerResult<Response<CanInstantViewResponse>> {
-    svc.deps.valid_sessions.auth(&request)?;
+    svc.deps.auth(&request).await?;
 
     let CanInstantViewRequest { url } = request.into_message().await?;
 

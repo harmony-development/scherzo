@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
 use tower::Service;
 
-use crate::rest_error_response;
+use crate::{impls::auth::get_token_from_header_map, rest_error_response};
 
 use super::*;
 
@@ -37,10 +37,11 @@ impl Service<HttpRequest> for UploadService {
     fn call(&mut self, request: HttpRequest) -> Self::Future {
         let deps = self.deps.clone();
 
-        let auth_res = deps.valid_sessions.auth_header_map(request.headers());
-
         let fut = async move {
-            if let Err(err) = auth_res {
+            if let Err(err) = deps
+                .auth_with(get_token_from_header_map(request.headers()))
+                .await
+            {
                 return Ok(err.into_rest_http_response());
             }
             let boundary_res = request

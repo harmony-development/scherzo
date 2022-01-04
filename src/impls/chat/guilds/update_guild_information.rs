@@ -4,7 +4,7 @@ pub async fn handler(
     svc: &ChatServer,
     request: Request<UpdateGuildInformationRequest>,
 ) -> ServerResult<Response<UpdateGuildInformationResponse>> {
-    let user_id = svc.deps.valid_sessions.auth(&request)?;
+    let user_id = svc.deps.auth(&request).await?;
 
     let UpdateGuildInformationRequest {
         guild_id,
@@ -30,10 +30,13 @@ pub async fn handler(
         .await?;
 
     if let Some(new_name) = new_name.clone() {
+        if new_name.is_empty() {
+            bail!(("h.bad-guild-name", "guild name cant be empty"));
+        }
         guild_info.name = new_name;
     }
     if let Some(new_picture) = new_picture.clone() {
-        guild_info.picture = Some(new_picture);
+        guild_info.picture = new_picture.is_empty().not().then(|| new_picture);
     }
     if let Some(new_metadata) = new_metadata.clone() {
         guild_info.metadata = Some(new_metadata);

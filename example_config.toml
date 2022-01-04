@@ -8,6 +8,13 @@ listen_on_localhost = true
 # The port to listen on.
 port = 2289
 
+# Why this server is hosted or info about the server.
+server_description = ""
+
+# Message of the day. Can also be changed at runtime, so it is suitable for
+# putting recent information (maintanance etc.).
+motd = ""
+
 # Whether to support CORS requests. Should only be used for
 # development purposes, since this allows everything.
 cors_dev = false
@@ -20,6 +27,9 @@ log_headers = false
 
 # Whether to disable registration and only allow it using admin generated tokens.
 disable_registration = false
+
+# Whether to disable email validation for registration.
+disable_registration_email_validation = false
 
 # Maximum amount of requests that should be processed concurrently.
 # If set to 0, it will be disabled.
@@ -89,3 +99,27 @@ host_allow_list = []
 
 # Which hosts to block.
 host_block_list = []
+
+# (optional) email mailserver settings
+# [email]
+
+# Server address of the mailserver.
+# server = "localhost"
+
+# Port the mailserver is on on the specified address.
+# port = 25
+
+# Name and email adress to use for sending the emails.
+# from = "Harmony <noreply@harmonyapp.io>"
+
+# (optional) Credentials file for the mailserver.
+#
+# Example:
+# ```
+# username = "username"
+# password = "password"
+# ```
+# credentials_file = "./email_creds.toml"
+
+# Whether to use TLS or not while connecting to the mailserver.
+# tls = false
