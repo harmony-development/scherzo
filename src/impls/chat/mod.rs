@@ -3,6 +3,8 @@ use std::{
     str::FromStr,
 };
 
+use harmony_rust_sdk::api::chat::stream_event::GuildAddedToList;
+use harmony_rust_sdk::api::chat::Event::Chat;
 use harmony_rust_sdk::api::{
     chat::{
         get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
@@ -26,7 +28,10 @@ use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
-    sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
+    sync::{
+        broadcast::{Receiver, Sender as BroadcastSend},
+        mpsc::UnboundedSender,
+    },
     task::JoinHandle,
 };
 use triomphe::Arc;
@@ -158,6 +163,7 @@ impl ChatServer {
         &self,
         user_id: u64,
         socket: Socket<StreamEventsResponse, StreamEventsRequest>,
+        mut subscribe_chan: Receiver<EventSub>,
     ) -> JoinHandle<Result<(), HrpcError>> {
         let (mut sock_tx, mut sock_rx) = socket.split();
 
@@ -168,9 +174,20 @@ impl ChatServer {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
             let mut failed_writes: u8 = 0;
             let mut failed_reads: u8 = 0;
-
+            let mut unsubscribed = false;
             loop {
                 tokio::select! {
+                    res = subscribe_chan.recv() => {
+                        match res {
+                            Ok(sub) => {subs.insert(sub);},
+                            Err(err) => {
+                                tracing::error!(
+                                    "failed to receive event subscription: {}",
+                                    err
+                                );
+                            }
+                        }
+                    }
                     res = sock_rx.receive_message() => {
                         let req = match res {
                             Ok(req) => {
@@ -212,6 +229,7 @@ impl ChatServer {
                                 }
                                 Request::UnsubscribeFromAll(UnsubscribeFromAll {}) => {
                                     subs.clear();
+                                    unsubscribed = true;
                                     continue;
                                 }
                             };
@@ -248,11 +266,20 @@ impl ChatServer {
                             None => true,
                         };
 
+
                         if !perm_check {
                             continue;
                         }
 
                         tracing::debug!("writing event to socket");
+
+                        if let Chat(chat_event) = &broadcast.event {
+                            match &chat_event {
+                                stream_event::Event::GuildAddedToList(guild) => subs.insert(EventSub::Guild(guild.guild_id)),
+                                stream_event::Event::GuildRemovedFromList(guild) => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                _ => false,
+                            };
+                        }
 
                         let write_res = sock_tx
                             .send_message(StreamEventsResponse {
