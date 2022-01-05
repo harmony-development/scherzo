@@ -7,13 +7,7 @@ on:
       - '**/*.nix'
       - 'nix/envrc'
       - 'flake.lock'
-  pull_request:
-    branches: [ master ]
-    paths-ignore:
-      - 'README.md'
-      - '**/*.nix'
-      - 'nix/envrc'
-      - 'flake.lock'
+
 jobs:
   nix-build:
     runs-on: ubuntu-latest
