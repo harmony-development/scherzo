@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
-    str::FromStr,
+    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
+    path::Path, str::FromStr,
 };
 
 use harmony_rust_sdk::api::{
@@ -166,8 +166,26 @@ impl ChatServer {
 
         let fut = async move {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
+
+            // add initial subs
+            // TODO: optimize local guild fetching
+            let user_guilds = chat_tree.get_user_guilds(user_id).await?;
+            let initial_subs = user_guilds
+                .into_iter()
+                .filter(|g| g.server_id.is_empty())
+                .map(|g| EventSub::Guild(g.guild_id));
+            let initial_subs = initial_subs
+                .chain(iter::once(EventSub::Actions))
+                .chain(iter::once(EventSub::Homeserver));
+            for sub in initial_subs {
+                subs.insert(sub);
+            }
+
+            // keep track of failed writes and reads to decide if closing the socket is worth it
             let mut failed_writes: u8 = 0;
             let mut failed_reads: u8 = 0;
+            // keep track of unsubscribed event sub, if we are then don't add new guilds
+            let mut manual_sub_handling = false;
 
             loop {
                 tokio::select! {
@@ -212,6 +230,7 @@ impl ChatServer {
                                 }
                                 Request::UnsubscribeFromAll(UnsubscribeFromAll {}) => {
                                     subs.clear();
+                                    manual_sub_handling = true;
                                     continue;
                                 }
                             };
@@ -220,6 +239,16 @@ impl ChatServer {
                         }
                     }
                     Ok(broadcast) = rx.recv() => {
+                        // handle automatic sub handling BEFORE all the other logic because otherwise
+                        // `subs.contains()` will just return
+                        if manual_sub_handling.not() {
+                            match &broadcast.event {
+                                Event::Chat(stream_event::Event::GuildAddedToList(guild)) => subs.insert(EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild)) => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                _ => false,
+                            };
+                        }
+
                         if !subs.contains(&broadcast.sub) {
                             continue;
                         }
@@ -247,6 +276,7 @@ impl ChatServer {
                             }
                             None => true,
                         };
+
 
                         if !perm_check {
                             continue;
@@ -655,6 +685,33 @@ impl ChatTree {
         };
 
         Ok((message, key))
+    }
+
+    pub async fn get_user_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
+        let prefix = make_guild_list_key_prefix(user_id);
+        let guild_list = self
+            .scan_prefix(&prefix)
+            .await
+            .try_fold(Vec::new(), |mut all, res| {
+                let (guild_id_raw, _) = res?;
+                let (id_raw, host_raw) = guild_id_raw
+                    .split_at(prefix.len())
+                    .1
+                    .split_at(size_of::<u64>());
+
+                // Safety: this unwrap can never cause UB since we split at u64 boundary
+                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+                // Safety: we never store non UTF-8 hosts, so this can't cause UB
+                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+
+                all.push(GuildListEntry {
+                    guild_id,
+                    server_id: host.to_string(),
+                });
+
+                ServerResult::Ok(all)
+            })?;
+        Ok(guild_list)
     }
 
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {
