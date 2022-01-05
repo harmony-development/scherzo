@@ -1,10 +1,8 @@
 use std::{
-    collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
-    str::FromStr,
+    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
+    path::Path, str::FromStr,
 };
 
-use harmony_rust_sdk::api::chat::stream_event::GuildAddedToList;
-use harmony_rust_sdk::api::chat::Event::Chat;
 use harmony_rust_sdk::api::{
     chat::{
         get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
@@ -28,10 +26,7 @@ use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
-    sync::{
-        broadcast::{Receiver, Sender as BroadcastSend},
-        mpsc::UnboundedSender,
-    },
+    sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
     task::JoinHandle,
 };
 use triomphe::Arc;
@@ -163,7 +158,6 @@ impl ChatServer {
         &self,
         user_id: u64,
         socket: Socket<StreamEventsResponse, StreamEventsRequest>,
-        mut subscribe_chan: Receiver<EventSub>,
     ) -> JoinHandle<Result<(), HrpcError>> {
         let (mut sock_tx, mut sock_rx) = socket.split();
 
@@ -172,22 +166,29 @@ impl ChatServer {
 
         let fut = async move {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
+
+            // add initial subs
+            // TODO: optimize local guild fetching
+            let user_guilds = chat_tree.get_user_guilds(user_id).await?;
+            let initial_subs = user_guilds
+                .into_iter()
+                .filter(|g| g.server_id.is_empty())
+                .map(|g| EventSub::Guild(g.guild_id));
+            let initial_subs = initial_subs
+                .chain(iter::once(EventSub::Actions))
+                .chain(iter::once(EventSub::Homeserver));
+            for sub in initial_subs {
+                subs.insert(sub);
+            }
+
+            // keep track of failed writes and reads to decide if closing the socket is worth it
             let mut failed_writes: u8 = 0;
             let mut failed_reads: u8 = 0;
-            let mut unsubscribed = false;
+            // keep track of unsubscribed event sub, if we are then don't add new guilds
+            let mut manual_sub_handling = false;
+
             loop {
                 tokio::select! {
-                    res = subscribe_chan.recv() => {
-                        match res {
-                            Ok(sub) => {subs.insert(sub);},
-                            Err(err) => {
-                                tracing::error!(
-                                    "failed to receive event subscription: {}",
-                                    err
-                                );
-                            }
-                        }
-                    }
                     res = sock_rx.receive_message() => {
                         let req = match res {
                             Ok(req) => {
@@ -229,7 +230,7 @@ impl ChatServer {
                                 }
                                 Request::UnsubscribeFromAll(UnsubscribeFromAll {}) => {
                                     subs.clear();
-                                    unsubscribed = true;
+                                    manual_sub_handling = true;
                                     continue;
                                 }
                             };
@@ -238,6 +239,16 @@ impl ChatServer {
                         }
                     }
                     Ok(broadcast) = rx.recv() => {
+                        // handle automatic sub handling BEFORE all the other logic because otherwise
+                        // `subs.contains()` will just return
+                        if manual_sub_handling.not() {
+                            match &broadcast.event {
+                                Event::Chat(stream_event::Event::GuildAddedToList(guild)) => subs.insert(EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild)) => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                _ => false,
+                            };
+                        }
+
                         if !subs.contains(&broadcast.sub) {
                             continue;
                         }
@@ -272,14 +283,6 @@ impl ChatServer {
                         }
 
                         tracing::debug!("writing event to socket");
-
-                        if let Chat(chat_event) = &broadcast.event {
-                            match &chat_event {
-                                stream_event::Event::GuildAddedToList(guild) => subs.insert(EventSub::Guild(guild.guild_id)),
-                                stream_event::Event::GuildRemovedFromList(guild) => subs.remove(&EventSub::Guild(guild.guild_id)),
-                                _ => false,
-                            };
-                        }
 
                         let write_res = sock_tx
                             .send_message(StreamEventsResponse {
