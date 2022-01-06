@@ -972,9 +972,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.33.13"
+version = "0.33.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17ffc119f718728c89504b4baf3e5a3bac35a658b846fea0ad5e6711c74b7d6"
+checksum = "b343b26204118d56dc3e209e0f3022487d62b652486a3f05502fc61e0ba122ab"
 dependencies = [
  "axum-server",
  "base64",
