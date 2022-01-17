@@ -29,6 +29,9 @@
             buildInputs = (prev.buildInputs or [ ]) ++ all;
             nativeBuildInputs = (prev.nativeBuildInputs or [ ]) ++ all;
           };
+        scherzo = prev: {
+          crateBin = common.lib.filter (bin: bin.name != "scherzo_migrate" && bin.name != "scherzo_cmd") prev.crateBin;
+        };
       };
       shell = common: prev: {
         packages = prev.packages ++ (with common.pkgs; [
