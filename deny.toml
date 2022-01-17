@@ -38,9 +38,9 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # The lint level for security vulnerabilities
 vulnerability = "deny"
 # The lint level for unmaintained crates
-unmaintained = "warn"
+unmaintained = "deny"
 # The lint level for crates that have been yanked from their source registry
-yanked = "warn"
+yanked = "deny"
 # The lint level for crates with security notices. Note that as of
 # 2019-12-17 there are no security notice advisories in
 # https://github.com/rustsec/advisory-db
@@ -94,7 +94,8 @@ deny = [
     #"Nokia",
 ]
 # Lint level for licenses considered copyleft
-copyleft = "warn"
+# we are copyleft anyways
+copyleft = "allow"
 # Blanket approval or denial for OSI-approved or FSF Free/Libre licenses
 # * both - The license will be approved if it is both OSI-approved *AND* FSF
 # * either - The license will be approved if it is either OSI-approved *OR* FSF
@@ -199,16 +200,18 @@ skip-tree = [
 [sources]
 # Lint level for what to happen when a crate from a crate registry that is not
 # in the allow list is encountered
-unknown-registry = "warn"
+unknown-registry = "deny"
 # Lint level for what to happen when a crate from a git repository that is not
 # in the allow list is encountered
-unknown-git = "warn"
+unknown-git = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
     "https://github.com/servo/html5ever.git",
+    "https://github.com/open-telemetry/opentelemetry-rust.git",
+    "https://github.com/tokio-rs/console.git",
 ]
 
 [sources.allow-org]
