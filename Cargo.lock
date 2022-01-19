@@ -327,8 +327,8 @@ dependencies = [
 
 [[package]]
 name = "console-api"
-version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#fdc77e28d45da73595320fab8ce56f982c562bb6"
+version = "0.1.1"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#25b80cecffc6c39a946c6d85935c1bf9a7a012ac"
 dependencies = [
  "prost",
  "prost-types",
@@ -339,8 +339,8 @@ dependencies = [
 
 [[package]]
 name = "console-subscriber"
-version = "0.1.0"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#fdc77e28d45da73595320fab8ce56f982c562bb6"
+version = "0.1.1"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#25b80cecffc6c39a946c6d85935c1bf9a7a012ac"
 dependencies = [
  "console-api",
  "crossbeam-channel",
