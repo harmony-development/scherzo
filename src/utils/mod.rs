@@ -60,9 +60,8 @@ pub fn get_mimetype(headers: &HeaderMap) -> &str {
         .unwrap_or("application/octet-stream")
 }
 
-pub fn get_content_length<T>(response: &http::Response<T>) -> http::HeaderValue {
-    response
-        .headers()
+pub fn get_content_length(headers: &HeaderMap) -> http::HeaderValue {
+    headers
         .get(&http::header::CONTENT_LENGTH)
         .cloned()
         .unwrap_or_else(|| unsafe {

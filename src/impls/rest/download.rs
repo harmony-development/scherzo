@@ -1,6 +1,7 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, ops::Not};
 
 use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
+use reqwest::Client as HttpClient;
 use tower::Service;
 
 use crate::rest_error_response;
@@ -25,21 +26,20 @@ impl Service<HttpRequest> for DownloadService {
     fn call(&mut self, request: HttpRequest) -> Self::Future {
         async fn make_request(
             http_client: &HttpClient,
-            url: Uri,
-        ) -> Result<http::Response<Body>, ServerError> {
-            let resp = http_client.get(url).await.map_err(ServerError::from)?;
+            url: String,
+        ) -> Result<reqwest::Response, ServerError> {
+            let resp = http_client
+                .get(url)
+                .send()
+                .await
+                .map_err(ServerError::FailedToDownload)?;
 
-            if resp.status().is_success().not() {
-                let err = if resp.status() == StatusCode::NOT_FOUND {
-                    ServerError::MediaNotFound
-                } else {
-                    // TODO: proper error
-                    ServerError::InternalServerError
-                };
-                Err(err)
-            } else {
-                Ok(resp)
+            if resp.status().is_success().not() && resp.status() == StatusCode::NOT_FOUND {
+                return Err(ServerError::MediaNotFound);
             }
+
+            resp.error_for_status()
+                .map_err(ServerError::FailedToDownload)
         }
 
         let deps = self.deps.clone();
@@ -72,7 +72,7 @@ impl Service<HttpRequest> for DownloadService {
                     info!("Serving external image from {}", url);
                     let filename = url.path().split('/').last().unwrap_or("unknown");
                     let disposition = unsafe { disposition_header(filename) };
-                    let resp = match make_request(http_client, url).await {
+                    let resp = match make_request(http_client, url.to_string()).await {
                         Ok(resp) => resp,
                         Err(err) => return Ok(err.into_rest_http_response()),
                     };
@@ -92,8 +92,13 @@ impl Service<HttpRequest> for DownloadService {
                             });
 
                     if let Some(content_type) = content_type {
-                        let len = get_content_length(&resp);
-                        (disposition, content_type, resp.into_body(), len)
+                        let len = get_content_length(resp.headers());
+                        (
+                            disposition,
+                            content_type,
+                            Body::wrap_stream(resp.bytes_stream()),
+                            len,
+                        )
                     } else {
                         return Ok(ServerError::NotMedia.into_rest_http_response());
                     }
@@ -133,8 +138,13 @@ impl Service<HttpRequest> for DownloadService {
                             Ok(data) => data,
                             Err(err) => return Ok(err.into_rest_http_response()),
                         };
-                        let len = get_content_length(&resp);
-                        (disposition, mimetype, resp.into_body(), len)
+                        let len = get_content_length(resp.headers());
+                        (
+                            disposition,
+                            mimetype,
+                            Body::wrap_stream(resp.bytes_stream()),
+                            len,
+                        )
                     }
                 }
                 FileId::Id(id) => {

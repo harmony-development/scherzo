@@ -10,7 +10,6 @@ use std::{
     convert::Infallible,
     fs::Metadata,
     future::Future,
-    ops::Not,
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
@@ -21,7 +20,6 @@ use std::{
 use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
-            client::transport::http::hyper::HttpClient,
             exports::futures_util::{
                 future::{self, BoxFuture, Either},
                 ready, stream, FutureExt, Stream, StreamExt,

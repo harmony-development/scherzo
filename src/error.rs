@@ -127,6 +127,7 @@ pub enum ServerError {
     InvalidProtoMessage(DecodeBodyError),
     InvalidEmailConfig(toml::de::Error),
     FailedToFetchLink(reqwest::Error),
+    FailedToDownload(reqwest::Error),
 }
 
 impl StdError for ServerError {
@@ -141,6 +142,7 @@ impl StdError for ServerError {
             ServerError::DbError(err) => Some(err),
             ServerError::MultipartError(err) => Some(err),
             ServerError::FailedToFetchLink(err) => Some(err),
+            ServerError::FailedToDownload(err) => Some(err),
             _ => None,
         }
     }
@@ -304,6 +306,9 @@ impl Display for ServerError {
             ServerError::FailedToFetchLink(err) => {
                 write!(f, "failed to fetch link: {}", err)
             }
+            ServerError::FailedToDownload(err) => {
+                write!(f, "failed to download: {}", err)
+            }
         }
     }
 }
@@ -377,7 +382,8 @@ impl ServerError {
             | ServerError::DbError(_)
             | ServerError::MultipartError(_)
             | ServerError::InvalidEmailConfig(_)
-            | ServerError::FailedToFetchLink(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::FailedToFetchLink(_)
+            | ServerError::FailedToDownload(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -397,7 +403,8 @@ impl ServerError {
             | ServerError::MultipartError(_)
             | ServerError::InvalidProtoMessage(_)
             | ServerError::InvalidEmailConfig(_)
-            | ServerError::FailedToFetchLink(_) => HrpcErrorIdentifier::InternalServerError.as_id(),
+            | ServerError::FailedToFetchLink(_)
+            | ServerError::FailedToDownload(_) => HrpcErrorIdentifier::InternalServerError.as_id(),
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",

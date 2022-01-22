@@ -5,8 +5,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use harmony_rust_sdk::api::exports::hrpc::server::transport::http::{
-    box_body, HttpRequest, HttpResponse,
+use harmony_rust_sdk::api::exports::hrpc::{
+    client::transport::http::hyper::{http_client, HttpClient},
+    server::transport::http::{box_body, HttpRequest, HttpResponse},
 };
 use hrpc::exports::futures_util::ready;
 use hyper::{client::ResponseFuture, header::HeaderName};

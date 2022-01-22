@@ -16,7 +16,6 @@ use prelude::*;
 use std::str::FromStr;
 
 use harmony_rust_sdk::api::HomeserverIdentifier;
-use hrpc::client::transport::http::hyper::{http_client, HttpClient};
 use hyper::{http, Uri};
 use lettre::{
     message::{header, Mailbox, MultiPart, SinglePart},
@@ -24,6 +23,7 @@ use lettre::{
     AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
 };
 use parking_lot::Mutex;
+use reqwest::Client as HttpClient;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
@@ -121,7 +121,7 @@ impl Dependencies {
                 .federation
                 .as_ref()
                 .map(|fc| Arc::new(key::Manager::new(fc.key.clone()))),
-            http: http_client(&mut hyper::Client::builder()),
+            http: HttpClient::new(),
             email: config.email.as_ref().map(|ec| {
                 let mut builder =
                     AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&ec.server)
