@@ -4,11 +4,11 @@ use super::*;
 
 const EMAIL_BODY_TEMPLATE_PLAIN: &str =
     include_str!("../../../../resources/email-token-template.txt");
-const EMAIL_BODY_TEMPLATE_HTML: &str =
-    include_str!("../../../../resources/email-token-template.html");
+//const EMAIL_BODY_TEMPLATE_HTML: &str =
+//   include_str!("../../../../resources/email-token-template.html");
 
-const LILLIES_SVG: &[u8] = include_bytes!("../../../../resources/lillies.svg");
-const LOTUS_SVG: &[u8] = include_bytes!("../../../../resources/lotus.svg");
+//const LILLIES_SVG: &[u8] = include_bytes!("../../../../resources/lillies.svg");
+//const LOTUS_SVG: &[u8] = include_bytes!("../../../../resources/lotus.svg");
 
 pub async fn send_token_email(
     deps: &Dependencies,

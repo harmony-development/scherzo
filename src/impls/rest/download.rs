@@ -87,9 +87,8 @@ impl Service<HttpRequest> for DownloadService {
                                         .zip(v.as_bytes().iter().take(LEN))
                                         .all(|(a, b)| a == b)
                                 };
-                                (v.len() > LEN
-                                    && std::array::IntoIter::new(ALLOWED_TYPES).any(compare))
-                                .then(|| v.clone())
+                                (v.len() > LEN && ALLOWED_TYPES.into_iter().any(compare))
+                                    .then(|| v.clone())
                             });
 
                     if let Some(content_type) = content_type {
@@ -244,7 +243,7 @@ pub fn calculate_range(
     // + 2 is because we need to factor in the 2 b'\n' seperators
     let start = is_jpeg
         .then(|| 0)
-        .unwrap_or_else(|| (filename_raw.len() + mimetype_raw.len()) as u64 + 2);
+        .unwrap_or((filename_raw.len() + mimetype_raw.len()) as u64 + 2);
     let end = metadata.len();
 
     (start, end)

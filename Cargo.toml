@@ -103,7 +103,7 @@ tracing-opentelemetry = { version = "0.16", default-features = false }
 
 pin-project = "1"
 
-dashmap = "5.0"
+dashmap = "=4.0"
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "chore/deps", default-features = false }
 paste = "1.0"
 parking_lot = "0.11"
@@ -163,6 +163,6 @@ key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
 markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
-opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", branch = "main" }
+opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
 swimmer = { git = "https://github.com/yusdacra/swimmer-rs.git", branch = "master" }

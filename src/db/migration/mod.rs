@@ -37,10 +37,7 @@ pub fn apply_migrations(
         if current_version == 0 {
             initial_db_version::migrate(db).await
         } else {
-            for (version, migration) in std::array::IntoIter::new(MIGRATIONS)
-                .enumerate()
-                .skip(current_version)
-            {
+            for (version, migration) in MIGRATIONS.into_iter().enumerate().skip(current_version) {
                 tracing::warn!(
                     "migrating database from version {} to {}",
                     version,

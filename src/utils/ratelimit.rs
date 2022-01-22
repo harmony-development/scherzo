@@ -18,8 +18,7 @@ pub fn rate_limit(
 ) -> RateLimitLayer<ExtractKey, CheckKey> {
     let allowed_ips = allowed_ips.map(|ips| {
         ips.into_iter()
-            .map(|s| IpAddr::from_str(&s))
-            .flatten()
+            .flat_map(|s| IpAddr::from_str(&s))
             .collect::<HashSet<_, ahash::RandomState>>()
     });
 

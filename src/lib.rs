@@ -4,8 +4,7 @@
     const_intrinsic_copy,
     const_ptr_offset,
     const_mut_refs,
-    type_alias_impl_trait,
-    destructuring_assignment
+    type_alias_impl_trait
 )]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
