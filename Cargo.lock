@@ -985,9 +985,9 @@ dependencies = [
 
 [[package]]
 name = "hrpc"
-version = "0.33.21"
+version = "0.33.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f0f77d67451a037fb5587340d7956d8673935f57d1d890e88d5c22823cad797"
+checksum = "7808b92a1a40d44ed5ea66d2fca9dbabe5d9a694d95c5ca49b05b87886345135"
 dependencies = [
  "axum-server",
  "base64",
@@ -2371,9 +2371,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.75"
+version = "1.0.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c059c05b48c5c0067d4b4b2b4f0732dd65feb52daf7e0ea09cd87e7dadc1af79"
+checksum = "651bca88044a8a5166bd0fd984a7ca558301079cf08365ca6287b2bb608cca3e"
 dependencies = [
  "itoa 1.0.1",
  "ryu",
