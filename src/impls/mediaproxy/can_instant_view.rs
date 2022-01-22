@@ -15,10 +15,16 @@ pub async fn handler(
         .into_response());
     }
 
-    let url: Uri = url.parse().map_err(ServerError::InvalidUrl)?;
-    let response = svc.http.get(url).await.map_err(ServerError::from)?;
+    let response = svc
+        .http
+        .get(url)
+        .send()
+        .await
+        .map_err(ServerError::FailedToFetchLink)?
+        .error_for_status()
+        .map_err(ServerError::FailedToFetchLink)?;
 
-    let ok = get_mimetype(&response).eq("text/html");
+    let ok = get_mimetype(response.headers()).eq("text/html");
 
     Ok((CanInstantViewResponse {
         can_instant_view: ok,

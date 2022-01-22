@@ -126,6 +126,7 @@ pub enum ServerError {
     ContentCantBeSentByUser,
     InvalidProtoMessage(DecodeBodyError),
     InvalidEmailConfig(toml::de::Error),
+    FailedToFetchLink(reqwest::Error),
 }
 
 impl StdError for ServerError {
@@ -139,6 +140,7 @@ impl StdError for ServerError {
             ServerError::WebRTCError(err) => err.source(),
             ServerError::DbError(err) => Some(err),
             ServerError::MultipartError(err) => Some(err),
+            ServerError::FailedToFetchLink(err) => Some(err),
             _ => None,
         }
     }
@@ -299,6 +301,9 @@ impl Display for ServerError {
             ServerError::ContentCantBeSentByUser => {
                 f.write_str("this content type cannot be used by a regular user")
             }
+            ServerError::FailedToFetchLink(err) => {
+                write!(f, "failed to fetch link: {}", err)
+            }
         }
     }
 }
@@ -371,7 +376,8 @@ impl ServerError {
             | ServerError::WebRTCError(_)
             | ServerError::DbError(_)
             | ServerError::MultipartError(_)
-            | ServerError::InvalidEmailConfig(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::InvalidEmailConfig(_)
+            | ServerError::FailedToFetchLink(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -390,9 +396,8 @@ impl ServerError {
             | ServerError::DbError(_)
             | ServerError::MultipartError(_)
             | ServerError::InvalidProtoMessage(_)
-            | ServerError::InvalidEmailConfig(_) => {
-                HrpcErrorIdentifier::InternalServerError.as_id()
-            }
+            | ServerError::InvalidEmailConfig(_)
+            | ServerError::FailedToFetchLink(_) => HrpcErrorIdentifier::InternalServerError.as_id(),
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",

@@ -1,13 +1,12 @@
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
-use hrpc::client::transport::http::hyper::http_client;
-use hyper::{body::Buf, StatusCode, Uri};
+use reqwest::Client as HttpClient;
 use webpage::HTML;
 
 use std::time::Instant;
 
-use super::{get_mimetype, http, prelude::*, HttpClient};
+use super::{get_mimetype, http, prelude::*};
 
 pub mod can_instant_view;
 pub mod fetch_link_metadata;
@@ -87,7 +86,7 @@ pub struct MediaproxyServer {
 impl MediaproxyServer {
     pub fn new(deps: Arc<Dependencies>) -> Self {
         Self {
-            http: http_client(&mut hyper::Client::builder()),
+            http: HttpClient::new(),
             disable_ratelimits: deps.config.policy.ratelimit.disable,
             deps,
         }
@@ -104,17 +103,14 @@ impl MediaproxyServer {
             return Ok(value.value.clone());
         }
 
-        let url: Uri = raw_url.parse().map_err(ServerError::InvalidUrl)?;
-        let response = self.http.get(url.clone()).await?;
-        if !response.status().is_success() {
-            let err = if response.status() == StatusCode::NOT_FOUND {
-                ServerError::LinkNotFound(url)
-            } else {
-                // TODO: change to proper error
-                ServerError::InternalServerError
-            };
-            return Err(err);
-        }
+        let response = self
+            .http
+            .get(&raw_url)
+            .send()
+            .await
+            .map_err(ServerError::FailedToFetchLink)?
+            .error_for_status()
+            .map_err(ServerError::FailedToFetchLink)?;
 
         let is_html = response
             .headers()
@@ -123,9 +119,12 @@ impl MediaproxyServer {
             .map_or(false, |v| v.eq_ignore_ascii_case(b"text/html"));
 
         let metadata = if is_html {
-            let body = hyper::body::aggregate(response.into_body()).await?;
-            let html = String::from_utf8_lossy(body.chunk());
-            let html = webpage::HTML::from_string(html.into(), Some(raw_url))?;
+            let body = response
+                .bytes()
+                .await
+                .map_err(ServerError::FailedToFetchLink)?;
+            let html = String::from_utf8_lossy(&body);
+            let html = webpage::HTML::from_string(html.into(), Some(raw_url.clone()))?;
             Metadata::Site(Arc::new(html))
         } else {
             let filename = response
@@ -138,18 +137,18 @@ impl MediaproxyServer {
                         .and_then(|f| s.get(f + FILENAME.len()..))
                         .unwrap_or(s)
                 })
-                .or_else(|| url.path().split('/').last().filter(|n| !n.is_empty()))
+                .or_else(|| raw_url.split('/').last().filter(|n| !n.is_empty()))
                 .unwrap_or("unknown")
                 .into();
             Metadata::Media {
                 filename,
-                mimetype: get_mimetype(&response).into(),
+                mimetype: get_mimetype(response.headers()).into(),
             }
         };
 
         // Insert to cache since successful
         CACHE.insert(
-            url.to_string(),
+            raw_url,
             TimedCacheValue {
                 value: metadata.clone(),
                 since: Instant::now(),

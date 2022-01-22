@@ -5,6 +5,7 @@ pub mod ratelimit;
 pub mod test;
 
 use hrpc::exports::{bytes::Bytes, http};
+use hyper::HeaderMap;
 use rand::Rng;
 pub use ratelimit::rate_limit;
 
@@ -51,9 +52,8 @@ pub fn gen_rand_u64() -> u64 {
     rand::thread_rng().gen_range(1..u64::MAX)
 }
 
-pub fn get_mimetype<T>(response: &http::Response<T>) -> &str {
-    response
-        .headers()
+pub fn get_mimetype(headers: &HeaderMap) -> &str {
+    headers
         .get(&http::header::CONTENT_TYPE)
         .and_then(|val| val.to_str().ok())
         .and_then(|s| s.split(';').next())
