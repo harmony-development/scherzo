@@ -39,8 +39,6 @@ pub async fn handler(
     let mut ordering = chat_tree.get_list_u64_logic(&key).await?;
     if let Some(index) = ordering.iter().position(|oid| channel_id.eq(oid)) {
         ordering.remove(index);
-    } else {
-        unreachable!("all valid channel IDs are valid ordering IDs");
     }
     let serialized_ordering = chat_tree.serialize_list_u64_logic(ordering);
 
