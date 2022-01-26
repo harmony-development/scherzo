@@ -79,9 +79,9 @@ dependencies = [
 
 [[package]]
 name = "async-compression"
-version = "0.3.8"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5443ccbb270374a2b1055fc72da40e1f237809cd6bb0e97e66d264cd138473a6"
+checksum = "795814bc6dce6c2e6af7e6aa5a96d99543c88808596300dbfb56372b4456f689"
 dependencies = [
  "flate2",
  "futures-core",
@@ -145,9 +145,9 @@ dependencies = [
 
 [[package]]
 name = "async-task"
-version = "4.0.3"
+version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91831deabf0d6d7ec49552e489aed63b7456a7a3c46cff62adad428110b0af0"
+checksum = "677d306121baf53310a3fd342d88dc0824f6bbeace68347593658525565abee8"
 
 [[package]]
 name = "async-trait"
@@ -547,9 +547,9 @@ checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "ed25519-compact"
-version = "1.0.6"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d2094c8d121850caf9a442e019d18a6fcb36156cfe2ba4dbfa6419d1a0fe8e3"
+checksum = "302ea73924517e9952bf08b505536f757e28dca8372cbf8b20723a0e2bab6c01"
 dependencies = [
  "getrandom",
 ]
@@ -853,9 +853,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.10"
+version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c9de88456263e249e241fcd211d3954e2c9b0ef7ccfc235a444eb367cae3689"
+checksum = "d9f1f717ddc7b2ba36df7e871fd88db79326551d3d6f1fc406fbfd28b582ff8e"
 dependencies = [
  "bytes",
  "fnv",
@@ -885,7 +885,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#951450bba8f5dfe03165df3ea71edc62297558e1"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#060a1dbcf04741f4edc9e266573c935257f0005a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -895,7 +895,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.8.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#951450bba8f5dfe03165df3ea71edc62297558e1"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#060a1dbcf04741f4edc9e266573c935257f0005a"
 dependencies = [
  "derive-new",
  "derive_more",
@@ -1294,9 +1294,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.113"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eef78b64d87775463c549fbd80e19249ef436ea3bf1de2a1eb7e717ec7fab1e9"
+checksum = "b0005d08a8f7b65fb8073cb697aa0b12b631ed251ce73d862ce50eeb52ce3b50"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -2118,9 +2118,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv"
-version = "0.7.29"
+version = "0.7.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49a37de5dfc60bae2d94961dacd03c7b80e426b66a99fa1b17799570dbdd8f96"
+checksum = "6758d0cb5660d71471e815a5a7ef9f3bebf072fda13c7503429db9a751ef2708"
 dependencies = [
  "bytecheck",
  "hashbrown",
@@ -2132,9 +2132,9 @@ dependencies = [
 
 [[package]]
 name = "rkyv_derive"
-version = "0.7.29"
+version = "0.7.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "719d447dd0e84b23cee6cb5b32d97e21efb112a3e3c636c8da36647b938475a1"
+checksum = "795f0a26ee48557c19ccedba4fc67cfb894d929d8898a4d94a5a25ad47900290"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2351,18 +2351,18 @@ checksum = "568a8e6258aa33c13358f81fd834adb854c6f7c9468520910a9b1e8fac068012"
 
 [[package]]
 name = "serde"
-version = "1.0.134"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b3c34c1690edf8174f5b289a336ab03f568a4460d8c6df75f2f3a692b3bc6a"
+checksum = "ce31e24b01e1e524df96f1c2fdd054405f8d7376249a5110886fb4b658484789"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.134"
+version = "1.0.136"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "784ed1fbfa13fe191077537b0d70ec8ad1e903cfe04831da608aa36457cb653d"
+checksum = "08597e7152fcd306f41838ed3e37be9eaeed2b61c42e2117266a554fab4662f9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2371,9 +2371,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.77"
+version = "1.0.78"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "651bca88044a8a5166bd0fd984a7ca558301079cf08365ca6287b2bb608cca3e"
+checksum = "d23c1ba4cf0efd44be32017709280b32d1cea5c3f1275c3b6d9e8bc54f758085"
 dependencies = [
  "itoa 1.0.1",
  "ryu",
@@ -3386,9 +3386,9 @@ checksum = "d8b77fdfd5a253be4ab714e4ffa3c49caf146b4de743e97510c0656cf90f1e8e"
 
 [[package]]
 name = "which"
-version = "4.2.2"
+version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea187a8ef279bc014ec368c27a920da2024d2a711109bfbe3440585d5cf27ad9"
+checksum = "2a5a7e487e921cf220206864a94a89b6c6905bfc19f1057fa26a4cb360e5c1d2"
 dependencies = [
  "either",
  "lazy_static",
