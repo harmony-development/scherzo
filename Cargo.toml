@@ -29,6 +29,7 @@ sqlite = ["sqlx", "itertools"]
 [dependencies]
 scherzo_derive = { path = "./scherzo_derive" }
 harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
+    "gen_all_protocols",
     "gen_server",
     "gen_client",
     "rkyv",
