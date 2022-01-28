@@ -1,6 +1,6 @@
+use crate::api::mediaproxy::{fetch_link_metadata_response::Data, *};
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
-use harmony_rust_sdk::api::mediaproxy::{fetch_link_metadata_response::Data, *};
 use reqwest::Client as HttpClient;
 use webpage::HTML;
 

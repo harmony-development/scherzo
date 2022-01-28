@@ -35,7 +35,7 @@ use std::{
 
 use crate::{config::DbConfig, error::travel_error, utils::evec::EVec, ServerError, ServerResult};
 
-use harmony_rust_sdk::api::{
+use crate::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
     emote::{Emote, EmotePack},
     profile::Profile,

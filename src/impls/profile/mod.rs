@@ -3,11 +3,11 @@ use super::{
     prelude::*,
 };
 
-use db::profile::*;
-use harmony_rust_sdk::api::{
+use crate::api::{
     chat::Event,
     profile::{profile_service_server::ProfileService, *},
 };
+use db::profile::*;
 
 pub mod get_app_data;
 pub mod get_profile;

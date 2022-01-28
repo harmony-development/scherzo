@@ -15,7 +15,7 @@ use prelude::*;
 
 use std::str::FromStr;
 
-use harmony_rust_sdk::api::HomeserverIdentifier;
+use crate::api::HomeserverIdentifier;
 use hyper::{http, Uri};
 use lettre::{
     message::{header, Mailbox, MultiPart, SinglePart},
@@ -42,7 +42,6 @@ pub mod prelude {
         ServerError,
     };
 
-    pub use harmony_rust_sdk::api::exports::prost::Message;
     pub use hrpc::{
         bail,
         response::IntoResponse,
@@ -53,6 +52,7 @@ pub mod prelude {
         },
         Request, Response,
     };
+    pub use prost::Message as PbMessage;
     pub use rkyv::Deserialize;
     pub use scherzo_derive::*;
     pub use smol_str::SmolStr;
@@ -159,7 +159,7 @@ pub fn setup_server(
         auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
         mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer,
     };
-    use harmony_rust_sdk::api::{
+    use crate::api::{
         auth::auth_service_server::AuthServiceServer,
         batch::batch_service_server::BatchServiceServer,
         chat::chat_service_server::ChatServiceServer,
@@ -186,8 +186,7 @@ pub fn setup_server(
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
     let sync = PostboxServiceServer::new(sync_server);
     #[cfg(feature = "voice")]
-    let voice =
-        harmony_rust_sdk::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
+    let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
 
     let batchable_services = {
         let profile = ProfileServiceServer::new(profile_server.batch());

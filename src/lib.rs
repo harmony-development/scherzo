@@ -8,7 +8,7 @@
 )]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
-use harmony_rust_sdk::api::exports::hrpc::exports::http;
+use hrpc::exports::http;
 use parking_lot::Mutex;
 use triomphe::Arc;
 
@@ -34,3 +34,5 @@ pub type SharedConfig = Arc<Mutex<SharedConfigData>>;
 pub struct SharedConfigData {
     pub motd: String,
 }
+
+pub use harmony_rust_sdk::api;
