@@ -29,6 +29,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v2
+      with:
+        submodules: true
 
     - name: Install nix
       uses: cachix/install-nix-action@v16
@@ -70,6 +72,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v2
+      with:
+        submodules: true
 
     - name: Install nix
       uses: cachix/install-nix-action@v16
