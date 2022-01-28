@@ -1,6 +1,19 @@
 use harmony_build::{Builder, Protocol, Result};
 
 fn main() -> Result<()> {
+    build_protocol(
+        "before_account_kind",
+        &["profile.v1", "harmonytypes.v1"],
+        &[],
+        |builder| {
+            builder.modify_hrpc_config(|cfg| {
+                cfg.type_attribute(
+                    ".protocol.profile.v1.Profile",
+                    "#[archive_attr(derive(::bytecheck::CheckBytes))]",
+                )
+            })
+        },
+    )?;
     Ok(())
 }
 
@@ -8,7 +21,7 @@ fn build_protocol(
     version: &str,
     stable_svcs: &[&str],
     staging_svcs: &[&str],
-    perms: bool,
+    f: impl FnOnce(Builder) -> Builder,
 ) -> Result<()> {
     let protocol_path = format!("protocols/{}", version);
     let out_dir = {
@@ -22,8 +35,8 @@ fn build_protocol(
     let all_services = stable_svcs.iter().chain(staging_svcs.iter());
     let protocol = Protocol::from_path(protocol_path, stable_svcs, staging_svcs)?;
 
-    let mut builder = Builder::new()
-        .write_permissions(perms)
+    let mut builder = f(Builder::new())
+        .modify_hrpc_config(|cfg| cfg.build_client(false).build_server(false))
         .modify_prost_config(|mut cfg| {
             cfg.bytes(&[".protocol.batch.v1"]);
             cfg

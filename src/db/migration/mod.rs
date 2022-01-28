@@ -7,16 +7,18 @@ use crate::db;
 
 use super::{Db, DbResult};
 
+mod add_account_kind;
 mod add_next_msg_ids;
 mod initial_db_version;
 mod remove_log_chan_id_from_admin_keys;
 
 type Migration = for<'a> fn(&'a Db) -> BoxFuture<'a, DbResult<()>>;
 
-pub const MIGRATIONS: [Migration; 3] = [
+pub const MIGRATIONS: [Migration; 4] = [
     initial_db_version::migrate,
     add_next_msg_ids::migrate,
     remove_log_chan_id_from_admin_keys::migrate,
+    add_account_kind::migrate,
 ];
 
 pub async fn get_db_version(db: &Db) -> DbResult<(usize, bool)> {
