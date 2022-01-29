@@ -267,6 +267,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
             ("tokio", Level::ERROR),
             ("runtime", Level::ERROR),
             ("console_subscriber", Level::ERROR),
+            ("html5ever::tokenizer", Level::ERROR),
             ("h2", level_filter),
             ("h2::codec", Level::ERROR),
             ("sqlx::query", level_filter),
