@@ -33,6 +33,7 @@ pub async fn handler(
             new_avatar: new_user_avatar,
             new_status: new_user_status,
             new_is_bot,
+            new_account_kind: None,
         }),
         None,
         EventContext::new(

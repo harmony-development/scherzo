@@ -33,6 +33,7 @@ enum Metadata {
     Media {
         filename: SmolStr,
         mimetype: SmolStr,
+        size: Option<u32>,
     },
 }
 
@@ -40,9 +41,14 @@ impl From<Metadata> for Data {
     fn from(metadata: Metadata) -> Self {
         match metadata {
             Metadata::Site(html) => Data::IsSite(site_metadata_from_html(&html)),
-            Metadata::Media { filename, mimetype } => Data::IsMedia(MediaMetadata {
+            Metadata::Media {
+                filename,
+                mimetype,
+                size,
+            } => Data::IsMedia(MediaMetadata {
                 mimetype: mimetype.into(),
                 filename: filename.into(),
+                size,
             }),
         }
     }
@@ -140,9 +146,14 @@ impl MediaproxyServer {
                 .or_else(|| raw_url.split('/').last().filter(|n| !n.is_empty()))
                 .unwrap_or("unknown")
                 .into();
+            let size = get_content_length(response.headers())
+                .to_str()
+                .ok()
+                .and_then(|size| size.parse::<u32>().ok());
             Metadata::Media {
                 filename,
                 mimetype: get_mimetype(response.headers()).into(),
+                size,
             }
         };
 
