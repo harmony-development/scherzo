@@ -137,6 +137,7 @@ pub async fn logic(
         step: Some(auth_step::Step::Session(Session {
             user_id,
             session_token: session_token.into(),
+            guest_token: None,
         })),
     })
 }

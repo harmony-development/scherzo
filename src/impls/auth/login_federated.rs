@@ -1,3 +1,5 @@
+use harmony_rust_sdk::api::profile::AccountKind;
+
 use super::*;
 
 pub async fn handler(
@@ -49,6 +51,7 @@ pub async fn handler(
                 user_status: UserStatus::OfflineUnspecified.into(),
                 user_avatar: avatar,
                 user_name: username,
+                account_kind: AccountKind::FullUnspecified.into(),
             };
             let buf = rkyv_ser(&profile);
             batch.insert(make_user_profile_key(local_id).to_vec(), buf);
@@ -66,6 +69,7 @@ pub async fn handler(
         let session = Session {
             session_token: session_token.to_string(),
             user_id: local_user_id,
+            guest_token: None,
         };
         svc.deps
             .auth_tree
