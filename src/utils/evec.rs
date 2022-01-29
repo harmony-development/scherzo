@@ -4,16 +4,30 @@ use rkyv::AlignedVec;
 #[cfg(feature = "sled")]
 use sled::IVec;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub enum EVec {
     #[cfg(feature = "sled")]
     Inline(IVec),
-    Owned(Vec<u8>),
+    Owned(AlignedVec),
 }
 
 impl Default for EVec {
     fn default() -> Self {
-        EVec::Owned(Vec::new())
+        EVec::Owned(AlignedVec::new())
+    }
+}
+
+impl From<EVec> for AlignedVec {
+    fn from(evec: EVec) -> Self {
+        match evec {
+            #[cfg(feature = "sled")]
+            EVec::Inline(inline) => {
+                let mut vec = AlignedVec::with_capacity(inline.len());
+                vec.extend_from_slice(inline.as_ref());
+                vec
+            }
+            EVec::Owned(owned) => owned,
+        }
     }
 }
 
@@ -22,21 +36,22 @@ impl From<EVec> for Vec<u8> {
         match evec {
             #[cfg(feature = "sled")]
             EVec::Inline(inline) => inline.to_vec(),
-            EVec::Owned(owned) => owned,
+            EVec::Owned(owned) => owned.into_vec(),
         }
     }
 }
 
 impl From<AlignedVec> for EVec {
     fn from(avec: AlignedVec) -> Self {
-        EVec::Owned(avec.into())
+        EVec::Owned(avec)
     }
 }
 
 #[cfg(feature = "sled")]
 impl From<IVec> for EVec {
     fn from(ivec: IVec) -> Self {
-        EVec::Inline(ivec)
+        let vec: AlignedVec = EVec::Inline(ivec).into();
+        EVec::Owned(vec)
     }
 }
 
@@ -45,26 +60,38 @@ impl From<EVec> for IVec {
     fn from(evec: EVec) -> Self {
         match evec {
             EVec::Inline(ivec) => ivec,
-            EVec::Owned(vec) => vec.into(),
+            EVec::Owned(vec) => vec.into_vec().into(),
         }
     }
 }
 
 impl From<Vec<u8>> for EVec {
     fn from(vec: Vec<u8>) -> Self {
-        EVec::Owned(vec)
+        EVec::Owned({
+            let mut avec = AlignedVec::with_capacity(vec.len());
+            avec.extend_from_slice(&vec);
+            avec
+        })
     }
 }
 
 impl From<&[u8]> for EVec {
     fn from(v: &[u8]) -> Self {
-        EVec::Owned(v.to_vec())
+        EVec::Owned({
+            let mut vec = AlignedVec::with_capacity(v.len());
+            vec.extend_from_slice(v);
+            vec
+        })
     }
 }
 
 impl<const N: usize> From<[u8; N]> for EVec {
     fn from(arr: [u8; N]) -> Self {
-        EVec::Owned(arr.to_vec())
+        EVec::Owned({
+            let mut vec = AlignedVec::with_capacity(arr.len());
+            vec.extend_from_slice(&arr);
+            vec
+        })
     }
 }
 
@@ -121,7 +148,7 @@ impl<const N: usize> TryFrom<EVec> for [u8; N] {
         match v {
             #[cfg(feature = "sled")]
             EVec::Inline(ivec) => ivec.as_ref().try_into().map_err(|_| EVec::Inline(ivec)),
-            EVec::Owned(vec) => vec.try_into().map_err(EVec::Owned),
+            EVec::Owned(vec) => vec.as_ref().try_into().map_err(|_| EVec::Owned(vec)),
         }
     }
 }

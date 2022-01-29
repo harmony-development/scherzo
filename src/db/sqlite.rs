@@ -97,7 +97,7 @@ pub mod shared {
                 .fetch_optional(&mut conn)
                 .await?;
 
-            Ok(val.map(|r| EVec::Owned(r.get::<Vec<u8>, _>(0))))
+            Ok(val.map(|r| EVec::from(r.get::<Vec<u8>, _>(0))))
         }
 
         pub async fn insert(&self, key: &[u8], value: impl AsRef<[u8]>) -> DbResult<Option<EVec>> {
@@ -109,7 +109,7 @@ pub mod shared {
                 .fetch_optional(&mut conn)
                 .await?;
 
-            Ok(val.map(|r| EVec::Owned(r.get::<Vec<u8>, _>(0))))
+            Ok(val.map(|r| EVec::from(r.get::<Vec<u8>, _>(0))))
         }
 
         pub async fn remove(&self, key: &[u8]) -> DbResult<Option<EVec>> {
@@ -120,7 +120,7 @@ pub mod shared {
                 .fetch_optional(&mut conn)
                 .await?;
 
-            Ok(val.map(|r| EVec::Owned(r.get::<Vec<u8>, _>(0))))
+            Ok(val.map(|r| EVec::from(r.get::<Vec<u8>, _>(0))))
         }
 
         pub async fn contains_key(&self, key: &[u8]) -> DbResult<bool> {
@@ -170,10 +170,12 @@ pub mod shared {
                 Err(err) => return Either::Left(std::iter::once(Err(err.into()))),
             };
 
-            Either::Right(
-                rows.into_iter()
-                    .map(|r| Ok((EVec::Owned(r.get(0)), EVec::Owned(r.get(1))))),
-            )
+            Either::Right(rows.into_iter().map(|r| {
+                Ok((
+                    EVec::from(r.get::<Vec<u8>, _>(0)),
+                    EVec::from(r.get::<Vec<u8>, _>(1)),
+                ))
+            }))
         }
 
         pub async fn scan_prefix(
@@ -197,7 +199,7 @@ pub mod shared {
                         let key: Vec<u8> = row.get(0);
                         if key.starts_with(prefix) {
                             let value: Vec<u8> = row.get(1);
-                            items.push(Ok((EVec::Owned(key), EVec::Owned(value))));
+                            items.push(Ok((EVec::from(key), EVec::from(value))));
                         } else {
                             break;
                         }
@@ -235,7 +237,7 @@ pub mod shared {
                         let key: Vec<u8> = row.get(0);
                         if key.as_slice() <= *end_key {
                             let value: Vec<u8> = row.get(1);
-                            items.push(Ok((EVec::Owned(key), EVec::Owned(value))));
+                            items.push(Ok((EVec::from(key), EVec::from(value))));
                         } else {
                             break;
                         }
