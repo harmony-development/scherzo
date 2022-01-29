@@ -34,7 +34,6 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "gen_server",
     "all_permissions",
     "rkyv",
-    "rkyv_validation",
 ] }
 prost = { version = "0.9" }
 hrpc = { version = "0.33", features = [
@@ -128,9 +127,7 @@ urlencoding = "2.0"
 toml = "0.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1"
-
-rkyv = { version = "0.7", features = ["validation"] }
-bytecheck = { version = "0.6" }
+rkyv = "0.7"
 
 mediasoup = { version = "0.9", optional = true }
 

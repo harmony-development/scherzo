@@ -10,8 +10,8 @@ pub fn define_proto_mod(input: TokenStream) -> TokenStream {
     let (proto_name, svc) = if split.len() == 1 {
         ("main", split.pop().unwrap())
     } else {
-        let svc = split.pop().unwrap().trim();
-        let proto_name = split.pop().unwrap().trim();
+        let svc = split.pop().unwrap();
+        let proto_name = split.pop().unwrap();
         (proto_name, svc)
     };
     let path = format!("/{}/protocol.{}.v1.rs", proto_name, svc);

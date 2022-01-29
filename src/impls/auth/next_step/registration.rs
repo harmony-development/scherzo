@@ -3,7 +3,6 @@ use rkyv::{de::deserializers::SharedDeserializeMap, Archive, Deserialize, Serial
 use super::*;
 
 #[derive(Debug, Archive, Serialize, Deserialize)]
-#[archive_attr(derive(bytecheck::CheckBytes))]
 struct RegInfo {
     email: String,
     username: String,

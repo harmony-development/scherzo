@@ -42,8 +42,9 @@ use crate::api::{
 };
 use rkyv::{
     archived_root,
+    de::deserializers::SharedDeserializeMap,
     ser::{serializers::AllocSerializer, Serializer},
-    AlignedVec, Archive, Serialize,
+    AlignedVec, Archive, Deserialize, Serialize,
 };
 use tracing::Instrument;
 
@@ -435,7 +436,8 @@ macro_rules! impl_deser {
         paste::paste! {
             $(
                 pub fn [<deser_ $name>](data: impl AsRef<[u8]>) -> $msg {
-                    rkyv::from_bytes(data.as_ref()).expect("failed to deserialize")
+                    let archive = rkyv_arch::<$msg>(data.as_ref());
+                    archive.deserialize(&mut SharedDeserializeMap::default()).expect("failed to deserialize")
                 }
             )*
         }
@@ -484,10 +486,6 @@ pub fn rkyv_ser<Value: Serialize<AllocSerializer<1024>>>(value: &Value) -> Align
     ser.into_serializer().into_inner()
 }
 
-pub fn rkyv_arch<'a, As>(data: &'a [u8]) -> &<As as Archive>::Archived
-where
-    As: Archive,
-    As::Archived: bytecheck::CheckBytes<rkyv::validation::validators::DefaultValidator<'a>>,
-{
-    rkyv::check_archived_root::<As>(data).expect("failed to unarchive data")
+pub fn rkyv_arch<As: Archive>(data: &[u8]) -> &<As as Archive>::Archived {
+    unsafe { archived_root::<As>(data) }
 }
