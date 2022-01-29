@@ -47,7 +47,6 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
         step: Some(auth_step::Step::Session(Session {
             user_id,
             session_token: session_token.into(),
-            guest_token: None,
         })),
     })
 }
