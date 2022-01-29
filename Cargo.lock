@@ -885,7 +885,7 @@ dependencies = [
 [[package]]
 name = "harmony_build"
 version = "0.1.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e9b5744d0354d71cdd52fb924e4556899067e3f1"
 dependencies = [
  "hrpc-build",
  "prost-build",
@@ -896,7 +896,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e9b5744d0354d71cdd52fb924e4556899067e3f1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -906,8 +906,9 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.8.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#e9b5744d0354d71cdd52fb924e4556899067e3f1"
 dependencies = [
+ "bytecheck",
  "derive-new",
  "derive_more",
  "harmony_build",
@@ -2236,6 +2237,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "argon2",
+ "bytecheck",
  "console-subscriber",
  "dashmap",
  "ed25519-compact",
