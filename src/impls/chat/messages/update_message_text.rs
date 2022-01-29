@@ -65,13 +65,13 @@ pub async fn handler(
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
-        stream_event::Event::EditedMessage(Box::new(stream_event::MessageUpdated {
+        stream_event::Event::EditedMessage(stream_event::MessageUpdated {
             guild_id,
             channel_id,
             message_id,
             edited_at,
             new_content,
-        })),
+        }),
         Some(PermCheck::new(
             guild_id,
             Some(channel_id),

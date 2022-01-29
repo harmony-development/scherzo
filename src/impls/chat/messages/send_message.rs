@@ -56,13 +56,13 @@ pub async fn handler(
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
-        stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
+        stream_event::Event::SentMessage(stream_event::MessageSent {
             echo_id,
             guild_id,
             channel_id,
             message_id,
             message: Some(message),
-        })),
+        }),
         Some(PermCheck::new(
             guild_id,
             Some(channel_id),
@@ -81,13 +81,13 @@ pub async fn handler(
             .await?;
         svc.send_event_through_chan(
             EventSub::Guild(guild_id),
-            stream_event::Event::SentMessage(Box::new(stream_event::MessageSent {
+            stream_event::Event::SentMessage(stream_event::MessageSent {
                 echo_id,
                 guild_id,
                 channel_id,
                 message_id,
                 message: Some(message),
-            })),
+            }),
             Some(PermCheck::new(
                 guild_id,
                 Some(channel_id),

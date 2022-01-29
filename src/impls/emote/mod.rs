@@ -1,4 +1,4 @@
-use harmony_rust_sdk::api::{
+use crate::api::{
     chat::Event,
     emote::{emote_service_server::EmoteService, *},
 };

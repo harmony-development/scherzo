@@ -1,4 +1,4 @@
-use harmony_rust_sdk::api::profile::AccountKind;
+use crate::api::profile::AccountKind;
 
 use super::*;
 

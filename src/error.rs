@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use harmony_rust_sdk::api::{
+use crate::api::{
     exports::hrpc::{
         exports::http::{self, uri::InvalidUri as UrlParseError, StatusCode},
         server::error::HrpcError,
