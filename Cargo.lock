@@ -341,7 +341,7 @@ dependencies = [
 [[package]]
 name = "console-api"
 version = "0.1.1"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#884f4ecac8cba7eee7f895024da4c6e28de75289"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#e7b228d13b5da3885532ff5d42d7f41c90dcbcb0"
 dependencies = [
  "prost",
  "prost-types",
@@ -353,7 +353,7 @@ dependencies = [
 [[package]]
 name = "console-subscriber"
 version = "0.1.1"
-source = "git+https://github.com/tokio-rs/console.git?branch=main#884f4ecac8cba7eee7f895024da4c6e28de75289"
+source = "git+https://github.com/tokio-rs/console.git?branch=main#e7b228d13b5da3885532ff5d42d7f41c90dcbcb0"
 dependencies = [
  "console-api",
  "crossbeam-channel",
@@ -883,20 +883,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "harmony_build"
-version = "0.1.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
-dependencies = [
- "hrpc-build",
- "prost-build",
- "regex",
- "walkdir",
-]
-
-[[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#7be20c27b624d28f21978c52281aa28d1c956092"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -906,17 +895,20 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.8.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#8427853489413c624327db45d824cf8992469e8c"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#7be20c27b624d28f21978c52281aa28d1c956092"
 dependencies = [
  "derive-new",
  "derive_more",
- "harmony_build",
  "harmony_derive",
  "hrpc",
+ "hrpc-build",
  "http",
  "prost",
+ "prost-build",
+ "regex",
  "rkyv",
  "serde",
+ "walkdir",
 ]
 
 [[package]]
@@ -1302,9 +1294,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.116"
+version = "0.2.115"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "565dbd88872dbe4cc8a46e527f26483c1d1f7afa6b884a3bd6cd893d4f98da74"
+checksum = "0a8d982fa7a96a000f6ec4cfe966de9703eccde29750df2bb8949da91b0e818d"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -1319,9 +1311,9 @@ dependencies = [
 
 [[package]]
 name = "lock_api"
-version = "0.4.6"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88943dd7ef4a2e5a4bfa2753aaab3013e34ce2533d1996fb18ef591e315e2b3b"
+checksum = "712a4d093c9976e24e7dbca41db895dabcbac38eb5f4045393d17a95bdfb1109"
 dependencies = [
  "scopeguard",
  "serde",
@@ -2240,7 +2232,6 @@ dependencies = [
  "dashmap",
  "ed25519-compact",
  "git-version",
- "harmony_build",
  "harmony_rust_sdk",
  "hrpc",
  "hyper",
@@ -2257,7 +2248,6 @@ dependencies = [
  "parking_lot",
  "paste 1.0.6",
  "pin-project",
- "prost",
  "rand",
  "reqwest",
  "rkyv",
@@ -2819,9 +2809,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.16.1"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c27a64b625de6d309e8c57716ba93021dccf1b3b5c97edd6d3dd2d2135afc0a"
+checksum = "95e99d373042c30406d317cfc5bfad7b5d604bdd31dab72cf8739abebaa64aee"
 dependencies = [
  "bytes",
  "libc",

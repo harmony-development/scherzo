@@ -1,4 +1,4 @@
-use crate::api::auth::{auth_step::form::FormField, next_step_request::FormFields};
+use harmony_rust_sdk::api::auth::{auth_step::form::FormField, next_step_request::FormFields};
 
 use super::*;
 

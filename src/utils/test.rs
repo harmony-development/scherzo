@@ -1,4 +1,4 @@
-use crate::api::{
+use harmony_rust_sdk::api::{
     auth::auth_service_client::AuthServiceClient, chat::chat_service_client::ChatServiceClient,
     emote::emote_service_client::EmoteServiceClient,
     mediaproxy::media_proxy_service_client::MediaProxyServiceClient,

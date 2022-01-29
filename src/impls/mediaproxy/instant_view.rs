@@ -19,10 +19,7 @@ pub async fn handler(
             metadata: Some(metadata),
         }
     } else {
-        InstantViewResponse {
-            is_valid: false,
-            ..Default::default()
-        }
+        InstantViewResponse::default().with_is_valid(false)
     };
 
     Ok(msg.into_response())

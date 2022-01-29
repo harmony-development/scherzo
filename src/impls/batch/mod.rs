@@ -1,4 +1,4 @@
-use crate::api::{
+use harmony_rust_sdk::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
         hrpc::{

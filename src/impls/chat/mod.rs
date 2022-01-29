@@ -3,7 +3,7 @@ use std::{
     path::Path, str::FromStr,
 };
 
-use crate::api::{
+use harmony_rust_sdk::api::{
     chat::{
         get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
         stream_event, FormattedText, Message as HarmonyMessage, *,

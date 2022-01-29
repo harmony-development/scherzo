@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use crate::api::{
+use harmony_rust_sdk::api::{
     exports::{
         hrpc::{
             exports::futures_util::{

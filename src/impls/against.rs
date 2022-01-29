@@ -5,11 +5,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use hrpc::exports::futures_util::ready;
-use hrpc::{
+use harmony_rust_sdk::api::exports::hrpc::{
     client::transport::http::hyper::{http_client, HttpClient},
     server::transport::http::{box_body, HttpRequest, HttpResponse},
 };
+use hrpc::exports::futures_util::ready;
 use hyper::{client::ResponseFuture, header::HeaderName};
 use pin_project::pin_project;
 use tower::{Layer, Service};

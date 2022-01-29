@@ -30,12 +30,10 @@ sqlite = ["sqlx", "itertools"]
 scherzo_derive = { path = "./scherzo_derive" }
 harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
     "gen_all_protocols",
-    "gen_client",
     "gen_server",
-    "all_permissions",
+    "gen_client",
     "rkyv",
 ] }
-prost = { version = "0.9" }
 hrpc = { version = "0.33", features = [
     "http_server",
     "http_hyper_client",
@@ -133,12 +131,8 @@ mediasoup = { version = "0.9", optional = true }
 
 tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
 
-[build-dependencies]
-harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
-    "client",
-    "server",
-    "all_permissions",
-] }
+# migration protocols
+# sdk_migration_two = { package = "harmony_rust_sdk", git = "https://github.com/harmony-development/harmony_rust_sdk.git", rev = "dfcaca4ab04992afd47d21a6610bb8600cbe48b8" }
 
 [profile.dev]
 opt-level = 0

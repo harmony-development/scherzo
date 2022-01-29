@@ -2,13 +2,13 @@
 
 use std::time::Duration;
 
-use crate::api::{
+use ahash::RandomState;
+use dashmap::{mapref::one::RefMut, DashMap};
+use harmony_rust_sdk::api::{
+    exports::hrpc::exports::futures_util::TryFutureExt,
     harmonytypes::Token,
     sync::{event::*, postbox_service_client::PostboxServiceClient, *},
 };
-use ahash::RandomState;
-use dashmap::{mapref::one::RefMut, DashMap};
-use hrpc::exports::futures_util::TryFutureExt;
 use hrpc::{client::transport::http::Hyper, encode::encode_protobuf_message};
 use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -118,7 +118,7 @@ impl SyncServer {
 
                                         let mut client = clients.get_client(host.clone());
                                         let mut push_result = sync2
-                                            .generate_request(PushRequest { event: Some(event.clone()) })
+                                            .generate_request(PushRequest::new(Some(event.clone())))
                                             .map_err(|_| ())
                                             .and_then(|req| {
                                                 client.push(req).map_err(|_| ())
@@ -127,7 +127,7 @@ impl SyncServer {
                                         let mut try_count = 0;
                                         while try_count < 5 && push_result.is_err() {
                                             push_result = sync2
-                                                .generate_request(PushRequest { event: Some(event.clone()) })
+                                                .generate_request(PushRequest::new(Some(event.clone())))
                                                 .map_err(|_| ())
                                                 .and_then(|req| {
                                                     client.push(req).map_err(|_| ())
@@ -158,10 +158,7 @@ impl SyncServer {
         sync
     }
 
-    async fn generate_request<Msg: PbMessage>(
-        &self,
-        msg: Msg,
-    ) -> Result<Request<Msg>, ServerError> {
+    async fn generate_request<Msg: Message>(&self, msg: Msg) -> Result<Request<Msg>, ServerError> {
         let data = AuthData {
             server_id: self.deps.config.host.clone(),
             time: get_time_secs(),

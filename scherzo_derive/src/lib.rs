@@ -1,33 +1,6 @@
 use proc_macro::TokenStream;
-use proc_macro2::{Ident, Span};
 use quote::quote;
 use syn::{parse_macro_input, AttributeArgs, ItemFn};
-
-#[proc_macro]
-pub fn define_proto_mod(input: TokenStream) -> TokenStream {
-    let input = input.to_string();
-    let mut split = input.split(',').collect::<Vec<_>>();
-    let (proto_name, svc) = if split.len() == 1 {
-        ("main", split.pop().unwrap())
-    } else {
-        let svc = split.pop().unwrap();
-        let proto_name = split.pop().unwrap();
-        (proto_name, svc)
-    };
-    let path = format!("/{}/protocol.{}.v1.rs", proto_name, svc);
-
-    let svc = Ident::new(svc, Span::call_site());
-
-    (quote! {
-        pub mod #svc {
-            pub mod v1 {
-                include!(concat!(env!("OUT_DIR"), #path));
-            }
-            pub use v1::*;
-        }
-    })
-    .into()
-}
 
 #[proc_macro]
 pub fn impl_db_methods(input: TokenStream) -> TokenStream {
@@ -72,8 +45,8 @@ pub fn rate(args: TokenStream, input: TokenStream) -> TokenStream {
     let func_name = quote::format_ident!("{}_middleware", func.sig.ident);
 
     (quote! {
-        fn #func_name (&self) -> Option<hrpc::server::HrpcLayer> {
-            use hrpc::server::HrpcLayer;
+        fn #func_name (&self) -> Option<harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer> {
+            use harmony_rust_sdk::api::exports::hrpc::server::HrpcLayer;
 
             (!self.disable_ratelimits)
                 .then(|| HrpcLayer::new(crate::utils::rate_limit(
