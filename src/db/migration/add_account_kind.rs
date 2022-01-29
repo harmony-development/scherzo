@@ -6,7 +6,11 @@ use db::{
     profile::{make_user_profile_key, USER_PREFIX},
     rkyv_ser, Batch, DbError,
 };
+use harmony_rust_sdk::api::profile::AccountKind;
 use hrpc::box_error;
+
+use crate::api::profile::Profile as NewProfile;
+use profile::Profile as OldProfile;
 
 pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {
     let fut = async move {
@@ -15,11 +19,17 @@ pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {
         for res in profile_tree.scan_prefix(USER_PREFIX).await {
             let (key, val) = res?;
             if key.len() == make_user_profile_key(0).len() {
-                let old_profile = rkyv::from_bytes::<profile::Profile>(&val);
-                if let Ok(old_profile) = &old_profile {
-                    let new_val = rkyv_ser(old_profile);
+                let old_profile = rkyv::from_bytes::<OldProfile>(&val);
+                if let Ok(old_profile) = old_profile {
+                    let new_val = rkyv_ser(&NewProfile {
+                        user_avatar: old_profile.user_avatar,
+                        account_kind: AccountKind::FullUnspecified.into(),
+                        is_bot: old_profile.is_bot,
+                        user_name: old_profile.user_name,
+                        user_status: old_profile.user_status,
+                    });
                     batch.insert(key, new_val);
-                } else if rkyv::check_archived_root::<crate::api::profile::Profile>(&val).is_ok() {
+                } else if rkyv::check_archived_root::<NewProfile>(&val).is_ok() {
                     // if it's new, then its already fine
                     continue;
                 } else {
