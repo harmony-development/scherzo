@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use crate::api::{
     batch::{batch_service_server::BatchService, *},
     exports::{
@@ -61,9 +63,6 @@ impl BatchReq {
         let mut responses = Vec::with_capacity(self.bodies.len());
 
         let auth_header = &self.auth_header;
-        if !self.endpoint.is_valid_endpoint() {
-            bail!(ServerError::InvalidBatchEndpoint);
-        }
         match &self.endpoint {
             Endpoint::Same(endpoint) => {
                 tracing::debug!(
@@ -71,12 +70,18 @@ impl BatchReq {
                     self.bodies.len(),
                     endpoint
                 );
+                if is_valid_endpoint(endpoint).not() {
+                    bail!(ServerError::InvalidBatchEndpoint(endpoint.to_string()));
+                }
                 for body in self.bodies {
                     responses.push(process_request(body, endpoint, auth_header, service).await?);
                 }
             }
             Endpoint::Different(a) => {
                 for (body, endpoint) in self.bodies.into_iter().zip(a) {
+                    if is_valid_endpoint(endpoint).not() {
+                        bail!(ServerError::InvalidBatchEndpoint(endpoint.to_string()));
+                    }
                     tracing::debug!("batching request for endpoint {}", endpoint);
                     responses.push(process_request(body, endpoint, auth_header, service).await?);
                 }
@@ -105,27 +110,18 @@ enum Endpoint {
     Different(Vec<String>),
 }
 
-impl Endpoint {
-    fn is_valid_endpoint(&self) -> bool {
-        const ACCEPTED_ENDPOINTS: [&str; 6] = [
-            "/protocol.profile.v1.ProfileService/GetProfile",
-            "/protocol.chat.v1.ChatService/QueryHasPermission",
-            "/protocol.chat.v1.ChatService/GetUserRoles",
-            "/protocol.chat.v1.ChatService/GetGuildRoles",
-            "/protocol.chat.v1.ChatService/GetGuild",
-            "/protocol.chat.v1.ChatService/GetGuildChannels",
-        ];
+fn is_valid_endpoint(endpoint: &str) -> bool {
+    const ACCEPTED_ENDPOINTS: [&str; 6] = [
+        "/protocol.profile.v1.ProfileService/GetProfile",
+        "/protocol.chat.v1.ChatService/QueryHasPermission",
+        "/protocol.chat.v1.ChatService/GetUserRoles",
+        "/protocol.chat.v1.ChatService/GetGuildRoles",
+        "/protocol.chat.v1.ChatService/GetGuild",
+        "/protocol.chat.v1.ChatService/GetGuildChannels",
+    ];
 
-        let check_one = |endpoint: &str| {
-            let endpoint = endpoint.trim_end_matches('/');
-            ACCEPTED_ENDPOINTS.contains(&endpoint)
-        };
-
-        match self {
-            Endpoint::Same(endpoint) => check_one(endpoint),
-            Endpoint::Different(endpoints) => endpoints.iter().map(String::as_str).all(check_one),
-        }
-    }
+    let endpoint = endpoint.trim_end_matches('/');
+    ACCEPTED_ENDPOINTS.contains(&endpoint)
 }
 
 #[derive(Clone)]

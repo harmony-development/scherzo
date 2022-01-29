@@ -35,7 +35,7 @@ fn build_protocol(
     let all_services = stable_svcs.iter().chain(staging_svcs.iter());
     let protocol = Protocol::from_path(protocol_path, stable_svcs, staging_svcs)?;
 
-    let mut builder = f(Builder::new())
+    let mut builder = Builder::new()
         .modify_hrpc_config(|cfg| cfg.build_client(false).build_server(false))
         .modify_prost_config(|mut cfg| {
             cfg.bytes(&[".protocol.batch.v1"]);
@@ -50,6 +50,8 @@ fn build_protocol(
             )
         });
     }
+
+    let builder = f(builder);
 
     builder.generate(protocol, out_dir)?;
 

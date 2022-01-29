@@ -118,7 +118,7 @@ pub enum ServerError {
     InvalidAgainst(HomeserverIdParseError),
     CantKickOrBanYourself,
     TooManyBatchedRequests,
-    InvalidBatchEndpoint,
+    InvalidBatchEndpoint(String),
     InvalidRegistrationToken,
     WebRTCError(anyhow::Error),
     MultipartError(multer::Error),
@@ -287,8 +287,8 @@ impl Display for ServerError {
             ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
             ServerError::NotMedia => write!(f, "the requested URL does not point to media"),
             ServerError::CantKickOrBanYourself => write!(f, "you can't ban or kick yourself"),
-            ServerError::InvalidBatchEndpoint => {
-                write!(f, "batch requests cant contain other batch requests")
+            ServerError::InvalidBatchEndpoint(endpoint) => {
+                write!(f, "can't use this endpoint in batch: {}", endpoint)
             }
             ServerError::TooManyBatchedRequests => {
                 write!(f, "too many requests in one batch (cannot exceed 64)")
@@ -362,7 +362,7 @@ impl ServerError {
             | ServerError::NotMedia
             | ServerError::InvalidAgainst(_)
             | ServerError::CantKickOrBanYourself
-            | ServerError::InvalidBatchEndpoint
+            | ServerError::InvalidBatchEndpoint(_)
             | ServerError::TooManyBatchedRequests
             | ServerError::InvalidRegistrationToken
             | ServerError::MultipartError(
@@ -466,7 +466,7 @@ impl ServerError {
             ServerError::InviteExists(_) => "h.invite-exists",
             ServerError::InvalidAgainst(_) => "h.invalid-against",
             ServerError::CantKickOrBanYourself => "h.cant-ban-kick-self",
-            ServerError::InvalidBatchEndpoint => "h.invalid-batch",
+            ServerError::InvalidBatchEndpoint(_) => "h.invalid-batch",
             ServerError::TooManyBatchedRequests => "h.too-many-batches",
             ServerError::InvalidRegistrationToken => "h.invalid-registration-token",
             ServerError::MustNotBeLastOwner => "h.last-owner-in-guild",
