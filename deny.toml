@@ -212,6 +212,7 @@ allow-git = [
     "https://github.com/servo/html5ever.git",
     "https://github.com/open-telemetry/opentelemetry-rust.git",
     "https://github.com/tokio-rs/console.git",
+    "https://github.com/image-rs/image.git",
 ]
 
 [sources.allow-org]
