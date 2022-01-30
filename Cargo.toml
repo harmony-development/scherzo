@@ -115,12 +115,13 @@ pin-project = "1"
 dashmap = "=4.0"
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "chore/deps", default-features = false }
 paste = "1.0"
-parking_lot = "0.11"
+parking_lot = "0.12"
 lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
-image = "0.23"
+image = { git = "https://github.com/image-rs/image.git", branch = "master" }
+webp = "0.2"
 infer = { version = "0.6", default-features = false }
 anyhow = "1"
 

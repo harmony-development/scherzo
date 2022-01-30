@@ -1570,8 +1570,6 @@ impl ChatTree {
                     for photo in photos.photos.drain(..).collect::<Vec<_>>() {
                         // TODO: return error for invalid hmc
                         if let Ok(file_id) = FileId::from_str(&photo.hmc) {
-                            const FORMAT: image::ImageFormat = image::ImageFormat::Jpeg;
-
                             // TODO: check if the hmc host matches ours, if not fetch the image from the other host
                             let id = match &file_id {
                                 FileId::External(_) => bail!((
@@ -1582,92 +1580,99 @@ impl ChatTree {
                                 FileId::Id(id) => id.as_str(),
                             };
 
-                            let image_jpeg_id = format!("{}_{}", id, "jpeg");
-                            let image_jpeg_path = media_root.join(&image_jpeg_id);
-                            let minithumbnail_jpeg_id = format!("{}_{}", id, "jpegthumb");
-                            let minithumbnail_jpeg_path = media_root.join(&minithumbnail_jpeg_id);
+                            let image_id = format!("{}_{}", id, "jpeg");
+                            let image_path = media_root.join(&image_id);
+                            let minithumbnail_id = format!("{}_{}", id, "jpegthumb");
+                            let minithumbnail_path = media_root.join(&minithumbnail_id);
 
-                            let ((file_size, isize), minithumbnail) = if image_jpeg_path.exists()
-                                && minithumbnail_jpeg_path.exists()
-                            {
-                                let minithumbnail_jpeg = tokio::fs::read(&minithumbnail_jpeg_path)
-                                    .await
-                                    .map_err(ServerError::from)?;
+                            let ((file_size, isize), minithumbnail) =
+                                if image_path.exists() && minithumbnail_path.exists() {
+                                    let minithumbnail = tokio::fs::read(&minithumbnail_path)
+                                        .await
+                                        .map_err(ServerError::from)?;
 
-                                let ifile = tokio::fs::File::open(&image_jpeg_path)
-                                    .await
-                                    .map_err(ServerError::from)?;
-                                let file_size =
-                                    ifile.metadata().await.map_err(ServerError::from)?.len();
-                                let ifile = BufReader::new(ifile.into_std().await);
-                                let mut ireader = image::io::Reader::new(ifile);
-                                ireader.set_format(FORMAT);
-                                // this should be cheap and shouldnt block...
-                                let isize = ireader
-                                    .into_dimensions()
-                                    .map_err(|_| ServerError::InternalServerError)?;
-
-                                (
-                                    (file_size as u32, isize),
-                                    Minithumbnail {
-                                        width: 64,
-                                        height: 64,
-                                        data: minithumbnail_jpeg,
-                                    },
-                                )
-                            } else {
-                                let (_, _, data, _) = get_file_full(media_root, id).await?;
-
-                                let (image, image_jpeg) = tokio::task::spawn_blocking(move || {
-                                    let guessed_format = image::guess_format(&data)
-                                        .map_err(|_| ServerError::NotAnImage)?;
-
-                                    let image =
-                                        image::load_from_memory_with_format(&data, guessed_format)
-                                            .map_err(|_| ServerError::InternalServerError)?;
-                                    let mut image_jpeg = Vec::new();
-                                    image
-                                        .write_to(&mut image_jpeg, FORMAT)
+                                    let ifile = tokio::fs::File::open(&image_path)
+                                        .await
+                                        .map_err(ServerError::from)?;
+                                    let file_size =
+                                        ifile.metadata().await.map_err(ServerError::from)?.len();
+                                    let ifile = BufReader::new(ifile.into_std().await);
+                                    let ireader = image::io::Reader::new(ifile)
+                                        .with_guessed_format()
+                                        .map_err(ServerError::from)?;
+                                    // this should be cheap and shouldnt block...
+                                    let isize = ireader
+                                        .into_dimensions()
                                         .map_err(|_| ServerError::InternalServerError)?;
-                                    ServerResult::Ok((image, image_jpeg))
-                                })
-                                .await
-                                .expect("failed to join task")?;
 
-                                tokio::fs::write(&image_jpeg_path, &image_jpeg)
-                                    .await
-                                    .map_err(ServerError::from)?;
+                                    (
+                                        (file_size as u32, isize),
+                                        Minithumbnail {
+                                            width: 64,
+                                            height: 64,
+                                            data: minithumbnail,
+                                        },
+                                    )
+                                } else {
+                                    let (_, _, data, _) = get_file_full(media_root, id).await?;
 
-                                let (image, minithumbnail, minithumbnail_jpeg) =
-                                    tokio::task::spawn_blocking(move || {
-                                        let minithumbnail = image.thumbnail(64, 64);
-                                        let mut minithumbnail_jpeg = Vec::new();
-                                        minithumbnail
-                                            .write_to(&mut minithumbnail_jpeg, FORMAT)
-                                            .map_err(|_| ServerError::InternalServerError)?;
+                                    let (minithumbnail, image_size, image_raw) =
+                                        tokio::task::spawn_blocking(move || {
+                                            let image = image::load_from_memory(&data)
+                                                .map_err(|_| ServerError::InternalServerError)?;
+                                            let image_size = image.dimensions();
+                                            let minithumbnail = image.thumbnail(64, 64);
+                                            let rgba = image.into_rgba8();
+                                            let encoder = webp::Encoder::from_rgba(
+                                                rgba.as_ref(),
+                                                rgba.width(),
+                                                rgba.height(),
+                                            );
+                                            let encoded = encoder.encode(100.0);
+                                            ServerResult::Ok((
+                                                minithumbnail,
+                                                image_size,
+                                                encoded.to_vec(),
+                                            ))
+                                        })
+                                        .await
+                                        .map_err(|_| ServerError::InternalServerError)??;
 
-                                        ServerResult::Ok((image, minithumbnail, minithumbnail_jpeg))
-                                    })
-                                    .await
-                                    .expect("task panicked")?;
+                                    tokio::fs::write(&image_path, &image_raw)
+                                        .await
+                                        .map_err(ServerError::from)?;
 
-                                tokio::fs::write(&minithumbnail_jpeg_path, &minithumbnail_jpeg)
-                                    .await
-                                    .map_err(ServerError::from)?;
+                                    let (minithumb_size, minithumbnail_raw) =
+                                        tokio::task::spawn_blocking(move || {
+                                            let rgba = minithumbnail.into_rgba8();
+                                            let encoder = webp::Encoder::from_rgba(
+                                                rgba.as_ref(),
+                                                rgba.width(),
+                                                rgba.height(),
+                                            );
+                                            let encoded = encoder.encode(100.0);
 
-                                let minithumb_size = minithumbnail.dimensions();
-                                (
-                                    (image_jpeg.len() as u32, image.dimensions()),
-                                    Minithumbnail {
-                                        width: minithumb_size.0,
-                                        height: minithumb_size.1,
-                                        data: minithumbnail_jpeg,
-                                    },
-                                )
-                            };
+                                            ServerResult::Ok(((64, 64), encoded.to_vec()))
+                                        })
+                                        .await
+                                        .map_err(|_| ServerError::InternalServerError)??;
+
+                                    tokio::fs::write(&minithumbnail_path, &minithumbnail_raw)
+                                        .await
+                                        .map_err(ServerError::from)?;
+
+                                    (
+                                        (image_raw.len() as u32, image_size),
+                                        Minithumbnail {
+                                            width: minithumb_size.0,
+                                            height: minithumb_size.1,
+                                            data: minithumbnail_raw,
+                                        },
+                                    )
+                                };
 
                             photos.photos.push(Photo {
-                                hmc: Hmc::new(host, image_jpeg_id).unwrap().into(),
+                                hmc: Hmc::new(host, image_id).unwrap().into(),
                                 minithumbnail: Some(minithumbnail),
                                 width: isize.0,
                                 height: isize.1,
