@@ -187,9 +187,12 @@ unsafe fn disposition_header(name: &str) -> HeaderValue {
     ))
 }
 
-pub async fn get_file_handle(media_root: &Path, id: &str) -> Result<(File, Metadata), ServerError> {
+pub async fn get_file_handle(
+    media_root: &Path,
+    id: &str,
+) -> Result<(File, Metadata, PathBuf), ServerError> {
     let file_path = media_root.join(id);
-    let file = tokio::fs::File::open(file_path).await.map_err(|err| {
+    let file = tokio::fs::File::open(&file_path).await.map_err(|err| {
         if let std::io::ErrorKind::NotFound = err.kind() {
             ServerError::MediaNotFound
         } else {
@@ -197,18 +200,23 @@ pub async fn get_file_handle(media_root: &Path, id: &str) -> Result<(File, Metad
         }
     })?;
     let metadata = file.metadata().await?;
-    Ok((file, metadata))
+    Ok((file, metadata, file_path))
 }
 
-pub async fn read_bufs(
-    file: &mut File,
+pub async fn read_bufs<'file>(
+    path: &Path,
+    file: &'file mut File,
     is_jpeg: bool,
-) -> Result<(Vec<u8>, Vec<u8>, BufReader<&mut File>), ServerError> {
-    let mut buf_reader = BufReader::new(file);
-
+) -> Result<(Vec<u8>, Vec<u8>, BufReader<&'file mut File>), ServerError> {
     if is_jpeg {
-        Ok((b"unknown.jpg".to_vec(), b"image/jpeg".to_vec(), buf_reader))
+        let mimetype = infer::get_from_path(path).ok().flatten().map_or_else(
+            || b"image/jpeg".to_vec(),
+            |t| t.mime_type().as_bytes().to_vec(),
+        );
+        Ok((b"unknown".to_vec(), mimetype, BufReader::new(file)))
     } else {
+        let mut buf_reader = BufReader::new(file);
+
         let mut filename_raw = Vec::with_capacity(20);
         buf_reader.read_until(SEPERATOR, &mut filename_raw).await?;
         filename_raw.pop();
@@ -226,8 +234,9 @@ pub async fn get_file_full(
     id: &str,
 ) -> Result<(String, String, Vec<u8>, u64), ServerError> {
     let is_jpeg = is_id_jpeg(id);
-    let (mut file, metadata) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, mut buf_reader) = read_bufs(&mut file, is_jpeg).await?;
+    let (mut file, metadata, file_path) = get_file_handle(media_root, id).await?;
+    let (filename_raw, mimetype_raw, mut buf_reader) =
+        read_bufs(&file_path, &mut file, is_jpeg).await?;
 
     let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
     let size = end - start;
@@ -260,7 +269,7 @@ pub fn calculate_range(
 }
 
 pub fn is_id_jpeg(id: &str) -> bool {
-    id.ends_with("_jpeg")
+    id.ends_with("_jpeg") || id.ends_with("_jpegthumb")
 }
 
 pub async fn get_file(
@@ -268,8 +277,8 @@ pub async fn get_file(
     id: &str,
 ) -> Result<(HeaderValue, HeaderValue, hyper::Body, HeaderValue), ServerError> {
     let is_jpeg = is_id_jpeg(id);
-    let (mut file, metadata) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, _) = read_bufs(&mut file, is_jpeg).await?;
+    let (mut file, metadata, file_path) = get_file_handle(media_root, id).await?;
+    let (filename_raw, mimetype_raw, _) = read_bufs(&file_path, &mut file, is_jpeg).await?;
 
     let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
     let mimetype: Bytes = mimetype_raw.into();
