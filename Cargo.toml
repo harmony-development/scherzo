@@ -121,7 +121,7 @@ smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
 image = { git = "https://github.com/image-rs/image.git", branch = "master" }
-webp = "0.2"
+webp = { git = "https://github.com/yusdacra/webp.git", branch = "master" }
 infer = "0.6"
 anyhow = "1"
 

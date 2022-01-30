@@ -1614,12 +1614,19 @@ impl ChatTree {
                                         },
                                     )
                                 } else {
-                                    let (_, _, data, _) = get_file_full(media_root, id).await?;
+                                    let (_, mime, data, _) = get_file_full(media_root, id).await?;
 
                                     let (minithumbnail, image_size, image_raw) =
                                         tokio::task::spawn_blocking(move || {
-                                            let image = image::load_from_memory(&data)
-                                                .map_err(|_| ServerError::InternalServerError)?;
+                                            let image = (mime == "image/webp")
+                                                .then(|| {
+                                                    let decoder = webp::Decoder::new(&data);
+                                                    decoder.decode().map(|i| i.to_image())
+                                                })
+                                                .flatten()
+                                                .or_else(|| image::load_from_memory(&data).ok())
+                                                .ok_or(ServerError::InternalServerError)?;
+
                                             let image_size = image.dimensions();
                                             let minithumbnail = image.thumbnail(64, 64);
                                             let rgba = image.into_rgba8();
@@ -1693,9 +1700,10 @@ impl ChatTree {
                         if let Ok(id) = FileId::from_str(&attachment.id) {
                             let fill_file_local = move |attachment: Attachment, id: String| async move {
                                 let is_jpeg = is_id_jpeg(&id);
-                                let (mut file, metadata) = get_file_handle(media_root, &id).await?;
+                                let (mut file, metadata, path) =
+                                    get_file_handle(media_root, &id).await?;
                                 let (filename_raw, mimetype_raw, _) =
-                                    read_bufs(&mut file, is_jpeg).await?;
+                                    read_bufs(&path, &mut file, is_jpeg).await?;
                                 let (start, end) = calculate_range(
                                     &filename_raw,
                                     &mimetype_raw,

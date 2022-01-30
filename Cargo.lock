@@ -1274,20 +1274,6 @@ dependencies = [
 
 [[package]]
 name = "image"
-version = "0.23.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ffcb7e7244a9bf19d35bf2883b9c080c4ced3c07a9895572178cdb8f13f6a1"
-dependencies = [
- "bytemuck",
- "byteorder",
- "color_quant",
- "num-iter",
- "num-rational 0.3.2",
- "num-traits",
-]
-
-[[package]]
-name = "image"
 version = "0.24.0-alpha"
 source = "git+https://github.com/image-rs/image.git?branch=master#9d70ecf5b41cde89b7c724f9a76f7827acfad57e"
 dependencies = [
@@ -1298,7 +1284,7 @@ dependencies = [
  "gif",
  "jpeg-decoder 0.2.1",
  "num-iter",
- "num-rational 0.4.0",
+ "num-rational",
  "num-traits",
  "png",
  "scoped_threadpool",
@@ -1730,17 +1716,6 @@ name = "num-iter"
 version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2021c8337a54d21aca0d59a92577a029af9431cb59b909b03252b9c164fad59"
-dependencies = [
- "autocfg",
- "num-integer",
- "num-traits",
-]
-
-[[package]]
-name = "num-rational"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12ac428b1cb17fce6f731001d307d351ec70a6d202fc2e60f7d4c5e42d8f4f07"
 dependencies = [
  "autocfg",
  "num-integer",
@@ -2442,7 +2417,7 @@ dependencies = [
  "hrpc",
  "hyper",
  "hyper-rustls",
- "image 0.24.0-alpha",
+ "image",
  "infer",
  "itertools",
  "lazy_static",
@@ -3541,10 +3516,9 @@ dependencies = [
 [[package]]
 name = "webp"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0041a9fcbdbf6402c3cb0ec7c2c1a1c240efd523519a0763ae07753bc95f7713"
+source = "git+https://github.com/yusdacra/webp.git?branch=master#7c30e50781cdda4f140a0763e3443fa105513672"
 dependencies = [
- "image 0.23.14",
+ "image",
  "libwebp-sys",
 ]
 
