@@ -12,6 +12,10 @@ pub async fn handler(
 
     chat_tree.check_guild_user(guild_id, user_id).await?;
 
+    if chat_tree.is_user_guild_owner(guild_id, user_id).await? {
+        bail!(("h.owner-cant-leave", "guild owners cant leave their guild"));
+    }
+
     chat_tree
         .chat_tree
         .remove(&make_member_key(guild_id, user_id))
