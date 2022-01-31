@@ -183,7 +183,7 @@ pub fn setup_server(
     let emote = EmoteServiceServer::new(emote_server);
     let auth = AuthServiceServer::new(auth_server);
     let chat = ChatServiceServer::new(chat_server.clone());
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
     let sync = PostboxServiceServer::new(sync_server);
     #[cfg(feature = "voice")]
     let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
@@ -191,7 +191,8 @@ pub fn setup_server(
     let batchable_services = {
         let profile = ProfileServiceServer::new(profile_server.batch());
         let chat = ChatServiceServer::new(chat_server.batch());
-        combine_services!(profile, chat)
+        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
+        combine_services!(profile, chat, mediaproxy)
     };
 
     let rest = RestServiceLayer::new(deps.clone());
