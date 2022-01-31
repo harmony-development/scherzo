@@ -136,9 +136,9 @@ fn is_valid_endpoint(endpoint: &str) -> bool {
         "/protocol.chat.v1.ChatService/GetGuildRoles",
         "/protocol.chat.v1.ChatService/GetGuild",
         "/protocol.chat.v1.ChatService/GetGuildChannels",
-        "/protocol.mediaproxy.v1.MediaproxyService/FetchLinkMetadata",
-        "/protocol.mediaproxy.v1.MediaproxyService/InstantView",
-        "/protocol.mediaproxy.v1.MediaproxyService/CanInstantView",
+        "/protocol.mediaproxy.v1.MediaProxyService/FetchLinkMetadata",
+        "/protocol.mediaproxy.v1.MediaProxyService/InstantView",
+        "/protocol.mediaproxy.v1.MediaProxyService/CanInstantView",
     ];
 
     let endpoint = endpoint.trim_end_matches('/');
