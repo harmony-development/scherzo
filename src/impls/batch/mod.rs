@@ -111,13 +111,16 @@ enum Endpoint {
 }
 
 fn is_valid_endpoint(endpoint: &str) -> bool {
-    const ACCEPTED_ENDPOINTS: [&str; 6] = [
+    const ACCEPTED_ENDPOINTS: [&str; 9] = [
         "/protocol.profile.v1.ProfileService/GetProfile",
         "/protocol.chat.v1.ChatService/QueryHasPermission",
         "/protocol.chat.v1.ChatService/GetUserRoles",
         "/protocol.chat.v1.ChatService/GetGuildRoles",
         "/protocol.chat.v1.ChatService/GetGuild",
         "/protocol.chat.v1.ChatService/GetGuildChannels",
+        "/protocol.mediaproxy.v1.MediaProxyService/FetchLinkMetadata",
+        "/protocol.mediaproxy.v1.MediaProxyService/InstantView",
+        "/protocol.mediaproxy.v1.MediaProxyService/CanInstantView",
     ];
 
     let endpoint = endpoint.trim_end_matches('/');
