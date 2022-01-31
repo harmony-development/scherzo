@@ -1,4 +1,4 @@
-use std::ops::Not;
+use std::{future::Future, ops::Not};
 
 use crate::api::{
     batch::{batch_service_server::BatchService, *},
@@ -32,12 +32,12 @@ impl BatchReq {
         self,
         service: &mut RoutesFinalized,
     ) -> Result<Vec<Bytes>, HrpcServerError> {
-        async fn process_request(
+        fn process_request(
             body: Bytes,
             endpoint: &str,
             auth_header: &Option<HeaderValue>,
             service: &mut RoutesFinalized,
-        ) -> Result<Bytes, HrpcServerError> {
+        ) -> impl Future<Output = Result<Bytes, HrpcServerError>> + Send + 'static {
             let mut req = Request::new_with_body(Body::full(body));
             *req.endpoint_mut() = endpoint.to_string().into();
 
@@ -46,14 +46,18 @@ impl BatchReq {
                     .insert(header::AUTHORIZATION, auth.clone());
             }
 
-            let mut reply = service.call(req).await.unwrap();
-            if let Some(err) = reply.extensions_mut().remove::<HrpcError>() {
-                bail!(err);
-            }
+            let fut = service.call(req);
 
-            // This should be safe since we know we insert a message into responses
-            // as whole chunks
-            Ok(response::Parts::from(reply).body.next().await.unwrap()?)
+            async move {
+                let mut reply = fut.await.unwrap();
+                if let Some(err) = reply.extensions_mut().remove::<HrpcError>() {
+                    bail!(err);
+                }
+
+                // This should be safe since we know we insert a message into responses
+                // as whole chunks
+                Ok(response::Parts::from(reply).body.next().await.unwrap()?)
+            }
         }
 
         if self.bodies.len() > 64 {
@@ -73,17 +77,31 @@ impl BatchReq {
                 if is_valid_endpoint(endpoint).not() {
                     bail!(ServerError::InvalidBatchEndpoint(endpoint.to_string()));
                 }
+                let mut handles = Vec::with_capacity(self.bodies.len());
                 for body in self.bodies {
-                    responses.push(process_request(body, endpoint, auth_header, service).await?);
+                    let handle =
+                        tokio::spawn(process_request(body, endpoint, auth_header, service));
+                    handles.push(handle);
+                }
+                for handle in handles {
+                    responses.push(handle.await.expect("task panicked")?);
                 }
             }
             Endpoint::Different(a) => {
-                for (body, endpoint) in self.bodies.into_iter().zip(a) {
+                for endpoint in a {
                     if is_valid_endpoint(endpoint).not() {
                         bail!(ServerError::InvalidBatchEndpoint(endpoint.to_string()));
                     }
+                }
+                let mut handles = Vec::with_capacity(self.bodies.len());
+                for (body, endpoint) in self.bodies.into_iter().zip(a) {
                     tracing::debug!("batching request for endpoint {}", endpoint);
-                    responses.push(process_request(body, endpoint, auth_header, service).await?);
+                    let handle =
+                        tokio::spawn(process_request(body, endpoint, auth_header, service));
+                    handles.push(handle);
+                }
+                for handle in handles {
+                    responses.push(handle.await.expect("task panicked")?);
                 }
             }
         }
