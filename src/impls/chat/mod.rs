@@ -1616,7 +1616,9 @@ impl ChatTree {
                                 } else {
                                     let (_, mime, data, _) = get_file_full(media_root, id).await?;
 
-                                    let (minithumbnail, image_size, image_raw) =
+                                    let is_animated = mime == "image/gif";
+
+                                    let (minithumbnail, image_size, image_raw, data) =
                                         tokio::task::spawn_blocking(move || {
                                             let image = (mime == "image/webp")
                                                 .then(|| {
@@ -1629,21 +1631,26 @@ impl ChatTree {
 
                                             let image_size = image.dimensions();
                                             let minithumbnail = image.thumbnail(64, 64);
-                                            let rgba = image.into_rgba8();
-                                            let encoder = webp::Encoder::from_rgba(
-                                                rgba.as_ref(),
-                                                rgba.width(),
-                                                rgba.height(),
-                                            );
-                                            let encoded = encoder.encode(100.0);
+                                            let encoded = is_animated.not().then(|| {
+                                                let rgba = image.into_rgba8();
+                                                let encoder = webp::Encoder::from_rgba(
+                                                    rgba.as_ref(),
+                                                    rgba.width(),
+                                                    rgba.height(),
+                                                );
+                                                encoder.encode(100.0)
+                                            });
                                             ServerResult::Ok((
                                                 minithumbnail,
                                                 image_size,
-                                                encoded.to_vec(),
+                                                encoded.map(|m| m.to_vec()),
+                                                data,
                                             ))
                                         })
                                         .await
                                         .map_err(|_| ServerError::InternalServerError)??;
+
+                                    let image_raw = image_raw.unwrap_or(data);
 
                                     tokio::fs::write(&image_path, &image_raw)
                                         .await
