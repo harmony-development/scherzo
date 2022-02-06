@@ -67,12 +67,12 @@ pub async fn handler(
                 role_id,
                 new_perms: perms_to_give,
             }),
-            Some(PermCheck {
+            Some(PermCheck::new(
                 guild_id,
-                channel_id: None,
-                check_for: "guild.manage",
-                must_be_guild_owner: false,
-            }),
+                None,
+                all_permissions::ROLES_MANAGE,
+                false,
+            )),
             EventContext::empty(),
         );
         Ok((SetPermissionsResponse {}).into_response())

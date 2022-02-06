@@ -25,7 +25,12 @@ pub async fn handler(
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleDeleted(stream_event::RoleDeleted { guild_id, role_id }),
-        None,
+        Some(PermCheck::new(
+            guild_id,
+            None,
+            all_permissions::ROLES_GET,
+            false,
+        )),
         EventContext::empty(),
     );
 

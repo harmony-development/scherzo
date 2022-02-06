@@ -37,7 +37,7 @@ pub async fn handler(
             user_id: user_to_manage,
             new_role_ids,
         }),
-        None,
+        Some(PermCheck::new(guild_id, None, "roles.user.get", false)),
         EventContext::empty(),
     );
 

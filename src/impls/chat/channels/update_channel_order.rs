@@ -39,12 +39,7 @@ pub async fn handler(
                 channel_id,
                 new_position: Some(position),
             }),
-            Some(PermCheck::new(
-                guild_id,
-                Some(channel_id),
-                "messages.view",
-                false,
-            )),
+            None,
             EventContext::empty(),
         );
     }
