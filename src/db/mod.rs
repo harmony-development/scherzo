@@ -33,7 +33,7 @@ use std::{
     mem::size_of,
 };
 
-use crate::{config::DbConfig, error::travel_error, utils::evec::EVec, ServerError, ServerResult};
+use crate::{config::DbConfig, utils::evec::EVec, ServerError, ServerResult};
 
 use crate::api::{
     chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
@@ -41,7 +41,6 @@ use crate::api::{
     profile::Profile,
 };
 use rkyv::{
-    archived_root,
     ser::{serializers::AllocSerializer, Serializer},
     AlignedVec, Archive, Serialize,
 };
@@ -102,7 +101,6 @@ pub struct DbError {
 
 impl Display for DbError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        travel_error(f, self.inner.as_ref());
         f.write_str("a database error occured")
     }
 }

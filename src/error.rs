@@ -143,6 +143,7 @@ impl StdError for ServerError {
             ServerError::MultipartError(err) => Some(err),
             ServerError::FailedToFetchLink(err) => Some(err),
             ServerError::FailedToDownload(err) => Some(err),
+            ServerError::InvalidEmailConfig(err) => Some(err),
             _ => None,
         }
     }
@@ -150,17 +151,18 @@ impl StdError for ServerError {
 
 impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        travel_error(f, self);
         match self {
-            ServerError::InvalidEmailConfig(err) => write!(f, "invalid email config: {}", err),
+            ServerError::InvalidEmailConfig(_) => f.write_str("invalid email config"),
             ServerError::InvalidProtoMessage(err) => {
                 write!(f, "couldn't decode a response body: {}", err)
             }
-            ServerError::InviteExpired => write!(f, "invite expired"),
-            ServerError::InvalidUrl(err) => write!(f, "invalid URL: {}", err),
+            ServerError::InviteExpired => f.write_str("invite expired"),
+            ServerError::InvalidUrl(_) => f.write_str("invalid URL"),
             ServerError::TooFast(rem) => write!(f, "too fast, try again in {}", rem.as_secs_f64()),
-            ServerError::InvalidAuthId => write!(f, "invalid auth id"),
-            ServerError::NoFieldSpecified => write!(f, "expected field in response"),
-            ServerError::NoSuchField => write!(f, "no such field"),
+            ServerError::InvalidAuthId => f.write_str("invalid auth id"),
+            ServerError::NoFieldSpecified => f.write_str("expected field in response"),
+            ServerError::NoSuchField => f.write_str("no such field"),
             ServerError::NoSuchChoice {
                 choice,
                 expected_any_of,
@@ -184,14 +186,14 @@ impl Display for ServerError {
             ServerError::WrongEmailOrPassword { email } => {
                 write!(f, "invalid credentials for email {}", email)
             }
-            ServerError::UserBanned => write!(f, "user banned in guild"),
+            ServerError::UserBanned => f.write_str("user banned in guild"),
             ServerError::UserNotInGuild { guild_id, user_id } => {
                 write!(f, "user {} not in guild {}", user_id, guild_id)
             }
-            ServerError::UserAlreadyExists => write!(f, "user already exists"),
-            ServerError::UserAlreadyInGuild => write!(f, "user already in guild"),
-            ServerError::Unauthenticated => write!(f, "invalid-session"),
-            ServerError::NotImplemented => write!(f, "not implemented"),
+            ServerError::UserAlreadyExists => f.write_str("user already exists"),
+            ServerError::UserAlreadyInGuild => f.write_str("user already in guild"),
+            ServerError::Unauthenticated => f.write_str("invalid-session"),
+            ServerError::NotImplemented => f.write_str("not implemented"),
             ServerError::NoSuchChannel {
                 guild_id,
                 channel_id,
@@ -200,7 +202,9 @@ impl Display for ServerError {
                 "channel {} does not exist in guild {}",
                 channel_id, guild_id
             ),
-            ServerError::UnderSpecifiedChannels => write!(f, "not all required channels specified"),
+            ServerError::UnderSpecifiedChannels => {
+                f.write_str("not all required channels specified")
+            }
             ServerError::ChannelAlreadyExists {
                 guild_id,
                 channel_id,
@@ -224,8 +228,8 @@ impl Display for ServerError {
                 message_id, channel_id, guild_id
             ),
             ServerError::NoSuchInvite(id) => write!(f, "no such invite with id {}", id),
-            ServerError::InternalServerError => write!(f, "internal server error"),
-            ServerError::SessionExpired => write!(f, "session expired"),
+            ServerError::InternalServerError => f.write_str("internal server error"),
+            ServerError::SessionExpired => f.write_str("session expired"),
             ServerError::NotEnoughPermissions {
                 must_be_guild_owner,
                 missing_permission,
@@ -237,78 +241,69 @@ impl Display for ServerError {
                 f.write_str(missing_permission)?;
                 f.write_char('\n')
             }
-            ServerError::EmptyPermissionQuery => write!(f, "permission query cant be empty"),
+            ServerError::EmptyPermissionQuery => f.write_str("permission query cant be empty"),
             ServerError::NoSuchRole { guild_id, role_id } => {
                 write!(f, "no such role {} in guild {}", role_id, guild_id)
             }
-            ServerError::NoRoleSpecified => write!(
-                f,
-                "no role specified when there must have been one specified"
-            ),
-            ServerError::NoPermissionsSpecified => write!(
-                f,
-                "no permissions specified when there must have been some specified"
-            ),
-            ServerError::TooManyFiles => write!(f, "uploaded too many files"),
-            ServerError::MissingFiles => write!(f, "must upload at least one file"),
-            ServerError::IoError(err) => {
-                travel_error(f, err);
-                write!(f, "io error occured: {}", err)
+            ServerError::NoRoleSpecified => {
+                f.write_str("no role specified when there must have been one specified")
             }
-            ServerError::HttpError(err) => {
-                travel_error(f, err);
-                write!(f, "error occured in reqwest: {}", err)
+            ServerError::NoPermissionsSpecified => {
+                f.write_str("no permissions specified when there must have been some specified")
             }
+            ServerError::TooManyFiles => f.write_str("uploaded too many files"),
+            ServerError::MissingFiles => f.write_str("must upload at least one file"),
+            ServerError::IoError(_) => f.write_str("io error occured"),
+            ServerError::HttpError(_) => f.write_str("error occured in reqwest"),
             ServerError::FileExtractUnexpected(msg) => write!(f, "unexpected behaviour: {}", msg),
-            ServerError::InvalidFileId => write!(f, "invalid file id"),
-            ServerError::NotAnImage => write!(f, "the requested URL does not point to an image"),
-            ServerError::MediaNotFound => write!(f, "requested media is not found"),
-            ServerError::FailedToAuthSync => write!(f, "failed to auth for host"),
-            ServerError::CantGetKey => write!(f, "can't get key"),
+            ServerError::InvalidFileId => f.write_str("invalid file id"),
+            ServerError::NotAnImage => f.write_str("the requested URL does not point to an image"),
+            ServerError::MediaNotFound => f.write_str("requested media is not found"),
+            ServerError::FailedToAuthSync => f.write_str("failed to auth for host"),
+            ServerError::CantGetKey => f.write_str("can't get key"),
             ServerError::CantGetHostKey(host) => write!(f, "can't get host key: {}", host),
-            ServerError::InvalidTokenData => write!(f, "token data is invalid"),
-            ServerError::InvalidTokenSignature => write!(f, "token signature is invalid"),
-            ServerError::InvalidTime => write!(f, "invalid time"),
-            ServerError::InvalidToken => write!(f, "token is invalid"),
+            ServerError::InvalidTokenData => f.write_str("token data is invalid"),
+            ServerError::InvalidTokenSignature => f.write_str("token signature is invalid"),
+            ServerError::InvalidTime => f.write_str("invalid time"),
+            ServerError::InvalidToken => f.write_str("token is invalid"),
             ServerError::InvalidAgainst(err) => write!(f, "malformed Against header: {}", err),
-            ServerError::CouldntVerifyTokenData => write!(
-                f,
-                "token data could not be verified with the given signature"
-            ),
-            ServerError::FederationDisabled => write!(f, "federation is disabled on this server"),
-            ServerError::HostNotAllowed => write!(f, "host is not allowed on this server"),
-            ServerError::EmotePackNotFound => write!(f, "emote pack is not found"),
-            ServerError::NotEmotePackOwner => write!(f, "you are not the owner of this emote pack"),
+            ServerError::CouldntVerifyTokenData => {
+                f.write_str("token data could not be verified with the given signature")
+            }
+            ServerError::FederationDisabled => f.write_str("federation is disabled on this server"),
+            ServerError::HostNotAllowed => f.write_str("host is not allowed on this server"),
+            ServerError::EmotePackNotFound => f.write_str("emote pack is not found"),
+            ServerError::NotEmotePackOwner => {
+                f.write_str("you are not the owner of this emote pack")
+            }
             ServerError::LinkNotFound(url) => {
                 write!(f, "metadata requested for link {} not found", url)
             }
-            ServerError::MessageContentCantBeEmpty => write!(f, "message content cannot be empty"),
+            ServerError::MessageContentCantBeEmpty => {
+                f.write_str("message content cannot be empty")
+            }
             ServerError::InviteExists(name) => write!(f, "invite {} already exists", name),
-            ServerError::InviteNameEmpty => write!(f, "invite name can't be empty"),
-            ServerError::NotMedia => write!(f, "the requested URL does not point to media"),
-            ServerError::CantKickOrBanYourself => write!(f, "you can't ban or kick yourself"),
+            ServerError::InviteNameEmpty => f.write_str("invite name can't be empty"),
+            ServerError::NotMedia => f.write_str("the requested URL does not point to media"),
+            ServerError::CantKickOrBanYourself => f.write_str("you can't ban or kick yourself"),
             ServerError::InvalidBatchEndpoint(endpoint) => {
                 write!(f, "can't use this endpoint in batch: {}", endpoint)
             }
             ServerError::TooManyBatchedRequests => {
-                write!(f, "too many requests in one batch (cannot exceed 64)")
+                f.write_str("too many requests in one batch (cannot exceed 100 / 20)")
             }
             ServerError::InvalidRegistrationToken => write!(f, "invalid registration token"),
-            ServerError::WebRTCError(err) => write!(f, "webrtc error: {}", err),
-            ServerError::DbError(err) => write!(f, "database error: {}", err),
-            ServerError::MultipartError(err) => write!(f, "multipart error: {}", err),
+            ServerError::WebRTCError(_) => f.write_str("webrtc error"),
+            ServerError::DbError(_) => f.write_str("database error"),
+            ServerError::MultipartError(_) => f.write_str("multipart error"),
             ServerError::MustNotBeLastOwner => {
                 f.write_str("must not be the last owner left in the guild")
             }
             ServerError::ContentCantBeSentByUser => {
                 f.write_str("this content type cannot be used by a regular user")
             }
-            ServerError::FailedToFetchLink(err) => {
-                write!(f, "failed to fetch link: {}", err)
-            }
-            ServerError::FailedToDownload(err) => {
-                write!(f, "failed to download: {}", err)
-            }
+            ServerError::FailedToFetchLink(_) => f.write_str("failed to fetch link"),
+            ServerError::FailedToDownload(_) => f.write_str("failed to download"),
         }
     }
 }
