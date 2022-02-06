@@ -1594,6 +1594,7 @@ impl ChatTree {
                                     let ifile = tokio::fs::File::open(&image_path)
                                         .await
                                         .map_err(ServerError::from)?;
+
                                     let file_size =
                                         ifile.metadata().await.map_err(ServerError::from)?.len();
                                     let ifile = BufReader::new(ifile.into_std().await);
@@ -1605,12 +1606,20 @@ impl ChatTree {
                                         .into_dimensions()
                                         .map_err(|_| ServerError::InternalServerError)?;
 
+                                    let mut minithumbnail = std::io::Cursor::new(minithumbnail);
+                                    let minireader = image::io::Reader::new(&mut minithumbnail)
+                                        .with_guessed_format()
+                                        .map_err(ServerError::from)?;
+                                    let minisize = minireader
+                                        .into_dimensions()
+                                        .map_err(|_| ServerError::InternalServerError)?;
+
                                     (
                                         (file_size as u32, isize),
                                         Minithumbnail {
-                                            width: 64,
-                                            height: 64,
-                                            data: minithumbnail,
+                                            width: minisize.0,
+                                            height: minisize.1,
+                                            data: minithumbnail.into_inner(),
                                         },
                                     )
                                 } else {
