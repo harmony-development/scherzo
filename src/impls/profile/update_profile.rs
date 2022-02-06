@@ -14,6 +14,12 @@ pub async fn handler(
         new_is_bot,
     } = request.into_message().await?;
 
+    if let Some(username) = new_user_name.as_deref() {
+        if svc.deps.profile_tree.does_username_exist(username).await? {
+            bail!(ServerError::UserAlreadyExists);
+        }
+    }
+
     svc.deps
         .profile_tree
         .update_profile_logic(

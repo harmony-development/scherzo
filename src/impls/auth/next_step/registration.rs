@@ -101,6 +101,10 @@ pub async fn logic(
         bail!(ServerError::UserAlreadyExists);
     }
 
+    if svc.deps.profile_tree.does_username_exist(&username).await? {
+        bail!(ServerError::UserAlreadyExists);
+    }
+
     let user_id = svc.gen_user_id().await?;
     let session_token = svc.gen_auth_token().await?; // [ref:alphanumeric_auth_token_gen] [ref:auth_token_length]
 

@@ -123,6 +123,17 @@ impl ProfileTree {
         Ok(profile)
     }
 
+    pub async fn does_username_exist(&self, username: &str) -> ServerResult<bool> {
+        for res in self.scan_prefix(USER_PREFIX).await {
+            let (_, value) = res?;
+            let profile = db::rkyv_arch::<Profile>(&value);
+            if profile.user_name == username {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub async fn does_user_exist(&self, user_id: u64) -> ServerResult<()> {
         self.contains_key(&make_user_profile_key(user_id))
             .await?
