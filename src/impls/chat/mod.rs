@@ -34,7 +34,7 @@ use triomphe::Arc;
 use crate::{
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
     impls::{
-        get_time_secs,
+        get_time_millisecs,
         prelude::*,
         rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
@@ -1505,7 +1505,7 @@ impl ChatTree {
         let message_id = self.get_next_message_id(guild_id, channel_id).await?;
         let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
-        let created_at = get_time_secs();
+        let created_at = get_time_millisecs();
         let edited_at = None;
 
         let message = HarmonyMessage {
