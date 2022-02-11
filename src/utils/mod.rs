@@ -11,6 +11,13 @@ pub use ratelimit::rate_limit;
 
 use smol_str::SmolStr;
 
+pub fn get_time_millisecs() -> u64 {
+    std::time::UNIX_EPOCH
+        .elapsed()
+        .expect("time is before unix epoch")
+        .as_millis() as u64
+}
+
 pub fn get_time_secs() -> u64 {
     std::time::UNIX_EPOCH
         .elapsed()
