@@ -122,7 +122,7 @@ git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
 image = { git = "https://github.com/image-rs/image.git", branch = "master" }
 webp = { git = "https://github.com/yusdacra/webp.git", branch = "master" }
-infer = "0.6"
+infer = "0.7"
 anyhow = "1"
 
 urlencoding = "2.0"
