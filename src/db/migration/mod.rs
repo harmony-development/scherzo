@@ -16,6 +16,7 @@ use super::{rkyv_ser, Batch, Db, DbResult, Tree};
 mod add_account_kind;
 mod add_next_msg_ids;
 mod initial_db_version;
+mod proto_v2;
 mod remove_log_chan_id_from_admin_keys;
 mod timestamps_are_milliseconds;
 
@@ -27,6 +28,7 @@ pub const MIGRATIONS: [Migration; 5] = [
     remove_log_chan_id_from_admin_keys::migrate,
     add_account_kind::migrate,
     timestamps_are_milliseconds::migrate,
+    proto_v2::migrate,
 ];
 
 pub async fn get_db_version(db: &Db) -> DbResult<(usize, bool)> {
