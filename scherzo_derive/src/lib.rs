@@ -6,27 +6,30 @@ use syn::{parse_macro_input, AttributeArgs, ItemFn};
 #[proc_macro]
 pub fn define_proto_mod(input: TokenStream) -> TokenStream {
     let input = input.to_string();
-    let mut split = input.split(',').collect::<Vec<_>>();
-    let (proto_name, svc) = if split.len() == 1 {
-        ("main", split.pop().unwrap())
+    let mut split = input.split(',').map(str::trim).collect::<Vec<_>>();
+    let (proto_name, svcs) = if split.len() == 1 {
+        ("main", split)
     } else {
-        let svc = split.pop().unwrap().trim();
-        let proto_name = split.pop().unwrap().trim();
-        (proto_name, svc)
+        let proto_name = split.remove(0);
+        (proto_name, split)
     };
-    let path = format!("/{}/protocol.{}.v1.rs", proto_name, svc);
 
-    let svc = Ident::new(svc, Span::call_site());
+    let mut gen = TokenStream::new();
+    for svc in svcs {
+        let path = format!("/{}/protocol.{}.v1.rs", proto_name, svc);
+        let svc = Ident::new(svc, Span::call_site());
 
-    (quote! {
-        pub mod #svc {
-            pub mod v1 {
-                include!(concat!(env!("OUT_DIR"), #path));
+        gen.extend(TokenStream::from(quote! {
+            pub mod #svc {
+                pub mod v1 {
+                    include!(concat!(env!("OUT_DIR"), #path));
+                }
+                pub use v1::*;
             }
-            pub use v1::*;
-        }
-    })
-    .into()
+        }));
+    }
+
+    gen
 }
 
 #[proc_macro]

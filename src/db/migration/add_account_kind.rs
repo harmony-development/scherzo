@@ -19,5 +19,4 @@ define_migration!(|db| {
     .await
 });
 
-scherzo_derive::define_proto_mod!(before_account_kind, profile);
-scherzo_derive::define_proto_mod!(before_account_kind, harmonytypes);
+scherzo_derive::define_proto_mod!(before_account_kind, harmonytypes, profile);
