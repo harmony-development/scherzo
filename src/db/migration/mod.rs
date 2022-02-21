@@ -112,3 +112,15 @@ where
     tree.apply_batch(batch).await?;
     Ok(())
 }
+
+macro_rules! define_migration {
+    (|$db:ident| $e:tt) => {
+        pub(super) fn migrate($db: &Db) -> BoxFuture<'_, DbResult<()>> {
+            let fut = Box::pin(async move { $e });
+
+            Box::pin(fut)
+        }
+    };
+}
+
+pub(self) use define_migration;
