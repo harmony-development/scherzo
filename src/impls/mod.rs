@@ -3,6 +3,7 @@ pub mod against;
 pub mod auth;
 pub mod chat;
 pub mod emote;
+pub mod media;
 pub mod mediaproxy;
 pub mod profile;
 pub mod rest;
@@ -28,8 +29,8 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
 
 use self::{
-    auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, rest::RestServiceLayer,
-    sync::EventDispatch,
+    auth::AuthTree, chat::ChatTree, emote::EmoteTree, media::MediaStore, profile::ProfileTree,
+    rest::RestServiceLayer, sync::EventDispatch,
 };
 
 pub mod prelude {
@@ -78,6 +79,7 @@ pub struct Dependencies {
     pub key_manager: Option<Arc<key::Manager>>,
     pub http: HttpClient,
     pub email: Option<AsyncSmtpTransport<Tokio1Executor>>,
+    pub media: MediaStore,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
@@ -138,6 +140,7 @@ impl Dependencies {
                 }
                 builder.build()
             }),
+            media: MediaStore::new(&config.media),
 
             runtime_config: Arc::new(Mutex::new(SharedConfigData {
                 motd: config.motd.clone(),

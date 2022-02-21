@@ -21,7 +21,6 @@ use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
-    io::AsyncReadExt,
     sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
     task::JoinHandle,
 };
@@ -29,12 +28,7 @@ use triomphe::Arc;
 
 use crate::{
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
-    impls::{
-        get_time_millisecs,
-        prelude::*,
-        rest::download::{calculate_range, get_file_handle, is_id_jpeg, read_bufs},
-        sync::EventDispatch,
-    },
+    impls::{get_time_secs, prelude::*, sync::EventDispatch},
 };
 
 use channels::*;
@@ -43,6 +37,8 @@ use invites::*;
 use messages::*;
 use moderation::*;
 use permissions::*;
+
+use super::media::FileHandle;
 
 pub mod channels;
 pub mod guilds;
@@ -1544,122 +1540,128 @@ impl ChatTree {
         Ok(())
     }
 
+    pub async fn process_image_info(
+        &self,
+        deps: &Dependencies,
+        info: send_message_request::ImageInfo,
+        id: String,
+        file_handle: FileHandle,
+    ) -> Result<(String, ImageInfo), ServerError> {
+        let send_message_request::ImageInfo {
+            caption,
+            use_original,
+        } = info;
+
+        let media_root = &deps.config.media.media_root;
+
+        let is_animated = file_handle.mime == "image/gif";
+        let is_webp = file_handle.mime == "image/webp";
+
+        let raw = file_handle.read().await?;
+
+        // TODO: improve this code
+        let minithumbnail_id = format!("{}_jpegthumb", id);
+        let minithumbnail_path = media_root.join(&minithumbnail_id);
+        let id = use_original
+            .not()
+            .then(|| format!("{}_jpeg", id))
+            .unwrap_or(id);
+        let image_path = media_root.join(&id);
+
+        let task_fn = move || -> Result<_, ServerError> {
+            if image_path.exists() && minithumbnail_path.exists() {
+                let ifile = std::fs::File::open(&image_path)?;
+                let ifile = BufReader::new(ifile);
+                let ireader = image::io::Reader::new(ifile).with_guessed_format()?;
+                let idimensions = ireader
+                    .into_dimensions()
+                    .map_err(|_| ServerError::InternalServerError)?;
+
+                let minireader =
+                    image::io::Reader::open(&minithumbnail_path)?.with_guessed_format()?;
+                let minisize = minireader
+                    .into_dimensions()
+                    .map_err(|_| ServerError::InternalServerError)?;
+
+                let minithumbnail = Minithumbnail {
+                    width: minisize.0,
+                    height: minisize.1,
+                    data: std::fs::read(&minithumbnail_path)?,
+                };
+
+                Ok((idimensions, minithumbnail))
+            } else {
+                let image = is_webp
+                    .then(|| {
+                        let decoder = webp::Decoder::new(&raw);
+                        decoder.decode().map(|i| i.to_image())
+                    })
+                    .flatten()
+                    .or_else(|| image::load_from_memory(&raw).ok())
+                    .ok_or(ServerError::InternalServerError)?;
+
+                let image_size = image.dimensions();
+                let minithumbnail = image.thumbnail(64, 64);
+                if use_original.not() {
+                    let encoded = is_animated.not().then(|| {
+                        let rgba = image.into_rgba8();
+                        let encoder =
+                            webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
+                        encoder.encode(100.0)
+                    });
+                    let image_raw = encoded.map(|m| m.to_vec()).unwrap_or(raw);
+                    std::fs::write(&image_path, &image_raw)?;
+                }
+
+                let rgba = minithumbnail.into_rgba8();
+                let encoder = webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
+                let encoded = encoder.encode(100.0).to_vec();
+
+                std::fs::write(&minithumbnail_path, &encoded)?;
+
+                Ok((
+                    image_size,
+                    Minithumbnail {
+                        width: rgba.width(),
+                        height: rgba.height(),
+                        data: encoded,
+                    },
+                ))
+            }
+        };
+
+        let ((width, height), minithumbnail) = tokio::task::spawn_blocking(task_fn)
+            .await
+            .map_err(|_| ServerError::InternalServerError)??;
+
+        let info = ImageInfo {
+            width,
+            height,
+            minithumbnail: Some(minithumbnail),
+            caption,
+        };
+
+        Ok((id, info))
+    }
+
     pub async fn process_attachment_info(
         &self,
         deps: &Dependencies,
         info: Option<send_message_request::attachment::Info>,
         id: String,
-        size: u64,
-        mimetype: &str,
-        mut filebuf: tokio::io::BufReader<&mut tokio::fs::File>,
+        file_handle: FileHandle,
     ) -> Result<(String, Option<attachment::Info>), ServerError> {
-        use send_message_request::{attachment::Info, ImageInfo as RequestImageInfo};
-
-        let media_root = &deps.config.media.media_root;
+        use send_message_request::attachment::Info;
 
         let Some(info) = info else {
             return Ok((id, None));
         };
 
         let (id, info) = match info {
-            Info::Image(RequestImageInfo {
-                caption,
-                use_original,
-            }) => {
-                let mut raw = Vec::with_capacity(size as usize);
-                filebuf.read_to_end(&mut raw).await?;
+            Info::Image(info) => {
+                let (id, info) = self.process_image_info(deps, info, id, file_handle).await?;
 
-                let is_animated = mimetype == "image/gif";
-                let is_webp = mimetype == "image/webp";
-
-                // TODO: improve this code
-                let minithumbnail_id = format!("{}_jpegthumb", id);
-                let minithumbnail_path = media_root.join(&minithumbnail_id);
-                let id = use_original
-                    .not()
-                    .then(|| format!("{}_jpeg", id))
-                    .unwrap_or(id);
-                let image_path = media_root.join(&id);
-
-                let task_fn = move || -> Result<_, ServerError> {
-                    if image_path.exists() && minithumbnail_path.exists() {
-                        let ifile = std::fs::File::open(&image_path)?;
-                        let ifile = BufReader::new(ifile);
-                        let ireader = image::io::Reader::new(ifile).with_guessed_format()?;
-                        let idimensions = ireader
-                            .into_dimensions()
-                            .map_err(|_| ServerError::InternalServerError)?;
-
-                        let minithumbnail = std::fs::read(&minithumbnail_path)?;
-                        let mut minithumbnail = std::io::Cursor::new(minithumbnail);
-                        let minireader =
-                            image::io::Reader::new(&mut minithumbnail).with_guessed_format()?;
-                        let minisize = minireader
-                            .into_dimensions()
-                            .map_err(|_| ServerError::InternalServerError)?;
-
-                        let minithumbnail = Minithumbnail {
-                            width: minisize.0,
-                            height: minisize.1,
-                            data: minithumbnail.into_inner(),
-                        };
-
-                        Ok((idimensions, minithumbnail))
-                    } else {
-                        let image = is_webp
-                            .then(|| {
-                                let decoder = webp::Decoder::new(&raw);
-                                decoder.decode().map(|i| i.to_image())
-                            })
-                            .flatten()
-                            .or_else(|| image::load_from_memory(&raw).ok())
-                            .ok_or(ServerError::InternalServerError)?;
-
-                        let image_size = image.dimensions();
-                        let minithumbnail = image.thumbnail(64, 64);
-                        if use_original.not() {
-                            let encoded = is_animated.not().then(|| {
-                                let rgba = image.into_rgba8();
-                                let encoder = webp::Encoder::from_rgba(
-                                    rgba.as_ref(),
-                                    rgba.width(),
-                                    rgba.height(),
-                                );
-                                encoder.encode(100.0)
-                            });
-                            let image_raw = encoded.map(|m| m.to_vec()).unwrap_or(raw);
-                            std::fs::write(&image_path, &image_raw)?;
-                        }
-
-                        let rgba = minithumbnail.into_rgba8();
-                        let encoder =
-                            webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
-                        let encoded = encoder.encode(100.0).to_vec();
-
-                        std::fs::write(&minithumbnail_path, &encoded)?;
-
-                        Ok((
-                            image_size,
-                            Minithumbnail {
-                                width: rgba.width(),
-                                height: rgba.height(),
-                                data: encoded,
-                            },
-                        ))
-                    }
-                };
-
-                let ((width, height), minithumbnail) = tokio::task::spawn_blocking(task_fn)
-                    .await
-                    .map_err(|_| ServerError::InternalServerError)??;
-
-                let info = attachment::Info::Image(ImageInfo {
-                    width,
-                    height,
-                    minithumbnail: Some(minithumbnail),
-                    caption,
-                });
-                (id, info)
+                (id, attachment::Info::Image(info))
             }
         };
 
@@ -1671,22 +1673,17 @@ impl ChatTree {
         deps: &Dependencies,
         send_message_request::Attachment { id, name, info }: send_message_request::Attachment,
     ) -> ServerResult<Attachment> {
-        let media_root = deps.config.media.media_root.as_path();
+        let file_handle = deps.media.get_file(&id).await?;
 
-        let is_jpeg = is_id_jpeg(&id);
-        let (mut file, metadata, path) = get_file_handle(media_root, &id).await?;
-        let (filename_raw, mimetype_raw, file_buf) = read_bufs(&path, &mut file, is_jpeg).await?;
-        let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
-
-        let size = end - start;
+        let size = file_handle.size;
         let filename = name
             .is_empty()
-            .then(|| unsafe { String::from_utf8_unchecked(filename_raw) })
+            .then(|| file_handle.name.clone())
             .unwrap_or(name);
-        let mimetype = unsafe { String::from_utf8_unchecked(mimetype_raw) };
+        let mimetype = file_handle.mime.clone();
 
         let (id, info) = self
-            .process_attachment_info(deps, info, id, size, &mimetype, file_buf)
+            .process_attachment_info(deps, info, id, file_handle)
             .await?;
 
         Ok(Attachment {
