@@ -1,4 +1,7 @@
-use crate::api::mediaproxy::{fetch_link_metadata_response::Data, *};
+use crate::api::mediaproxy::{
+    fetch_link_metadata_response::{metadata::Data, Metadata as HarmonyMetadata},
+    *,
+};
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use reqwest::Client as HttpClient;
@@ -17,12 +20,15 @@ fn site_metadata_from_html(html: &HTML) -> SiteMetadata {
         page_title: html.title.clone().unwrap_or_default(),
         description: html.description.clone().unwrap_or_default(),
         url: html.url.clone().unwrap_or_default(),
-        image: html
+        thumbnail: html
             .opengraph
             .images
-            .last()
-            .map(|og| og.url.clone())
-            .unwrap_or_default(),
+            .iter()
+            .map(|img| site_metadata::ThumbnailImage {
+                url: img.url.clone(),
+                ..Default::default()
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -47,10 +53,17 @@ impl From<Metadata> for Data {
                 size,
             } => Data::IsMedia(MediaMetadata {
                 mimetype: mimetype.into(),
-                filename: filename.into(),
+                name: filename.into(),
                 size,
+                ..Default::default()
             }),
         }
+    }
+}
+
+impl From<Metadata> for HarmonyMetadata {
+    fn from(metadata: Metadata) -> Self {
+        HarmonyMetadata::new(Data::from(metadata))
     }
 }
 

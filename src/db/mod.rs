@@ -31,6 +31,7 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display, Formatter},
     mem::size_of,
+    pin::Pin,
 };
 
 use crate::{config::DbConfig, utils::evec::EVec, ServerError, ServerResult};
@@ -97,6 +98,12 @@ impl Batch {
 #[derive(Debug)]
 pub struct DbError {
     pub inner: Box<dyn StdError + Sync + Send>,
+}
+
+impl From<anyhow::Error> for DbError {
+    fn from(err: anyhow::Error) -> Self {
+        Self { inner: err.into() }
+    }
 }
 
 impl Display for DbError {

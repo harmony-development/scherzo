@@ -16,7 +16,6 @@ pub async fn logic(deps: &Dependencies, user_id: u64) -> ServerResult<()> {
             Some("Deleted User".to_string()),
             Some("".to_string()),
             Some(UserStatus::OfflineUnspecified.into()),
-            Some(false),
         )
         .await?;
 

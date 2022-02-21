@@ -1,7 +1,6 @@
 pub mod admin_action;
 pub mod against;
 pub mod auth;
-pub mod batch;
 pub mod chat;
 pub mod emote;
 pub mod mediaproxy;
@@ -34,7 +33,7 @@ use self::{
 };
 
 pub mod prelude {
-    pub use std::{convert::TryInto, mem::size_of};
+    pub use std::{collections::HashMap, convert::TryInto, mem::size_of};
 
     pub use crate::{
         db::{self, deser_id, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
@@ -156,13 +155,11 @@ pub fn setup_server(
     log_level: tracing::Level,
 ) -> (impl MakeRoutes, RestServiceLayer) {
     use self::{
-        auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
-        mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer,
+        auth::AuthServer, chat::ChatServer, emote::EmoteServer, mediaproxy::MediaproxyServer,
+        profile::ProfileServer, sync::SyncServer,
     };
     use crate::api::{
-        auth::auth_service_server::AuthServiceServer,
-        batch::batch_service_server::BatchServiceServer,
-        chat::chat_service_server::ChatServiceServer,
+        auth::auth_service_server::AuthServiceServer, chat::chat_service_server::ChatServiceServer,
         emote::emote_service_server::EmoteServiceServer,
         mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
         profile::profile_service_server::ProfileServiceServer,
@@ -188,17 +185,7 @@ pub fn setup_server(
     #[cfg(feature = "voice")]
     let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
 
-    let batchable_services = {
-        let profile = ProfileServiceServer::new(profile_server.batch());
-        let chat = ChatServiceServer::new(chat_server.batch());
-        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
-        combine_services!(profile, chat, mediaproxy)
-    };
-
     let rest = RestServiceLayer::new(deps.clone());
-
-    let batch_server = BatchServer::new(deps, batchable_services);
-    let batch = BatchServiceServer::new(batch_server);
 
     let server = combine_services!(
         profile,
@@ -208,8 +195,7 @@ pub fn setup_server(
         mediaproxy,
         sync,
         #[cfg(feature = "voice")]
-        voice,
-        batch
+        voice
     );
 
     (server, rest)

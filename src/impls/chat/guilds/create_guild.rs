@@ -28,7 +28,7 @@ pub async fn handler(
             name,
             picture,
             metadata,
-            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
+            guild_kind::Kind::Normal(guild_kind::Normal::new()),
         )
         .await?;
 

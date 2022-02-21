@@ -47,7 +47,6 @@ pub async fn handler(
             );
             // Add the profile entry
             let profile = Profile {
-                is_bot: false,
                 user_status: UserStatus::OfflineUnspecified.into(),
                 user_avatar: avatar,
                 user_name: username,

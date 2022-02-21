@@ -26,6 +26,7 @@ use hrpc::{
 };
 use hyper::header;
 use scherzo::{
+    api::chat::Content,
     config::Config,
     db::{
         migration::{apply_migrations, get_db_version},
@@ -329,7 +330,7 @@ async fn setup_admin_guild(deps: &Dependencies) {
             "Admin".to_string(),
             None,
             None,
-            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
+            guild_kind::Kind::Normal(guild_kind::Normal::new()),
         )
         .await
         .unwrap();
@@ -366,12 +367,7 @@ async fn setup_admin_guild(deps: &Dependencies) {
         .send_with_system(
             guild_id,
             cmd_id,
-            content::Content::TextMessage(content::TextContent {
-                content: Some(FormattedText::new(
-                    admin_action::HELP_TEXT.to_string(),
-                    Vec::new(),
-                )),
-            }),
+            Content::default().with_text(admin_action::HELP_TEXT),
         )
         .await
         .unwrap();

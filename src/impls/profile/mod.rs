@@ -79,7 +79,6 @@ impl ProfileTree {
         new_user_name: Option<String>,
         new_user_avatar: Option<String>,
         new_user_status: Option<i32>,
-        new_is_bot: Option<bool>,
     ) -> ServerResult<()> {
         let key = make_user_profile_key(user_id);
 
@@ -100,9 +99,6 @@ impl ProfileTree {
         }
         if let Some(new_status) = new_user_status {
             profile.user_status = new_status;
-        }
-        if let Some(new_is_bot) = new_is_bot {
-            profile.is_bot = new_is_bot;
         }
 
         let buf = rkyv_ser(&profile);

@@ -6,28 +6,14 @@ pub async fn handler(
 ) -> ServerResult<Response<CanInstantViewResponse>> {
     svc.deps.auth(&request).await?;
 
-    let CanInstantViewRequest { url } = request.into_message().await?;
+    let CanInstantViewRequest { url: urls } = request.into_message().await?;
 
-    if let Some(val) = get_from_cache(&url) {
-        return Ok((CanInstantViewResponse {
-            can_instant_view: matches!(val.value, Metadata::Site(_)),
-        })
-        .into_response());
+    let mut can_instant_view = HashMap::with_capacity(urls.len());
+    for url in urls {
+        let metadata = svc.fetch_metadata(url.clone()).await?;
+        let ok = matches!(metadata, Metadata::Site(_));
+        can_instant_view.insert(url, ok);
     }
 
-    let response = svc
-        .http
-        .get(url)
-        .send()
-        .await
-        .map_err(ServerError::FailedToFetchLink)?
-        .error_for_status()
-        .map_err(ServerError::FailedToFetchLink)?;
-
-    let ok = get_mimetype(response.headers()).eq("text/html");
-
-    Ok((CanInstantViewResponse {
-        can_instant_view: ok,
-    })
-    .into_response())
+    Ok(CanInstantViewResponse::new(can_instant_view).into_response())
 }

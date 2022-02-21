@@ -42,7 +42,7 @@ fn build_protocol(
             cfg
         });
 
-    for service in all_services.filter(|a| "batch.v1".ne(**a)) {
+    for service in all_services {
         builder = builder.modify_hrpc_config(|cfg| {
             cfg.type_attribute(
                 format!(".protocol.{}", service),

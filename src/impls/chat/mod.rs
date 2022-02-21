@@ -26,6 +26,7 @@ use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
 use tokio::{
+    io::AsyncReadExt,
     sync::{broadcast::Sender as BroadcastSend, mpsc::UnboundedSender},
     task::JoinHandle,
 };
@@ -478,7 +479,7 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(15, 8)]
         send_message, SendMessageRequest, SendMessageResponse;
         #[rate(5, 7)]
-        query_has_permission, QueryHasPermissionRequest, QueryHasPermissionResponse;
+        has_permission, HasPermissionRequest, HasPermissionResponse;
         #[rate(5, 7)]
         set_permissions, SetPermissionsRequest, SetPermissionsResponse;
         #[rate(7, 5)]
@@ -1011,7 +1012,7 @@ impl ChatTree {
             }))
     }
 
-    pub async fn query_has_permission_logic(
+    pub async fn has_permission_logic(
         &self,
         guild_id: u64,
         channel_id: Option<u64>,
@@ -1046,6 +1047,8 @@ impl ChatTree {
         Ok(false)
     }
 
+    // TODO: make this return bool so we can differ db errors
+    // from actual permission error
     pub async fn check_perms(
         &self,
         guild_id: u64,
@@ -1061,7 +1064,7 @@ impl ChatTree {
             }
         } else if is_owner
             || self
-                .query_has_permission_logic(guild_id, channel_id, user_id, check_for)
+                .has_permission_logic(guild_id, channel_id, user_id, check_for)
                 .await?
         {
             return Ok(());
@@ -1425,12 +1428,12 @@ impl ChatTree {
         }
     }
 
-    pub async fn query_has_permission_request(
+    pub async fn has_permission_request(
         &self,
         user_id: u64,
-        request: QueryHasPermissionRequest,
-    ) -> ServerResult<QueryHasPermissionResponse> {
-        let QueryHasPermissionRequest {
+        request: HasPermissionRequest,
+    ) -> ServerResult<HasPermissionResponse> {
+        let HasPermissionRequest {
             guild_id,
             channel_id,
             check_for,
@@ -1450,12 +1453,16 @@ impl ChatTree {
             return Err(ServerError::EmptyPermissionQuery.into());
         }
 
-        Ok(QueryHasPermissionResponse {
-            ok: self
+        let mut perms = Vec::with_capacity(check_for.len());
+        for check_for in check_for {
+            let ok = self
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .await
-                .is_ok(),
-        })
+                .is_ok();
+            perms.push(Permission::new(check_for, ok));
+        }
+
+        Ok(HasPermissionResponse::new(perms))
     }
 
     pub async fn get_next_message_id(
@@ -1489,19 +1496,14 @@ impl ChatTree {
 
     pub async fn send_message_logic(
         &self,
+        guild_id: u64,
+        channel_id: u64,
         user_id: u64,
-        request: SendMessageRequest,
+        content: Content,
+        overrides: Option<Overrides>,
+        in_reply_to: Option<u64>,
+        metadata: Option<Metadata>,
     ) -> ServerResult<(u64, HarmonyMessage)> {
-        let SendMessageRequest {
-            guild_id,
-            channel_id,
-            content,
-            echo_id: _,
-            overrides,
-            in_reply_to,
-            metadata,
-        } = request;
-
         let message_id = self.get_next_message_id(guild_id, channel_id).await?;
         let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
@@ -1513,7 +1515,7 @@ impl ChatTree {
             author_id: user_id,
             created_at,
             edited_at,
-            content,
+            content: Some(content),
             in_reply_to,
             overrides,
             reactions: Vec::new(),
@@ -1546,247 +1548,189 @@ impl ChatTree {
         Ok(())
     }
 
+    pub async fn process_attachment_info(
+        &self,
+        deps: &Dependencies,
+        info: Option<send_message_request::attachment::Info>,
+        id: String,
+        size: u64,
+        mimetype: &str,
+        mut filebuf: tokio::io::BufReader<&mut tokio::fs::File>,
+    ) -> Result<(String, Option<attachment::Info>), ServerError> {
+        use send_message_request::{attachment::Info, ImageInfo as RequestImageInfo};
+
+        let media_root = &deps.config.media.media_root;
+
+        let Some(info) = info else {
+            return Ok((id, None));
+        };
+
+        let (id, info) = match info {
+            Info::Image(RequestImageInfo {
+                caption,
+                use_original,
+            }) => {
+                let mut raw = Vec::with_capacity(size as usize);
+                filebuf.read_to_end(&mut raw).await?;
+
+                let is_animated = mimetype == "image/gif";
+                let is_webp = mimetype == "image/webp";
+
+                // TODO: improve this code
+                let minithumbnail_id = format!("{}_jpegthumb", id);
+                let minithumbnail_path = media_root.join(&minithumbnail_id);
+                let id = use_original
+                    .not()
+                    .then(|| format!("{}_jpeg", id))
+                    .unwrap_or(id);
+                let image_path = media_root.join(&id);
+
+                let task_fn = move || -> Result<_, ServerError> {
+                    if image_path.exists() && minithumbnail_path.exists() {
+                        let ifile = std::fs::File::open(&image_path)?;
+                        let ifile = BufReader::new(ifile);
+                        let ireader = image::io::Reader::new(ifile).with_guessed_format()?;
+                        let idimensions = ireader
+                            .into_dimensions()
+                            .map_err(|_| ServerError::InternalServerError)?;
+
+                        let minithumbnail = std::fs::read(&minithumbnail_path)?;
+                        let mut minithumbnail = std::io::Cursor::new(minithumbnail);
+                        let minireader =
+                            image::io::Reader::new(&mut minithumbnail).with_guessed_format()?;
+                        let minisize = minireader
+                            .into_dimensions()
+                            .map_err(|_| ServerError::InternalServerError)?;
+
+                        let minithumbnail = Minithumbnail {
+                            width: minisize.0,
+                            height: minisize.1,
+                            data: minithumbnail.into_inner(),
+                        };
+
+                        Ok((idimensions, minithumbnail))
+                    } else {
+                        let image = is_webp
+                            .then(|| {
+                                let decoder = webp::Decoder::new(&raw);
+                                decoder.decode().map(|i| i.to_image())
+                            })
+                            .flatten()
+                            .or_else(|| image::load_from_memory(&raw).ok())
+                            .ok_or(ServerError::InternalServerError)?;
+
+                        let image_size = image.dimensions();
+                        let minithumbnail = image.thumbnail(64, 64);
+                        if use_original.not() {
+                            let encoded = is_animated.not().then(|| {
+                                let rgba = image.into_rgba8();
+                                let encoder = webp::Encoder::from_rgba(
+                                    rgba.as_ref(),
+                                    rgba.width(),
+                                    rgba.height(),
+                                );
+                                encoder.encode(100.0)
+                            });
+                            let image_raw = encoded.map(|m| m.to_vec()).unwrap_or(raw);
+                            std::fs::write(&image_path, &image_raw)?;
+                        }
+
+                        let rgba = minithumbnail.into_rgba8();
+                        let encoder =
+                            webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
+                        let encoded = encoder.encode(100.0).to_vec();
+
+                        std::fs::write(&minithumbnail_path, &encoded)?;
+
+                        Ok((
+                            image_size,
+                            Minithumbnail {
+                                width: rgba.width(),
+                                height: rgba.height(),
+                                data: encoded,
+                            },
+                        ))
+                    }
+                };
+
+                let ((width, height), minithumbnail) = tokio::task::spawn_blocking(task_fn)
+                    .await
+                    .map_err(|_| ServerError::InternalServerError)??;
+
+                let info = attachment::Info::Image(ImageInfo {
+                    width,
+                    height,
+                    minithumbnail: Some(minithumbnail),
+                    caption,
+                });
+                (id, info)
+            }
+        };
+
+        Ok((id, Some(info)))
+    }
+
+    pub async fn process_attachment(
+        &self,
+        deps: &Dependencies,
+        send_message_request::Attachment { id, name, info }: send_message_request::Attachment,
+    ) -> ServerResult<Attachment> {
+        let media_root = deps.config.media.media_root.as_path();
+
+        let is_jpeg = is_id_jpeg(&id);
+        let (mut file, metadata, path) = get_file_handle(media_root, &id).await?;
+        let (filename_raw, mimetype_raw, file_buf) = read_bufs(&path, &mut file, is_jpeg).await?;
+        let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
+
+        let size = end - start;
+        let filename = name
+            .is_empty()
+            .then(|| unsafe { String::from_utf8_unchecked(filename_raw) })
+            .unwrap_or(name);
+        let mimetype = unsafe { String::from_utf8_unchecked(mimetype_raw) };
+
+        let (id, info) = self
+            .process_attachment_info(deps, info, id, size, &mimetype, file_buf)
+            .await?;
+
+        Ok(Attachment {
+            id,
+            name: filename,
+            mimetype,
+            size: size as u32,
+            info,
+        })
+    }
+
     pub async fn process_message_content(
         &self,
-        content: Option<Content>,
-        media_root: &Path,
-        host: &str,
+        deps: &Dependencies,
+        content: Option<send_message_request::Content>,
     ) -> ServerResult<Content> {
-        use content::Content as MsgContent;
-
-        let inner_content = content.and_then(|c| c.content);
-        let content = if let Some(content) = inner_content {
-            let content = match content {
-                content::Content::TextMessage(text) => {
-                    if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    content::Content::TextMessage(text)
-                }
-                content::Content::PhotoMessage(mut photos) => {
-                    if photos.photos.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    for photo in photos.photos.drain(..).collect::<Vec<_>>() {
-                        // TODO: return error for invalid hmc
-                        if let Ok(file_id) = FileId::from_str(&photo.hmc) {
-                            // TODO: check if the hmc host matches ours, if not fetch the image from the other host
-                            let id = match &file_id {
-                                FileId::External(_) => bail!((
-                                    "h.photo-cant-have-external-url",
-                                    "message photo contents cant use external URL"
-                                )),
-                                FileId::Hmc(hmc) => hmc.id(),
-                                FileId::Id(id) => id.as_str(),
-                            };
-
-                            let image_id = format!("{}_{}", id, "jpeg");
-                            let image_path = media_root.join(&image_id);
-                            let minithumbnail_id = format!("{}_{}", id, "jpegthumb");
-                            let minithumbnail_path = media_root.join(&minithumbnail_id);
-
-                            let ((file_size, isize), minithumbnail) =
-                                if image_path.exists() && minithumbnail_path.exists() {
-                                    let minithumbnail = tokio::fs::read(&minithumbnail_path)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    let ifile = tokio::fs::File::open(&image_path)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    let file_size =
-                                        ifile.metadata().await.map_err(ServerError::from)?.len();
-                                    let ifile = BufReader::new(ifile.into_std().await);
-                                    let ireader = image::io::Reader::new(ifile)
-                                        .with_guessed_format()
-                                        .map_err(ServerError::from)?;
-                                    // this should be cheap and shouldnt block...
-                                    let isize = ireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
-
-                                    let mut minithumbnail = std::io::Cursor::new(minithumbnail);
-                                    let minireader = image::io::Reader::new(&mut minithumbnail)
-                                        .with_guessed_format()
-                                        .map_err(ServerError::from)?;
-                                    let minisize = minireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
-
-                                    (
-                                        (file_size as u32, isize),
-                                        Minithumbnail {
-                                            width: minisize.0,
-                                            height: minisize.1,
-                                            data: minithumbnail.into_inner(),
-                                        },
-                                    )
-                                } else {
-                                    let (_, mime, data, _) = get_file_full(media_root, id).await?;
-
-                                    let is_animated = mime == "image/gif";
-
-                                    let (minithumbnail, image_size, image_raw, data) =
-                                        tokio::task::spawn_blocking(move || {
-                                            let image = (mime == "image/webp")
-                                                .then(|| {
-                                                    let decoder = webp::Decoder::new(&data);
-                                                    decoder.decode().map(|i| i.to_image())
-                                                })
-                                                .flatten()
-                                                .or_else(|| image::load_from_memory(&data).ok())
-                                                .ok_or(ServerError::InternalServerError)?;
-
-                                            let image_size = image.dimensions();
-                                            let minithumbnail = image.thumbnail(64, 64);
-                                            let encoded = is_animated.not().then(|| {
-                                                let rgba = image.into_rgba8();
-                                                let encoder = webp::Encoder::from_rgba(
-                                                    rgba.as_ref(),
-                                                    rgba.width(),
-                                                    rgba.height(),
-                                                );
-                                                encoder.encode(100.0)
-                                            });
-                                            ServerResult::Ok((
-                                                minithumbnail,
-                                                image_size,
-                                                encoded.map(|m| m.to_vec()),
-                                                data,
-                                            ))
-                                        })
-                                        .await
-                                        .map_err(|_| ServerError::InternalServerError)??;
-
-                                    let image_raw = image_raw.unwrap_or(data);
-
-                                    tokio::fs::write(&image_path, &image_raw)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    let (minithumb_size, minithumbnail_raw) =
-                                        tokio::task::spawn_blocking(move || {
-                                            let rgba = minithumbnail.into_rgba8();
-                                            let encoder = webp::Encoder::from_rgba(
-                                                rgba.as_ref(),
-                                                rgba.width(),
-                                                rgba.height(),
-                                            );
-                                            let encoded = encoder.encode(100.0);
-
-                                            ServerResult::Ok(((64, 64), encoded.to_vec()))
-                                        })
-                                        .await
-                                        .map_err(|_| ServerError::InternalServerError)??;
-
-                                    tokio::fs::write(&minithumbnail_path, &minithumbnail_raw)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    (
-                                        (image_raw.len() as u32, image_size),
-                                        Minithumbnail {
-                                            width: minithumb_size.0,
-                                            height: minithumb_size.1,
-                                            data: minithumbnail_raw,
-                                        },
-                                    )
-                                };
-
-                            photos.photos.push(Photo {
-                                hmc: Hmc::new(host, image_id).unwrap().into(),
-                                minithumbnail: Some(minithumbnail),
-                                width: isize.0,
-                                height: isize.1,
-                                file_size,
-                                ..photo
-                            });
-                        } else {
-                            photos.photos.push(photo);
-                        }
-                    }
-                    content::Content::PhotoMessage(photos)
-                }
-                content::Content::AttachmentMessage(mut files) => {
-                    if files.files.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    for attachment in files.files.drain(..).collect::<Vec<_>>() {
-                        if let Ok(id) = FileId::from_str(&attachment.id) {
-                            let fill_file_local = move |attachment: Attachment, id: String| async move {
-                                let is_jpeg = is_id_jpeg(&id);
-                                let (mut file, metadata, path) =
-                                    get_file_handle(media_root, &id).await?;
-                                let (filename_raw, mimetype_raw, _) =
-                                    read_bufs(&path, &mut file, is_jpeg).await?;
-                                let (start, end) = calculate_range(
-                                    &filename_raw,
-                                    &mimetype_raw,
-                                    &metadata,
-                                    is_jpeg,
-                                );
-                                let size = end - start;
-
-                                Result::<_, ServerError>::Ok(Attachment {
-                                    name: attachment
-                                        .name
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(filename_raw)
-                                        })
-                                        .unwrap_or(attachment.name),
-                                    size: attachment
-                                        .size
-                                        .eq(&0)
-                                        .then(|| size as u32)
-                                        .unwrap_or(attachment.size),
-                                    mimetype: attachment
-                                        .mimetype
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(mimetype_raw)
-                                        })
-                                        .unwrap_or(attachment.mimetype),
-                                    ..attachment
-                                })
-                            };
-                            match id {
-                                FileId::Hmc(hmc) => {
-                                    // TODO: fetch file from remote host if its not local
-                                    let id = hmc.id();
-                                    files
-                                        .files
-                                        .push(fill_file_local(attachment, id.to_string()).await?);
-                                }
-                                FileId::Id(id) => {
-                                    files.files.push(fill_file_local(attachment, id).await?)
-                                }
-                                _ => files.files.push(attachment),
-                            }
-                        } else {
-                            files.files.push(attachment);
-                        }
-                    }
-                    content::Content::AttachmentMessage(files)
-                }
-                content::Content::EmbedMessage(embed) => {
-                    if embed.embeds.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    content::Content::EmbedMessage(embed)
-                }
-                MsgContent::InviteAccepted(_)
-                | MsgContent::InviteRejected(_)
-                | MsgContent::RoomUpgradedToGuild(_) => {
-                    bail!(ServerError::ContentCantBeSentByUser);
-                }
-            };
-            Content {
-                content: Some(content),
-            }
-        } else {
+        let Some(content) = content else {
             bail!(ServerError::MessageContentCantBeEmpty);
+        };
+
+        let is_text_empty = content.text.is_empty();
+        let is_embeds_empty = content.embeds.is_empty();
+        let is_attachments_empty = content.attachments.is_empty();
+
+        // check if message content is empty
+        if is_attachments_empty && is_embeds_empty && is_text_empty {
+            bail!(ServerError::MessageContentCantBeEmpty);
+        }
+
+        let mut attachments = Vec::with_capacity(content.attachments.len());
+        for attachment in content.attachments {
+            attachments.push(self.process_attachment(deps, attachment).await?);
+        }
+
+        let content = Content {
+            text: content.text,
+            text_formats: content.text_formats,
+            embeds: content.embeds,
+            attachments,
+            extra: None,
         };
 
         Ok(content)
@@ -1802,20 +1746,23 @@ impl ChatTree {
         &self,
         guild_id: u64,
         channel_id: u64,
-        content: content::Content,
+        content: Content,
     ) -> ServerResult<(u64, HarmonyMessage)> {
-        let request = SendMessageRequest::default()
-            .with_guild_id(guild_id)
-            .with_channel_id(channel_id)
-            .with_content(Content {
-                content: Some(content),
-            })
-            .with_overrides(Overrides {
-                username: Some("System".to_string()),
-                reason: Some(overrides::Reason::SystemMessage(Empty {})),
-                avatar: None,
-            });
-        self.send_message_logic(0, request).await
+        let overrides = Overrides {
+            username: Some("System".to_string()),
+            reason: Some(overrides::Reason::SystemMessage(Empty {})),
+            avatar: None,
+        };
+        self.send_message_logic(
+            0,
+            guild_id,
+            channel_id,
+            content,
+            Some(overrides),
+            None,
+            None,
+        )
+        .await
     }
 
     pub async fn update_reaction(

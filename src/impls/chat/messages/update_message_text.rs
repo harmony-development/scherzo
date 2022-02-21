@@ -26,8 +26,11 @@ pub async fn handler(
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
-    if new_content.as_ref().map_or(true, |f| f.text.is_empty()) {
-        return Err(ServerError::MessageContentCantBeEmpty.into());
+    let Some(new_content) = new_content else {
+        bail!(ServerError::MessageContentCantBeEmpty);
+    };
+    if new_content.text.is_empty() {
+        bail!(ServerError::MessageContentCantBeEmpty);
     }
 
     let key = make_msg_key(guild_id, channel_id, message_id);
@@ -47,17 +50,15 @@ pub async fn handler(
         .deserialize(&mut SharedDeserializeMap::default())
         .unwrap();
 
-    let msg_content = if let Some(content) = &mut message.content {
-        content
-    } else {
-        message.content = Some(Content::default());
-        message.content.as_mut().unwrap()
-    };
-    msg_content.content = Some(content::Content::TextMessage(content::TextContent {
-        content: new_content.clone(),
-    }));
-
     let edited_at = get_time_secs();
+    if let Some(content) = &mut message.content {
+        content.text.clear();
+        content.text.push_str(&new_content.text);
+        content.text_formats.clear();
+        content
+            .text_formats
+            .extend(new_content.format.iter().cloned());
+    }
     message.edited_at = Some(edited_at);
 
     let buf = rkyv_ser(&message);
@@ -70,7 +71,7 @@ pub async fn handler(
             channel_id,
             message_id,
             edited_at,
-            new_content,
+            new_content: Some(new_content),
         }),
         Some(PermCheck::new(
             guild_id,

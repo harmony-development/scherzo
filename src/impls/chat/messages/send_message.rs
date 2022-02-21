@@ -24,32 +24,33 @@ pub async fn handler(
 
     chat_tree.process_message_overrides(request.overrides.as_ref())?;
     let content = chat_tree
-        .process_message_content(
-            request.content.take(),
-            svc.deps.config.media.media_root.as_path(),
-            &svc.deps.config.host,
-        )
+        .process_message_content(svc.deps.as_ref(), request.content.take())
         .await?;
-    request.content = Some(content);
-    let (message_id, message) = chat_tree.send_message_logic(user_id, request).await?;
 
-    let is_cmd_channel = chat_tree
+    let admin_action = chat_tree
         .admin_guild_keys
         .get()
-        .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id));
+        .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id))
+        .then(|| content.text.parse::<admin_action::AdminAction>().ok())
+        .flatten();
 
-    let action_content = if is_cmd_channel {
-        if let Some(content::Content::TextMessage(content::TextContent {
-            content: Some(FormattedText { text, .. }),
-        })) = message.content.as_ref().and_then(|c| c.content.as_ref())
-        {
-            let msg = admin_action::run_str(svc.deps.as_ref(), text)
-                .await
-                .unwrap_or_else(|err| format!("error: {}", err));
-            Some(msg)
-        } else {
-            None
-        }
+    let (message_id, message) = chat_tree
+        .send_message_logic(
+            guild_id,
+            channel_id,
+            user_id,
+            content,
+            request.overrides,
+            request.in_reply_to,
+            request.metadata,
+        )
+        .await?;
+
+    let action_content = if let Some(action) = admin_action {
+        let msg = admin_action::run(svc.deps.as_ref(), action)
+            .await
+            .unwrap_or_else(|err| format!("error: {}", err));
+        Some(msg)
     } else {
         None
     };
@@ -73,9 +74,7 @@ pub async fn handler(
     );
 
     if let Some(msg) = action_content {
-        let content = content::Content::TextMessage(content::TextContent {
-            content: Some(FormattedText::new(msg, Vec::new())),
-        });
+        let content = Content::default().with_text(msg);
         let (message_id, message) = chat_tree
             .send_with_system(guild_id, channel_id, content)
             .await?;

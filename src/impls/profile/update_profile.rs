@@ -11,7 +11,6 @@ pub async fn handler(
         new_user_name,
         new_user_avatar,
         new_user_status,
-        new_is_bot,
     } = request.into_message().await?;
 
     if let Some(username) = new_user_name.as_deref() {
@@ -27,7 +26,6 @@ pub async fn handler(
             new_user_name.clone(),
             new_user_avatar.clone(),
             new_user_status,
-            new_is_bot,
         )
         .await?;
 
@@ -38,7 +36,6 @@ pub async fn handler(
             new_username: new_user_name,
             new_avatar: new_user_avatar,
             new_status: new_user_status,
-            new_is_bot,
             new_account_kind: None,
         }),
         None,

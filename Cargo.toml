@@ -28,7 +28,7 @@ sqlite = ["sqlx", "itertools"]
 
 [dependencies]
 scherzo_derive = { path = "./scherzo_derive" }
-harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
+harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "refactored", features = [
     "gen_all_protocols",
     "gen_client",
     "gen_server",
@@ -85,7 +85,7 @@ rand = "0.8"
 argon2 = "0.3"
 ed25519-compact = "1"
 sha3 = "0.10"
-ahash = { version = "0.7", default-features = false }
+ahash = "0.7"
 
 tokio = { version = "1.16", features = [
     "macros",
@@ -94,7 +94,7 @@ tokio = { version = "1.16", features = [
     "tracing",
     "signal",
 ] }
-tokio-util = "0.6.7"
+tokio-util = { version = "0.7", features = ["io"] }
 swimmer = "0.3"
 
 tracing = "0.1"
@@ -106,9 +106,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "std",
 ] }
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main" }
-opentelemetry = { version = "0.16", features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.15", features = ["rt-tokio"] }
-tracing-opentelemetry = { version = "0.16", default-features = false }
+opentelemetry = { version = "0.17", features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.16", features = ["rt-tokio"] }
+tracing-opentelemetry = { version = "0.17" }
 
 pin-project = "1"
 
@@ -138,7 +138,7 @@ mediasoup = { version = "0.9", optional = true }
 tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
 
 [build-dependencies]
-harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
+harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "refactored", features = [
     "client",
     "server",
     "all_permissions",
@@ -179,6 +179,4 @@ key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
 markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
-opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
 swimmer = { git = "https://github.com/yusdacra/swimmer-rs.git", branch = "master" }

@@ -2,14 +2,14 @@ use super::*;
 
 pub async fn handler(
     svc: &ChatServer,
-    request: Request<QueryHasPermissionRequest>,
-) -> ServerResult<Response<QueryHasPermissionResponse>> {
+    request: Request<HasPermissionRequest>,
+) -> ServerResult<Response<HasPermissionResponse>> {
     let user_id = svc.deps.auth(&request).await?;
     let request = request.into_message().await?;
 
     svc.deps
         .chat_tree
-        .query_has_permission_request(user_id, request)
+        .has_permission_request(user_id, request)
         .await
         .map(IntoResponse::into_response)
 }

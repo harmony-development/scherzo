@@ -159,7 +159,7 @@ fn form<'a>(
             .map(|(name, r#type)| {
                 auth_step::form::FormField::new(name.to_string(), r#type.to_string())
             })
-            .collect(),
+            .collect::<Vec<_>>(),
     )))
 }
 
@@ -180,7 +180,7 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
             AuthStep {
                 can_go_back: true,
                 fallback_url: String::default(),
-                step: Some(auth_step::Step::new_choice(auth_step::Choice::new(
+                step: Some(auth_step::Step::Choice(auth_step::Choice::new(
                     "other-options".to_string(),
                     options,
                 ))),

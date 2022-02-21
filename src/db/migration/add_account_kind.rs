@@ -7,7 +7,6 @@ use db::{
     rkyv_ser, Batch, DbError,
 };
 use harmony_rust_sdk::api::profile::AccountKind;
-use hrpc::box_error;
 
 use crate::api::profile::Profile as NewProfile;
 use profile::Profile as OldProfile;
@@ -24,7 +23,6 @@ pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {
                     let new_val = rkyv_ser(&NewProfile {
                         user_avatar: old_profile.user_avatar,
                         account_kind: AccountKind::FullUnspecified.into(),
-                        is_bot: old_profile.is_bot,
                         user_name: old_profile.user_name,
                         user_status: old_profile.user_status,
                     });
@@ -33,12 +31,12 @@ pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {
                     // if it's new, then its already fine
                     continue;
                 } else {
-                    old_profile.map_err(|err| DbError {
-                        inner: box_error(AnyhowError(anyhow::anyhow!(
-                            "profile with key {} has invalid state: {}",
-                            String::from_utf8_lossy(key.as_ref()),
-                            err
-                        ))),
+                    old_profile.map_err(|err| {
+                        DbError::from(
+                            anyhow::anyhow!("profile has invalid state")
+                                .context(format!("rkyv error: {}", err))
+                                .context(format!("key: {}", String::from_utf8_lossy(key.as_ref()))),
+                        )
                     })?;
                 }
             }
@@ -52,14 +50,3 @@ pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {
 
 scherzo_derive::define_proto_mod!(before_account_kind, profile);
 scherzo_derive::define_proto_mod!(before_account_kind, harmonytypes);
-
-#[derive(Debug)]
-struct AnyhowError(anyhow::Error);
-
-impl Display for AnyhowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl std::error::Error for AnyhowError {}

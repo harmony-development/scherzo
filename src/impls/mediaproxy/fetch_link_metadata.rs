@@ -6,9 +6,14 @@ pub async fn handler(
 ) -> ServerResult<Response<FetchLinkMetadataResponse>> {
     svc.deps.auth(&request).await?;
 
-    let FetchLinkMetadataRequest { url } = request.into_message().await?;
+    let FetchLinkMetadataRequest { url: urls } = request.into_message().await?;
 
-    let data = svc.fetch_metadata(url).await?.into();
+    let mut data = HashMap::with_capacity(urls.len());
+    for url in urls {
+        let metadata = svc.fetch_metadata(url.clone()).await?.into();
+        data.insert(url, metadata);
+    }
 
-    Ok((FetchLinkMetadataResponse { data: Some(data) }).into_response())
+    // TODO: return fetch errors
+    Ok(FetchLinkMetadataResponse::new(data, HashMap::new()).into_response())
 }

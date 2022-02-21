@@ -6,6 +6,7 @@ use crate::api::{
 };
 use ahash::RandomState;
 use dashmap::DashMap;
+use harmony_rust_sdk::api::profile::AccountKind;
 use hrpc::server::gen_prelude::BoxFuture;
 use hyper::{http, HeaderMap};
 use rand::{Rng, SeedableRng};
@@ -142,7 +143,7 @@ impl AuthServer {
                                                     atime_key(id),
                                                     get_time_secs().to_be_bytes(),
                                                 );
-                                            } else if !profile.is_bot
+                                            } else if profile.account_kind() != AccountKind::Bot
                                                 && auth_how_old >= SESSION_EXPIRE
                                             {
                                                 tracing::debug!("user {} session has expired", id);
