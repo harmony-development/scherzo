@@ -31,7 +31,7 @@ use crate::api::{
     rest::{extract_file_info_from_download_response, FileId},
 };
 use hrpc::common::future::Ready;
-use http::{header, HeaderValue, Method, StatusCode, Uri};
+use http::{header, HeaderValue, Method, StatusCode};
 use hyper::Body;
 use pin_project::pin_project;
 use tokio::{

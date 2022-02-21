@@ -31,7 +31,6 @@ use std::{
     error::Error as StdError,
     fmt::{self, Display, Formatter},
     mem::size_of,
-    pin::Pin,
 };
 
 use crate::{config::DbConfig, utils::evec::EVec, ServerError, ServerResult};

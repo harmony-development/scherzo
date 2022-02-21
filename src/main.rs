@@ -11,7 +11,7 @@ use std::{
 };
 
 use harmony_rust_sdk::api::{
-    chat::{content, guild_kind, ChannelKind, FormattedText, Permission},
+    chat::{guild_kind, ChannelKind, Permission},
     exports::hrpc::server::transport::{http::Hyper, Transport},
 };
 use hrpc::{

@@ -1,17 +1,13 @@
-use std::{
-    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
-    path::Path, str::FromStr,
-};
+use std::{collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not};
 
 use crate::api::{
     chat::{
         get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
-        stream_event, FormattedText, Message as HarmonyMessage, *,
+        stream_event, Message as HarmonyMessage, *,
     },
     emote::Emote,
     exports::hrpc::{server::socket::Socket, Request},
     harmonytypes::{item_position, Empty, ItemPosition, Metadata},
-    rest::FileId,
     sync::{
         event::{
             Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
@@ -19,7 +15,6 @@ use crate::api::{
         },
         Event as DispatchEvent,
     },
-    Hmc,
 };
 use image::GenericImageView;
 use rand::{Rng, SeedableRng};
@@ -37,7 +32,7 @@ use crate::{
     impls::{
         get_time_millisecs,
         prelude::*,
-        rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
+        rest::download::{calculate_range, get_file_handle, is_id_jpeg, read_bufs},
         sync::EventDispatch,
     },
 };
@@ -1494,6 +1489,7 @@ impl ChatTree {
         Ok(id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_message_logic(
         &self,
         guild_id: u64,

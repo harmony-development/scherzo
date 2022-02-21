@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use super::*;
 
 use db::{

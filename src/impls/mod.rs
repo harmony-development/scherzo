@@ -176,16 +176,16 @@ pub fn setup_server(
     #[cfg(feature = "voice")]
     let voice_server = self::voice::VoiceServer::new(deps.clone(), log_level);
 
-    let profile = ProfileServiceServer::new(profile_server.clone());
+    let profile = ProfileServiceServer::new(profile_server);
     let emote = EmoteServiceServer::new(emote_server);
     let auth = AuthServiceServer::new(auth_server);
-    let chat = ChatServiceServer::new(chat_server.clone());
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
+    let chat = ChatServiceServer::new(chat_server);
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
     let sync = PostboxServiceServer::new(sync_server);
     #[cfg(feature = "voice")]
     let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
 
-    let rest = RestServiceLayer::new(deps.clone());
+    let rest = RestServiceLayer::new(deps);
 
     let server = combine_services!(
         profile,
