@@ -48,10 +48,9 @@ impl MediaStore {
         mut chunks: impl Stream<Item = Result<Bytes, ServerError>> + Unpin,
         name: &str,
         mime: &str,
-        write_to: Option<PathBuf>,
     ) -> Result<SmolStr, ServerError> {
         let id = gen_rand_inline_str();
-        let path = write_to.unwrap_or_else(|| self.root.join(id.as_str()));
+        let path = self.root.join(id.as_str());
         if path.exists() {
             return Ok(id);
         }

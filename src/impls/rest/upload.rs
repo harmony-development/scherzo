@@ -82,7 +82,7 @@ impl Service<HttpRequest> for UploadService {
                             .to_string();
                         let chunks = field.map_err(ServerError::MultipartError);
 
-                        let id = match deps.media.write_file(chunks, &name, &mime, None).await {
+                        let id = match deps.media.write_file(chunks, &name, &mime).await {
                             Ok(id) => id,
                             Err(err) => return Ok(err.into_rest_http_response()),
                         };
