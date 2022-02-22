@@ -83,7 +83,6 @@ allow = [
     "ISC",
     "OpenSSL",
     "Zlib",
-    "CC0-1.0",
     "BSL-1.0",
     "0BSD",
 ]
@@ -210,7 +209,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
     "https://github.com/servo/html5ever.git",
-    "https://github.com/open-telemetry/opentelemetry-rust.git",
     "https://github.com/tokio-rs/console.git",
     "https://github.com/image-rs/image.git",
 ]

@@ -84,7 +84,6 @@ itertools = { version = "0.10", default-features = false, features = [
 rand = "0.8"
 argon2 = "0.3"
 ed25519-compact = "1"
-sha3 = "0.10"
 ahash = "0.7"
 
 tokio = { version = "1.16", features = [
@@ -95,7 +94,6 @@ tokio = { version = "1.16", features = [
     "signal",
 ] }
 tokio-util = { version = "0.7", features = ["io"] }
-swimmer = "0.3"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
@@ -179,4 +177,3 @@ key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
 markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
-swimmer = { git = "https://github.com/yusdacra/swimmer-rs.git", branch = "master" }

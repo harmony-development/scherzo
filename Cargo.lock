@@ -1296,12 +1296,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keccak"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67c21572b4949434e4fc1e1978b99c5f77064153c59d998bf13ecd96fb5ecba7"
-
-[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2329,11 +2323,9 @@ dependencies = [
  "scherzo_derive",
  "serde",
  "serde_json",
- "sha3",
  "sled",
  "smol_str",
  "sqlx",
- "swimmer",
  "tikv-jemallocator",
  "tokio",
  "tokio-util 0.7.0",
@@ -2495,16 +2487,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest 0.10.3",
-]
-
-[[package]]
-name = "sha3"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881bf8156c87b6301fc5ca6b27f11eeb2761224c7081e69b409d5a1951a70c86"
-dependencies = [
- "digest 0.10.3",
- "keccak",
 ]
 
 [[package]]
@@ -2724,14 +2706,6 @@ name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
-
-[[package]]
-name = "swimmer"
-version = "0.3.0"
-source = "git+https://github.com/yusdacra/swimmer-rs.git?branch=master#5f5735a6f8a6e3c61624ab7756943c8fa0cc2793"
-dependencies = [
- "thread_local",
-]
 
 [[package]]
 name = "syn"
