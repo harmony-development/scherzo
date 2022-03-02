@@ -28,7 +28,7 @@ jobs:
     name: Build scherzo
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
 
@@ -71,7 +71,7 @@ jobs:
     name: Build release binaries
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         submodules: true
 
@@ -121,7 +121,7 @@ jobs:
     if: github.event_name == 'push'
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: 'harmony-development/ansible'
       - run: 'echo "$SSH_KEY" > key && chmod 600 key'
