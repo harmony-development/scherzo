@@ -4,13 +4,13 @@ use super::*;
 
 pub async fn handler(
     svc: &ChatServer,
-    request: Request<UpdateMessageTextRequest>,
-) -> ServerResult<Response<UpdateMessageTextResponse>> {
+    request: Request<UpdateMessageContentRequest>,
+) -> ServerResult<Response<UpdateMessageContentResponse>> {
     let user_id = svc.deps.auth(&request).await?;
 
     let request = request.into_message().await?;
 
-    let UpdateMessageTextRequest {
+    let UpdateMessageContentRequest {
         guild_id,
         channel_id,
         message_id,
@@ -26,12 +26,9 @@ pub async fn handler(
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
-    let Some(new_content) = new_content else {
-        bail!(ServerError::MessageContentCantBeEmpty);
-    };
-    if new_content.text.is_empty() {
-        bail!(ServerError::MessageContentCantBeEmpty);
-    }
+    let new_content = chat_tree
+        .process_message_content(&svc.deps, new_content)
+        .await?;
 
     let key = make_msg_key(guild_id, channel_id, message_id);
     let Some(message_raw) = chat_tree.get(key).await? else {
@@ -51,14 +48,7 @@ pub async fn handler(
         .unwrap();
 
     let edited_at = get_time_secs();
-    if let Some(content) = &mut message.content {
-        content.text.clear();
-        content.text.push_str(&new_content.text);
-        content.text_formats.clear();
-        content
-            .text_formats
-            .extend(new_content.format.iter().cloned());
-    }
+    message.content = Some(new_content.clone());
     message.edited_at = Some(edited_at);
 
     let buf = rkyv_ser(&message);
@@ -82,5 +72,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((UpdateMessageTextResponse {}).into_response())
+    Ok(UpdateMessageContentResponse::new().into_response())
 }

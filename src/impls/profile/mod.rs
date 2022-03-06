@@ -13,6 +13,7 @@ pub mod get_app_data;
 pub mod get_profile;
 pub mod set_app_data;
 pub mod update_profile;
+pub mod update_status;
 
 #[derive(Clone)]
 pub struct ProfileServer {
@@ -57,6 +58,8 @@ impl ProfileService for ProfileServer {
         set_app_data, SetAppDataRequest, SetAppDataResponse;
         #[rate(4, 5)]
         update_profile, UpdateProfileRequest, UpdateProfileResponse;
+        #[rate(4, 5)]
+        update_status, UpdateStatusRequest, UpdateStatusResponse;
     }
 }
 
@@ -78,7 +81,7 @@ impl ProfileTree {
         user_id: u64,
         new_user_name: Option<String>,
         new_user_avatar: Option<String>,
-        new_user_status: Option<i32>,
+        new_user_status: Option<UserStatus>,
     ) -> ServerResult<()> {
         let key = make_user_profile_key(user_id);
 
@@ -98,7 +101,7 @@ impl ProfileTree {
             }
         }
         if let Some(new_status) = new_user_status {
-            profile.user_status = new_status;
+            profile.user_status = Some(new_status);
         }
 
         let buf = rkyv_ser(&profile);

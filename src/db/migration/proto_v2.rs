@@ -7,13 +7,13 @@ use crate::{
                 dropdown::Entry as DropdownEntry, Button as ButtonAction,
                 Dropdown as DropdownAction, Input as InputAction, Kind as ActionKind,
             },
-            attachment::Info,
+            attachment::{ImageInfo, Info},
             content::{Extra, InviteAccepted, InviteRejected, RoomUpgradedToGuild},
-            embed::{embed_field::Image, EmbedField, EmbedHeading},
+            embed::{Field as EmbedField, Heading as EmbedHeading},
             format::{Format as NewFormatData, *},
             overrides::Reason as NewReason,
             Action, Attachment, Content as NewContent, Embed, Format as NewFormat, FormattedText,
-            ImageInfo, Message as NewMessage, Minithumbnail, Overrides as NewOverrides,
+            Message as NewMessage, Minithumbnail, Overrides as NewOverrides,
             Reaction as NewReaction,
         },
         emote::Emote as NewEmote,
@@ -24,7 +24,8 @@ use crate::{
 };
 
 use chat::Message as OldMessage;
-use profile::Profile as OldProfile;
+use harmony_rust_sdk::api::profile::{user_status, UserStatus};
+use profile::{Profile as OldProfile, UserStatus as OldUserStatus};
 
 define_migration!(|db| {
     let chat_tree = db.open_tree(b"chat").await?;
@@ -61,8 +62,8 @@ define_migration!(|db| {
             }
             content
         }),
-        created_at: old.created_at,
-        edited_at: old.edited_at,
+        created_at: to_seconds(old.created_at),
+        edited_at: old.edited_at.map(to_seconds),
         in_reply_to: old.in_reply_to,
         metadata: old.metadata.map(Into::into),
         overrides: old.overrides.map(Into::into),
@@ -74,7 +75,16 @@ define_migration!(|db| {
         user_avatar: old.user_avatar,
         account_kind: old.account_kind,
         user_name: old.user_name,
-        user_status: old.user_status,
+        user_status: Some(UserStatus {
+            kind: (match OldUserStatus::from_i32(old.user_status).unwrap_or_default() {
+                OldUserStatus::Online => user_status::Kind::Online,
+                OldUserStatus::Idle => user_status::Kind::Idle,
+                OldUserStatus::DoNotDisturb => user_status::Kind::DoNotDisturb,
+                _ => user_status::Kind::OfflineUnspecified,
+            })
+            .into(),
+            ..Default::default()
+        }),
     })
     .await?;
     Ok(())
@@ -82,15 +92,33 @@ define_migration!(|db| {
 
 scherzo_derive::define_proto_mod!(before_proto_v2, harmonytypes, chat, emote, profile);
 
+fn to_seconds(millis: u64) -> u64 {
+    std::time::Duration::from_millis(millis).as_secs()
+}
+
 impl From<chat::Embed> for Embed {
     fn from(embed: chat::Embed) -> Self {
+        let (fields, actions) = embed.fields.into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut fields, mut actions), item| {
+                let field = EmbedField {
+                    title: item.title,
+                    body: item.body.map(|f| f.text).unwrap_or_default(),
+                };
+                fields.push(field);
+                actions.extend(item.actions.into_iter().map(Into::into));
+                (fields, actions)
+            },
+        );
         Embed {
             header: embed.header.map(Into::into),
             title: embed.title,
             body: embed.body.map(Into::into),
-            fields: embed.fields.into_iter().map(Into::into).collect(),
+            fields,
             footer: embed.footer.map(Into::into),
             color: embed.color,
+            image: None,
+            actions,
         }
     }
 }
@@ -100,24 +128,7 @@ impl From<chat::embed::EmbedHeading> for EmbedHeading {
         EmbedHeading {
             url: old.url,
             icon: old.icon,
-            subtext: old.subtext,
             text: old.text,
-        }
-    }
-}
-
-impl From<chat::embed::EmbedField> for EmbedField {
-    fn from(old: chat::embed::EmbedField) -> Self {
-        EmbedField {
-            presentation: old.presentation,
-            title: old.title,
-            subtitle: old.subtitle,
-            body: old.body.map(Into::into),
-            image: old.image_url.map(|id| Image {
-                id,
-                ..Default::default()
-            }),
-            actions: old.actions.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -260,9 +271,12 @@ impl From<emote::Emote> for NewEmote {
 
 impl From<chat::Reaction> for NewReaction {
     fn from(old: chat::Reaction) -> Self {
+        let emote = old.emote.unwrap_or_default();
         NewReaction {
             count: old.count,
-            emote: old.emote.map(Into::into),
+            name: emote.name,
+            data: emote.image_id,
+            ..Default::default()
         }
     }
 }
@@ -309,14 +323,14 @@ impl From<chat::Format> for NewFormat {
         NewFormat {
             length: old.length,
             start: old.start,
-            format: old.format.map(Into::into),
+            format: old.format.and_then(Into::into),
         }
     }
 }
 
-impl From<chat::format::Format> for NewFormatData {
+impl From<chat::format::Format> for Option<NewFormatData> {
     fn from(old: chat::format::Format) -> Self {
-        match old {
+        let new = match old {
             chat::format::Format::Bold(_) => NewFormatData::Bold(Bold {}),
             chat::format::Format::Italic(_) => NewFormatData::Italic(Italic {}),
             chat::format::Format::Underline(_) => NewFormatData::Underline(Underline {}),
@@ -349,9 +363,8 @@ impl From<chat::format::Format> for NewFormatData {
                 }),
             }),
             chat::format::Format::Color(old) => NewFormatData::Color(Color { kind: old.kind }),
-            chat::format::Format::Localization(old) => NewFormatData::Localization(Localization {
-                i18n_code: old.i18n_code,
-            }),
-        }
+            _ => return None,
+        };
+        Some(new)
     }
 }

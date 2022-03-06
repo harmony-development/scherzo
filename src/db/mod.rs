@@ -275,13 +275,13 @@ pub mod chat {
         channel_id: u64,
         message_id: u64,
         user_id: u64,
-        image_id: &str,
+        data: &str,
     ) -> Vec<u8> {
         [
             make_msg_key(guild_id, channel_id, message_id).as_ref(),
             &[0],
             user_id.to_be_bytes().as_ref(),
-            image_id.as_bytes(),
+            data.as_bytes(),
         ]
         .concat()
     }

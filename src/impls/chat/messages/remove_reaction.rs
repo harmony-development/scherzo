@@ -10,29 +10,25 @@ pub async fn handler(
         guild_id,
         channel_id,
         message_id,
-        emote,
+        reaction_data,
     } = request.into_message().await?;
 
-    if let Some(emote) = emote {
-        let chat_tree = &svc.deps.chat_tree;
+    let chat_tree = &svc.deps.chat_tree;
 
-        chat_tree
-            .check_perms(
-                guild_id,
-                Some(channel_id),
-                user_id,
-                all_permissions::MESSAGES_REACTIONS_REMOVE,
-                false,
-            )
-            .await?;
+    chat_tree
+        .check_perms(
+            guild_id,
+            Some(channel_id),
+            user_id,
+            all_permissions::MESSAGES_REACTIONS_REMOVE,
+            false,
+        )
+        .await?;
 
-        let reaction = chat_tree
-            .update_reaction(user_id, guild_id, channel_id, message_id, emote, false)
-            .await?;
-        if reaction.is_some() {
-            svc.send_reaction_event(guild_id, channel_id, message_id, reaction);
-        }
-    }
+    chat_tree
+        .remove_reaction(user_id, guild_id, channel_id, message_id, &reaction_data)
+        .await?;
+    svc.send_removed_reaction_event(guild_id, channel_id, message_id, reaction_data);
 
-    Ok((RemoveReactionResponse {}).into_response())
+    Ok(RemoveReactionResponse::new().into_response())
 }

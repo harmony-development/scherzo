@@ -9,4 +9,4 @@ pub mod pin_message;
 pub mod remove_reaction;
 pub mod send_message;
 pub mod unpin_message;
-pub mod update_message_text;
+pub mod update_message_content;

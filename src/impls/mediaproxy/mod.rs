@@ -72,6 +72,15 @@ struct TimedCacheValue<T> {
     since: Instant,
 }
 
+impl<T> TimedCacheValue<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value,
+            since: Instant::now(),
+        }
+    }
+}
+
 // TODO: investigate possible optimization since the key will always be an URL?
 lazy_static::lazy_static! {
     static ref CACHE: DashMap<String, TimedCacheValue<Metadata>, RandomState> = DashMap::with_capacity_and_hasher(512, RandomState::new());
@@ -171,13 +180,7 @@ impl MediaproxyServer {
         };
 
         // Insert to cache since successful
-        CACHE.insert(
-            raw_url,
-            TimedCacheValue {
-                value: metadata.clone(),
-                since: Instant::now(),
-            },
-        );
+        CACHE.insert(raw_url, TimedCacheValue::new(metadata.clone()));
 
         Ok(metadata)
     }

@@ -10,6 +10,7 @@ type SledFut<T> = Ready<DbResult<T>>;
 
 pub mod shared {
     use hrpc::common::future::ready;
+    use smol_str::SmolStr;
 
     use super::*;
 
@@ -63,7 +64,10 @@ pub mod shared {
                 self.inner
                     .open_tree(name)
                     .map_err(Into::into)
-                    .map(|tree| Tree { inner: tree }),
+                    .map(|tree| Tree {
+                        inner: tree,
+                        name: String::from_utf8_lossy(name).as_ref().into(),
+                    }),
             )
         }
 
@@ -79,9 +83,14 @@ pub mod shared {
     #[derive(Debug, Clone)]
     pub struct Tree {
         inner: sled::Tree,
+        name: SmolStr,
     }
 
     impl Tree {
+        pub fn name(&self) -> &str {
+            self.name.as_str()
+        }
+
         pub fn get(&self, key: &[u8]) -> SledFut<Option<EVec>> {
             ready(
                 self.inner

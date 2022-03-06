@@ -108,7 +108,10 @@ where
             continue;
         } else {
             old.map_err(|err| anyhow::anyhow!(err.to_string()))
-                .with_context(|| format!("invalid state on key: {:?}", key.as_ref()))?;
+                .with_context(|| format!("on tree: {}", tree.name()))
+                .with_context(|| {
+                    format!("invalid state on key: {}", String::from_utf8_lossy(&key))
+                })?;
         }
     }
     tree.apply_batch(batch).await?;

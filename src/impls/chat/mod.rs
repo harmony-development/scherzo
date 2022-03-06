@@ -2,10 +2,10 @@ use std::{collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::si
 
 use crate::api::{
     chat::{
-        get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
+        attachment::ImageInfo, get_channel_messages_request::Direction, overrides::Reason,
+        permission::has_permission, send_message_request::attachment::ImageInfo as SendImageInfo,
         stream_event, Message as HarmonyMessage, *,
     },
-    emote::Emote,
     exports::hrpc::{server::socket::Socket, Request},
     harmonytypes::{item_position, Empty, ItemPosition, Metadata},
     sync::{
@@ -169,9 +169,7 @@ impl ChatServer {
             let initial_subs = initial_subs
                 .chain(iter::once(EventSub::Actions))
                 .chain(iter::once(EventSub::Homeserver));
-            for sub in initial_subs {
-                subs.insert(sub);
-            }
+            subs.extend(initial_subs);
 
             // keep track of failed writes and reads to decide if closing the socket is worth it
             let mut failed_writes: u8 = 0;
@@ -395,20 +393,70 @@ impl ChatServer {
         Ok(())
     }
 
-    fn send_reaction_event(
+    fn send_new_reaction_event(
         &self,
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-        reaction: Option<Reaction>,
+        reaction: Reaction,
     ) {
         self.send_event_through_chan(
             EventSub::Guild(guild_id),
-            stream_event::Event::ReactionUpdated(stream_event::ReactionUpdated {
+            stream_event::Event::NewReactionAdded(stream_event::NewReactionAdded {
                 guild_id,
                 channel_id,
                 message_id,
-                reaction,
+                reaction: Some(reaction),
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id: Some(channel_id),
+                check_for: all_permissions::MESSAGES_VIEW,
+                must_be_guild_owner: false,
+            }),
+            EventContext::empty(),
+        );
+    }
+
+    fn send_added_reaction_event(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+    ) {
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            stream_event::Event::ReactionAdded(stream_event::ReactionAdded {
+                guild_id,
+                channel_id,
+                message_id,
+                reaction_data: data,
+            }),
+            Some(PermCheck {
+                guild_id,
+                channel_id: Some(channel_id),
+                check_for: all_permissions::MESSAGES_VIEW,
+                must_be_guild_owner: false,
+            }),
+            EventContext::empty(),
+        );
+    }
+
+    fn send_removed_reaction_event(
+        &self,
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+    ) {
+        self.send_event_through_chan(
+            EventSub::Guild(guild_id),
+            stream_event::Event::ReactionRemoved(stream_event::ReactionRemoved {
+                guild_id,
+                channel_id,
+                message_id,
+                reaction_data: data,
             }),
             Some(PermCheck {
                 guild_id,
@@ -452,7 +500,7 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(1, 5)]
         update_all_channel_order, UpdateAllChannelOrderRequest, UpdateAllChannelOrderResponse;
         #[rate(5, 5)]
-        update_message_text, UpdateMessageTextRequest, UpdateMessageTextResponse;
+        update_message_content, UpdateMessageContentRequest, UpdateMessageContentResponse;
         #[rate(1, 15)]
         delete_guild, DeleteGuildRequest, DeleteGuildResponse;
         #[rate(4, 5)]
@@ -1207,7 +1255,7 @@ impl ChatTree {
         name: String,
         picture: Option<String>,
         metadata: Option<Metadata>,
-        kind: guild_kind::Kind,
+        kind: guild::Kind,
     ) -> ServerResult<u64> {
         let guild_id = {
             let mut rng = rand::rngs::SmallRng::from_entropy();
@@ -1223,7 +1271,7 @@ impl ChatTree {
             picture,
             owner_ids: vec![user_id],
             metadata,
-            kind: Some(GuildKind { kind: Some(kind) }),
+            kind: kind.into(),
         };
         let buf = rkyv_ser(&guild);
 
@@ -1476,7 +1524,6 @@ impl ChatTree {
     ) -> Result<u64, ServerError> {
         let next_id_key = make_next_msg_id_key(guild_id, channel_id);
         let raw = self
-            .chat_tree
             .get(&next_id_key)
             .await?
             .expect("no next message id for channel - this is a bug");
@@ -1543,11 +1590,11 @@ impl ChatTree {
     pub async fn process_image_info(
         &self,
         deps: &Dependencies,
-        info: send_message_request::ImageInfo,
+        info: SendImageInfo,
         id: String,
         file_handle: FileHandle,
     ) -> Result<(String, ImageInfo), ServerError> {
-        let send_message_request::ImageInfo {
+        let SendImageInfo {
             caption,
             use_original,
         } = info;
@@ -1747,9 +1794,9 @@ impl ChatTree {
             avatar: None,
         };
         self.send_message_logic(
-            0,
             guild_id,
             channel_id,
+            0,
             content,
             Some(overrides),
             None,
@@ -1758,67 +1805,114 @@ impl ChatTree {
         .await
     }
 
-    pub async fn update_reaction(
+    /// Removes a reaction by decrementing the count, if count is zero
+    /// deletes the reaction from message reactions.
+    ///
+    /// Returns `true` if the message was deleted from message reactions.
+    pub async fn remove_reaction(
         &self,
         user_id: u64,
         guild_id: u64,
         channel_id: u64,
         message_id: u64,
-        emote: Emote,
-        add: bool,
-    ) -> ServerResult<Option<Reaction>> {
-        let react_key =
-            make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &emote.image_id);
+        data: &str,
+    ) -> ServerResult<bool> {
+        self.check_guild_user_channel(guild_id, user_id, channel_id)
+            .await?;
+
+        let react_key = make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, data);
+
         let reacted = self
             .chat_tree
             .contains_key(&react_key)
             .await
             .map_err(ServerError::from)?;
-        if matches!((add, reacted), (true, true) | (false, false)) {
-            return Ok(None);
+        if reacted.not() {
+            bail!(("h.cant-remove-react", "cant remove react if didnt react"));
         }
 
         // TODO: validate the emote image_id is below a certain size
-        self.check_guild_user_channel(guild_id, user_id, channel_id)
-            .await?;
-
         let (mut message, message_key) = self
             .get_message_logic(guild_id, channel_id, message_id)
             .await?;
 
-        let mut batch = Batch::default();
-        let reaction = if let Some(reaction) = message.reactions.iter_mut().find(|r| {
-            r.emote
-                .as_ref()
-                .map_or(false, |e| e.image_id == emote.image_id)
-        }) {
-            reaction.count = add
-                .then(|| reaction.count.saturating_add(1))
-                .unwrap_or_else(|| reaction.count.saturating_sub(1));
-            if reaction.count == 0 {
-                batch.remove(react_key);
-            }
-            Some(reaction.clone())
-        } else if add {
-            let reaction = Reaction {
-                count: 1,
-                emote: Some(emote),
-            };
-            batch.insert(react_key, Vec::new());
-            message.reactions.push(reaction.clone());
-            Some(reaction)
-        } else {
-            None
-        };
+        let remove_index = message
+            .reactions
+            .iter_mut()
+            .enumerate()
+            .find(|(_, r)| r.data == data)
+            .and_then(|(index, reaction)| {
+                reaction.count = reaction.count.saturating_sub(1);
+                (reaction.count == 0).then(|| index)
+            });
 
-        batch.insert(message_key, rkyv_ser(&message));
+        if let Some(index) = remove_index {
+            message.reactions.remove(index);
+        }
 
-        self.chat_tree
-            .apply_batch(batch)
+        self.insert(message_key, rkyv_ser(&message)).await?;
+        self.remove(react_key).await?;
+
+        Ok(remove_index.is_some())
+    }
+
+    /// Adds a new reaction by incrementing the count, if the reaction
+    /// doesn't already exist adds it to the message reactions.
+    ///
+    /// Returns `true` if the reaction was new.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_reaction(
+        &self,
+        user_id: u64,
+        guild_id: u64,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+        name: String,
+        kind: ReactionKind,
+    ) -> ServerResult<bool> {
+        self.check_guild_user_channel(guild_id, user_id, channel_id)
+            .await?;
+
+        let react_key = make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &data);
+
+        let reacted = self
+            .chat_tree
+            .contains_key(&react_key)
             .await
             .map_err(ServerError::from)?;
+        if reacted {
+            bail!(("h.cant-react-multiple", "cant react multiple times"));
+        }
 
-        Ok(reaction)
+        // TODO: validate the emote image_id is below a certain size
+        let (mut message, message_key) = self
+            .get_message_logic(guild_id, channel_id, message_id)
+            .await?;
+
+        let did_increment = message
+            .reactions
+            .iter_mut()
+            .find(|r| r.data == data)
+            .map(|reaction| {
+                reaction.count = reaction.count.saturating_add(1);
+            })
+            .is_some();
+
+        if did_increment.not() {
+            let reaction = Reaction {
+                count: 1,
+                data,
+                kind: kind.into(),
+                name,
+            };
+            message.reactions.push(reaction);
+        }
+
+        self.insert(message_key, rkyv_ser(&message)).await?;
+        self.insert(react_key, []).await?;
+
+        Ok(did_increment.not())
     }
 
     pub async fn get_pinned_messages_logic(

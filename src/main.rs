@@ -11,7 +11,7 @@ use std::{
 };
 
 use harmony_rust_sdk::api::{
-    chat::{guild_kind, ChannelKind, Permission},
+    chat::{guild, ChannelKind, Permission},
     exports::hrpc::server::transport::{http::Hyper, Transport},
 };
 use hrpc::{
@@ -330,7 +330,7 @@ async fn setup_admin_guild(deps: &Dependencies) {
             "Admin".to_string(),
             None,
             None,
-            guild_kind::Kind::Normal(guild_kind::Normal::new()),
+            guild::Kind::NormalUnspecified,
         )
         .await
         .unwrap();
