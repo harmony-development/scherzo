@@ -1,6 +1,5 @@
 use std::future::Future;
 
-use anyhow::Context;
 use bytecheck::CheckBytes;
 use hrpc::server::gen_prelude::BoxFuture;
 use rkyv::{
@@ -103,15 +102,6 @@ where
             let new_val = migrate(old);
             let new_val = rkyv_ser(&new_val);
             batch.insert(key, new_val);
-        } else if rkyv::check_archived_root::<To>(&val).is_ok() {
-            // if it's new, then its already fine
-            continue;
-        } else {
-            old.map_err(|err| anyhow::anyhow!(err.to_string()))
-                .with_context(|| format!("on tree: {}", tree.name()))
-                .with_context(|| {
-                    format!("invalid state on key: {}", String::from_utf8_lossy(&key))
-                })?;
         }
     }
     tree.apply_batch(batch).await?;
