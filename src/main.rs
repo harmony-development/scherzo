@@ -179,6 +179,7 @@ async fn setup_db(db_path: String, config: &Config) -> (Db, usize) {
     let (current_db_version, needs_migration) = get_db_version(&db)
         .await
         .expect("something went wrong while checking if the db needs migrations!!!");
+    info!("db version is {}", current_db_version);
     if needs_migration {
         // Backup db before attempting to apply migrations
         if current_db_version > 0 {
