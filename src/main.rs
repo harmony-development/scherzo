@@ -253,6 +253,12 @@ fn setup_transport(
             .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
     }
 
+    info!(
+        "serving on {}://{}",
+        deps.config.tls.is_some().then(|| "https").unwrap_or("http"),
+        addr
+    );
+
     transport.configure_hyper(
         HttpConfig::new()
             .http1_keep_alive(true)
