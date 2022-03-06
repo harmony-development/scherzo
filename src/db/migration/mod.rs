@@ -22,7 +22,7 @@ mod timestamps_are_milliseconds;
 
 type Migration = for<'a> fn(&'a Db) -> BoxFuture<'a, DbResult<()>>;
 
-pub const MIGRATIONS: [Migration; 5] = [
+pub const MIGRATIONS: [Migration; 6] = [
     initial_db_version::migrate,
     add_next_msg_ids::migrate,
     remove_log_chan_id_from_admin_keys::migrate,
