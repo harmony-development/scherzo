@@ -998,7 +998,7 @@ checksum = "eabb4a44450da02c90444cf74558da904edde8fb4e9035a9a6a4e15445af0bd7"
 [[package]]
 name = "harmony_build"
 version = "0.1.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#3a7f65af8aefcfb3e808fce7d60b0defd6772f45"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#9d19fd4aa60fc8692a3494200fccd28bb8d20cf9"
 dependencies = [
  "hrpc-build",
  "prost-build",
@@ -1009,7 +1009,7 @@ dependencies = [
 [[package]]
 name = "harmony_derive"
 version = "0.1.3"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#3a7f65af8aefcfb3e808fce7d60b0defd6772f45"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#9d19fd4aa60fc8692a3494200fccd28bb8d20cf9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1019,7 +1019,7 @@ dependencies = [
 [[package]]
 name = "harmony_rust_sdk"
 version = "0.8.0"
-source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#3a7f65af8aefcfb3e808fce7d60b0defd6772f45"
+source = "git+https://github.com/harmony-development/harmony_rust_sdk.git?branch=master#9d19fd4aa60fc8692a3494200fccd28bb8d20cf9"
 dependencies = [
  "bytecheck",
  "derive-new",
