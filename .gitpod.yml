@@ -1,4 +1,5 @@
 tasks:
-  - init: echo "welcome"
+  - init: echo "entering devshell..."
+    command: nix develop
 
 
