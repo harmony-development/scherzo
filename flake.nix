@@ -5,15 +5,10 @@
       url = "github:yusdacra/nix-cargo-integration/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    flakeCompat = {
-      url = "github:edolstra/flake-compat";
-      flake = false;
-    };
   };
 
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
     root = ./.;
-    buildPlatform = "crate2nix";
     overrides = {
       crateOverrides = common: _: {
         mediasoup-sys = prev:
@@ -29,28 +24,11 @@
             buildInputs = (prev.buildInputs or [ ]) ++ all;
             nativeBuildInputs = (prev.nativeBuildInputs or [ ]) ++ all;
           };
-        scherzo = prev: {
-          crateBin = common.lib.filter (bin: bin.name != "scherzo_migrate" && bin.name != "scherzo_cmd") prev.crateBin;
-        };
       };
       shell = common: prev: {
         packages = prev.packages ++ (with common.pkgs; [
-          musl.dev
           mold
           mkcert
-          cargo-deny
-          /*(common.lib.buildCrate {
-            memberName = "tokio-console";
-
-            root = builtins.fetchGit {
-            url = "https://github.com/tokio-rs/console.git";
-            rev = "a30264e0b5469ea596430b846b05e6e3541915d1";
-            ref = "main";
-            };
-
-            inherit (common) nativeBuildInputs buildInputs;
-            CARGO_PKG_REPOSITORY = "https://github.com/tokio-rs/console";
-            })*/
         ]);
         commands = prev.commands ++ [
           {
