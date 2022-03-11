@@ -4,6 +4,8 @@ pub mod http_ratelimit;
 pub mod ratelimit;
 pub mod test;
 
+use std::future::Future;
+
 use hrpc::exports::{bytes::Bytes, http};
 use hyper::HeaderMap;
 use rand::Rng;
@@ -74,4 +76,16 @@ pub fn get_content_length(headers: &HeaderMap) -> http::HeaderValue {
         .unwrap_or_else(|| unsafe {
             http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
         })
+}
+
+pub fn opt_fut<FutIn, T>(fut: Option<FutIn>) -> impl Future<Output = Option<T>>
+where
+    FutIn: Future<Output = T>,
+{
+    async {
+        match fut {
+            Some(fut) => Some(fut.await),
+            None => None,
+        }
+    }
 }

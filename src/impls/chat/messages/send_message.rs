@@ -1,3 +1,5 @@
+use hrpc::exports::futures_util::FutureExt;
+
 use crate::impls::admin_action;
 
 use super::*;
@@ -46,14 +48,11 @@ pub async fn handler(
         )
         .await?;
 
-    let action_content = if let Some(action) = admin_action {
-        let msg = admin_action::run(svc.deps.as_ref(), action)
-            .await
-            .unwrap_or_else(|err| format!("error: {}", err));
-        Some(msg)
-    } else {
-        None
-    };
+    let action_content = opt_fut(admin_action.map(|action| {
+        admin_action::run(svc.deps.as_ref(), action)
+            .map(|err| err.unwrap_or_else(|err| format!("error: {}", err)))
+    }))
+    .await;
 
     svc.send_event_through_chan(
         EventSub::Guild(guild_id),
