@@ -6,7 +6,7 @@ use sled::IVec;
 
 #[derive(Debug, Clone)]
 pub enum EVec {
-    #[cfg(feature = "sled")]
+    #[cfg(feature = "sledaa")]
     Inline(IVec),
     Owned(AlignedVec),
 }
@@ -20,7 +20,7 @@ impl Default for EVec {
 impl From<EVec> for AlignedVec {
     fn from(evec: EVec) -> Self {
         match evec {
-            #[cfg(feature = "sled")]
+            #[cfg(feature = "sledaa")]
             EVec::Inline(inline) => {
                 let mut vec = AlignedVec::with_capacity(inline.len());
                 vec.extend_from_slice(inline.as_ref());
@@ -34,7 +34,7 @@ impl From<EVec> for AlignedVec {
 impl From<EVec> for Vec<u8> {
     fn from(evec: EVec) -> Self {
         match evec {
-            #[cfg(feature = "sled")]
+            #[cfg(feature = "sledaa")]
             EVec::Inline(inline) => inline.to_vec(),
             EVec::Owned(owned) => owned.into_vec(),
         }
@@ -50,7 +50,8 @@ impl From<AlignedVec> for EVec {
 #[cfg(feature = "sled")]
 impl From<IVec> for EVec {
     fn from(ivec: IVec) -> Self {
-        let vec: AlignedVec = EVec::Inline(ivec).into();
+        let mut vec = AlignedVec::with_capacity(ivec.len());
+        vec.extend_from_slice(ivec.as_ref());
         EVec::Owned(vec)
     }
 }
@@ -59,6 +60,7 @@ impl From<IVec> for EVec {
 impl From<EVec> for IVec {
     fn from(evec: EVec) -> Self {
         match evec {
+            #[cfg(feature = "sledaa")]
             EVec::Inline(ivec) => ivec,
             EVec::Owned(vec) => vec.into_vec().into(),
         }
@@ -98,7 +100,7 @@ impl<const N: usize> From<[u8; N]> for EVec {
 impl AsRef<[u8]> for EVec {
     fn as_ref(&self) -> &[u8] {
         match self {
-            #[cfg(feature = "sled")]
+            #[cfg(feature = "sledaa")]
             EVec::Inline(inline) => inline.as_ref(),
             EVec::Owned(owned) => owned.as_slice(),
         }
@@ -108,7 +110,7 @@ impl AsRef<[u8]> for EVec {
 impl AsMut<[u8]> for EVec {
     fn as_mut(&mut self) -> &mut [u8] {
         match self {
-            #[cfg(feature = "sled")]
+            #[cfg(feature = "sledaa")]
             EVec::Inline(inline) => inline.as_mut(),
             EVec::Owned(owned) => owned.as_mut_slice(),
         }
@@ -146,7 +148,7 @@ impl<const N: usize> TryFrom<EVec> for [u8; N] {
 
     fn try_from(v: EVec) -> Result<[u8; N], Self::Error> {
         match v {
-            #[cfg(feature = "sled")]
+            #[cfg(feature = "sledaa")]
             EVec::Inline(ivec) => ivec.as_ref().try_into().map_err(|_| EVec::Inline(ivec)),
             EVec::Owned(vec) => vec.as_ref().try_into().map_err(|_| EVec::Owned(vec)),
         }
