@@ -249,8 +249,13 @@ fn setup_transport(
         .layer(against::AgainstLayer);
 
     if let Some(tls_config) = deps.config.tls.as_ref() {
-        transport = transport
-            .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+        if tls_config.cert_file.exists() && tls_config.key_file.exists() {
+            transport = transport
+                .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+        } else {
+            error!("certificate file and key file specified, but the files don't exist");
+            warn!("not enabling TLS");
+        }
     }
 
     info!(
