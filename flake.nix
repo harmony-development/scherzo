@@ -5,6 +5,10 @@
       url = "github:yusdacra/nix-cargo-integration/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    flakeCompat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
   };
 
   outputs = inputs: inputs.nixCargoIntegration.lib.makeOutputs {
