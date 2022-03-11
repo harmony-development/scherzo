@@ -484,12 +484,7 @@ impl ServerError {
         let status = self.status();
         let err = HrpcError::from(self);
 
-        http::Response::builder()
-            .status(status)
-            .header(version_header_name(), version_header_value())
-            .header(http::header::CONTENT_TYPE, content_header_value())
-            .body(box_body(Body::full(encode_protobuf_message(&err).freeze())))
-            .unwrap()
+        hrpc_error_response(err, status)
     }
 
     pub fn into_rest_http_response(self) -> HttpResponse {
@@ -498,6 +493,15 @@ impl ServerError {
 
         rest_error_response(msg, status)
     }
+}
+
+pub fn hrpc_error_response(err: HrpcError, status: StatusCode) -> HttpResponse {
+    http::Response::builder()
+        .status(status)
+        .header(version_header_name(), version_header_value())
+        .header(http::header::CONTENT_TYPE, content_header_value())
+        .body(box_body(Body::full(encode_protobuf_message(&err).freeze())))
+        .unwrap()
 }
 
 pub fn rest_error_response(mut msg: String, status: StatusCode) -> HttpResponse {

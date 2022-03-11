@@ -5,6 +5,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use std::{
+    any::Any,
     net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
@@ -24,7 +25,7 @@ use hrpc::{
         MakeRoutes,
     },
 };
-use hyper::header;
+use hyper::{header, StatusCode};
 use scherzo::{
     api::chat::Content,
     config::Config,
@@ -32,6 +33,7 @@ use scherzo::{
         migration::{apply_migrations, get_db_version},
         Db,
     },
+    error::hrpc_error_response,
     impls::{
         admin_action, against,
         chat::{AdminGuildKeys, DEFAULT_ROLE_ID},
@@ -42,6 +44,7 @@ use scherzo::{
 };
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
+    catch_panic::CatchPanicLayer,
     cors::CorsLayer,
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
@@ -230,6 +233,25 @@ fn setup_transport(
         .expect("failed to create transport")
         .layer(cors)
         .layer(MapResponseBodyLayer::new(box_body))
+        .layer(CatchPanicLayer::custom(|err: Box<dyn Any + Send>| {
+            let err = err
+                .downcast_ref::<String>()
+                .map(String::clone)
+                .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()));
+
+            if let Some(err) = &err {
+                tracing::error!("service panicked: {}", err);
+            } else {
+                tracing::error!("service panicked but unable to extract error message");
+            }
+
+            hrpc_error_response(
+                hrpc::proto::Error::new_internal_server_error(
+                    err.unwrap_or_else(|| "unknown".to_string()),
+                ),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }))
         .layer(concurrency_limiter)
         .layer(SetSensitiveRequestHeadersLayer::new([
             header::AUTHORIZATION,

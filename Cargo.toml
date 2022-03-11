@@ -62,6 +62,7 @@ tower-http = { version = "0.2", default-features = false, features = [
     "sensitive-headers",
     "map-response-body",
     "cors",
+    "catch-panic",
 ] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
