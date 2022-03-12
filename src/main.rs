@@ -270,10 +270,12 @@ fn setup_transport(
         .layer(rest)
         .layer(against::AgainstLayer);
 
+    let mut enabled_tls = false;
     if let Some(tls_config) = deps.config.tls.as_ref() {
         if tls_config.cert_file.exists() && tls_config.key_file.exists() {
             transport = transport
                 .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+            enabled_tls = true;
         } else {
             error!("certificate file and key file specified, but the files don't exist");
             warn!("not enabling TLS");
@@ -282,7 +284,7 @@ fn setup_transport(
 
     info!(
         "serving on {}://{}",
-        deps.config.tls.is_some().then(|| "https").unwrap_or("http"),
+        enabled_tls.then(|| "https").unwrap_or("http"),
         addr
     );
 
