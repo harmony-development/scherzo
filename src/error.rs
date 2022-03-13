@@ -128,6 +128,7 @@ pub enum ServerError {
     InvalidEmailConfig(toml::de::Error),
     FailedToFetchLink(reqwest::Error),
     FailedToDownload(reqwest::Error),
+    ImageProcessError(image::ImageError),
 }
 
 impl StdError for ServerError {
@@ -144,6 +145,7 @@ impl StdError for ServerError {
             ServerError::FailedToFetchLink(err) => Some(err),
             ServerError::FailedToDownload(err) => Some(err),
             ServerError::InvalidEmailConfig(err) => Some(err),
+            ServerError::ImageProcessError(err) => Some(err),
             _ => None,
         }
     }
@@ -153,6 +155,7 @@ impl Display for ServerError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         travel_error(f, self);
         match self {
+            ServerError::ImageProcessError(_) => f.write_str("could not process image"),
             ServerError::InvalidEmailConfig(_) => f.write_str("invalid email config"),
             ServerError::InvalidProtoMessage(err) => {
                 write!(f, "couldn't decode a response body: {}", err)
@@ -378,7 +381,8 @@ impl ServerError {
             | ServerError::MultipartError(_)
             | ServerError::InvalidEmailConfig(_)
             | ServerError::FailedToFetchLink(_)
-            | ServerError::FailedToDownload(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            | ServerError::FailedToDownload(_)
+            | ServerError::ImageProcessError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::TooFast(_) => StatusCode::TOO_MANY_REQUESTS,
             ServerError::MediaNotFound | ServerError::LinkNotFound(_) => StatusCode::NOT_FOUND,
             ServerError::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -399,7 +403,8 @@ impl ServerError {
             | ServerError::InvalidProtoMessage(_)
             | ServerError::InvalidEmailConfig(_)
             | ServerError::FailedToFetchLink(_)
-            | ServerError::FailedToDownload(_) => HrpcErrorIdentifier::InternalServerError.as_id(),
+            | ServerError::FailedToDownload(_)
+            | ServerError::ImageProcessError(_) => HrpcErrorIdentifier::InternalServerError.as_id(),
             ServerError::Unauthenticated => "h.blank-session",
             ServerError::InvalidAuthId => "h.bad-auth-id",
             ServerError::UserAlreadyExists => "h.already-registered",

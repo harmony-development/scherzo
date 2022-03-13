@@ -8,6 +8,7 @@ use std::future::Future;
 
 use hrpc::exports::{bytes::Bytes, http};
 use hyper::HeaderMap;
+use image::ImageFormat;
 use rand::Rng;
 pub use ratelimit::rate_limit;
 

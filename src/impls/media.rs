@@ -1,5 +1,6 @@
 use std::{
     fs::Metadata,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -29,6 +30,15 @@ impl FileHandle {
         let mut raw = Vec::with_capacity(self.size as usize);
         self.file.read_to_end(&mut raw).await?;
         Ok(raw)
+    }
+
+    pub async fn read_std(self) -> impl FnOnce() -> Result<Vec<u8>, ServerError> {
+        let mut file = self.file.into_std().await;
+        move || {
+            let mut raw = Vec::with_capacity(self.size as usize);
+            file.read_to_end(&mut raw)?;
+            Ok(raw)
+        }
     }
 }
 

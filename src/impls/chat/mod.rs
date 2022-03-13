@@ -1,4 +1,7 @@
-use std::{collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not};
+use std::{
+    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
+    path::Path,
+};
 
 use crate::api::{
     chat::{
@@ -16,7 +19,7 @@ use crate::api::{
         Event as DispatchEvent,
     },
 };
-use image::GenericImageView;
+use image::{GenericImageView, ImageFormat};
 use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
@@ -1600,35 +1603,56 @@ impl ChatTree {
         } = info;
 
         let media_root = &deps.config.media.media_root;
-
-        let is_animated = file_handle.mime == "image/gif";
-        let is_webp = file_handle.mime == "image/webp";
-
-        let raw = file_handle.read().await?;
+        let get_format = |path: &Path| {
+            Result::<_, ServerError>::Ok(
+                infer::get_from_path(path)?
+                    .and_then(|t| ImageFormat::from_mime_type(t.mime_type()))
+                    .expect("unsupported image format"),
+            )
+        };
 
         // TODO: improve this code
         let minithumbnail_id = format!("{}_jpegthumb", id);
         let minithumbnail_path = media_root.join(&minithumbnail_id);
+
         let id = use_original
             .not()
             .then(|| format!("{}_jpeg", id))
             .unwrap_or(id);
-        let image_path = media_root.join(&id);
 
+        let image_path = media_root.join(&id);
+        let image_format =
+            ImageFormat::from_mime_type(&file_handle.mime).expect("unsupported image format");
+
+        let is_animated = image_format == ImageFormat::Gif;
+        let is_webp = image_format == ImageFormat::WebP;
+
+        let read_raw_fn = file_handle.read_std().await;
+
+        let id_ = id.clone();
         let task_fn = move || -> Result<_, ServerError> {
+            let _guard =
+                tracing::debug_span!("image_processing", id = %id_, format = ?image_format)
+                    .entered();
             if image_path.exists() && minithumbnail_path.exists() {
-                let ifile = std::fs::File::open(&image_path)?;
-                let ifile = BufReader::new(ifile);
-                let ireader = image::io::Reader::new(ifile).with_guessed_format()?;
+                use image::io::Reader as ImageReader;
+
+                tracing::debug!("loading existing processed image and thumbnail");
+
+                let image_format = get_format(&image_path)?;
+                let ifile = BufReader::new(std::fs::File::open(&image_path)?);
+                let mut ireader = ImageReader::new(ifile);
+                ireader.set_format(image_format);
                 let idimensions = ireader
                     .into_dimensions()
-                    .map_err(|_| ServerError::InternalServerError)?;
+                    .map_err(ServerError::ImageProcessError)?;
 
-                let minireader =
-                    image::io::Reader::open(&minithumbnail_path)?.with_guessed_format()?;
+                let minithumbnail_format = get_format(&minithumbnail_path)?;
+                let mut minireader = ImageReader::open(&minithumbnail_path)?;
+                minireader.set_format(minithumbnail_format);
                 let minisize = minireader
                     .into_dimensions()
-                    .map_err(|_| ServerError::InternalServerError)?;
+                    .map_err(ServerError::ImageProcessError)?;
 
                 let minithumbnail = Minithumbnail {
                     width: minisize.0,
@@ -1638,14 +1662,21 @@ impl ChatTree {
 
                 Ok((idimensions, minithumbnail))
             } else {
+                tracing::debug!("loading original image and processing");
+
+                let raw = read_raw_fn()?;
+
                 let image = is_webp
                     .then(|| {
                         let decoder = webp::Decoder::new(&raw);
                         decoder.decode().map(|i| i.to_image())
                     })
-                    .flatten()
-                    .or_else(|| image::load_from_memory(&raw).ok())
-                    .ok_or(ServerError::InternalServerError)?;
+                    .flatten();
+                let image = match image {
+                    Some(img) => img,
+                    None => image::load_from_memory_with_format(&raw, image_format)
+                        .map_err(ServerError::ImageProcessError)?,
+                };
 
                 let image_size = image.dimensions();
                 let minithumbnail = image.thumbnail(64, 64);
@@ -1679,7 +1710,7 @@ impl ChatTree {
 
         let ((width, height), minithumbnail) = tokio::task::spawn_blocking(task_fn)
             .await
-            .map_err(|_| ServerError::InternalServerError)??;
+            .expect("image process task panicked")?;
 
         let info = ImageInfo {
             width,
@@ -1700,19 +1731,24 @@ impl ChatTree {
     ) -> Result<(String, Option<attachment::Info>), ServerError> {
         use send_message_request::attachment::Info;
 
-        let Some(info) = info else {
-            return Ok((id, None));
-        };
+        if let Some(info) = info {
+            let (id, info) = match info {
+                Info::Image(info) => {
+                    let (id, info) = self.process_image_info(deps, info, id, file_handle).await?;
 
-        let (id, info) = match info {
-            Info::Image(info) => {
-                let (id, info) = self.process_image_info(deps, info, id, file_handle).await?;
+                    (id, attachment::Info::Image(info))
+                }
+            };
 
-                (id, attachment::Info::Image(info))
-            }
-        };
-
-        Ok((id, Some(info)))
+            Ok((id, Some(info)))
+        } else if file_handle.mime != "image/svg+xml" && file_handle.mime.starts_with("image") {
+            let (id, info) = self
+                .process_image_info(deps, SendImageInfo::default(), id, file_handle)
+                .await?;
+            Ok((id, Some(attachment::Info::Image(info))))
+        } else {
+            Ok((id, None))
+        }
     }
 
     pub async fn process_attachment(
