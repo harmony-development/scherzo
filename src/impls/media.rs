@@ -1,6 +1,5 @@
 use std::{
     fs::Metadata,
-    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -17,7 +16,7 @@ use crate::{config::MediaConfig, utils::gen_rand_inline_str, ServerError};
 const SEPERATOR: u8 = b'\n';
 
 pub struct FileHandle {
-    pub file: File,
+    pub file: BufReader<File>,
     pub metadata: Metadata,
     pub name: String,
     pub mime: String,
@@ -32,13 +31,8 @@ impl FileHandle {
         Ok(raw)
     }
 
-    pub async fn read_std(self) -> impl FnOnce() -> Result<Vec<u8>, ServerError> {
-        let mut file = self.file.into_std().await;
-        move || {
-            let mut raw = Vec::with_capacity(self.size as usize);
-            file.read_to_end(&mut raw)?;
-            Ok(raw)
-        }
+    pub fn read_blocking(self) -> Result<Vec<u8>, ServerError> {
+        tokio::runtime::Handle::current().block_on(self.read())
     }
 }
 
@@ -97,8 +91,8 @@ impl MediaStore {
 
     pub async fn get_file(&self, id: &str) -> Result<FileHandle, ServerError> {
         let is_jpeg = is_id_jpeg(id);
-        let (mut file, metadata, file_path) = self.get_file_handle(id).await?;
-        let (filename_raw, mimetype_raw, _) = read_bufs(&file_path, &mut file, is_jpeg).await?;
+        let (file, metadata, file_path) = self.get_file_handle(id).await?;
+        let (filename_raw, mimetype_raw, buf_file) = read_bufs(&file_path, file, is_jpeg).await?;
 
         let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
 
@@ -106,7 +100,7 @@ impl MediaStore {
         let name = String::from_utf8_lossy(&filename_raw).into_owned();
 
         Ok(FileHandle {
-            file,
+            file: buf_file,
             metadata,
             mime,
             name,
@@ -131,9 +125,9 @@ impl MediaStore {
 
 pub async fn read_bufs<'file>(
     path: &Path,
-    file: &'file mut File,
+    file: File,
     is_jpeg: bool,
-) -> Result<(Vec<u8>, Vec<u8>, BufReader<&'file mut File>), ServerError> {
+) -> Result<(Vec<u8>, Vec<u8>, BufReader<File>), ServerError> {
     if is_jpeg {
         let mimetype = infer::get_from_path(path).ok().flatten().map_or_else(
             || b"image/jpeg".to_vec(),

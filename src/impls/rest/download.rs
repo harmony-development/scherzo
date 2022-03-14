@@ -190,7 +190,7 @@ pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
 
 fn file_handle_to_data(handle: FileHandle) -> (HeaderValue, HeaderValue, Body, HeaderValue) {
     let stream = Body::wrap_stream(file_stream(
-        handle.file,
+        handle.file.into_inner(),
         optimal_buf_size(&handle.metadata),
         handle.range,
     ));

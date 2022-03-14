@@ -1627,8 +1627,6 @@ impl ChatTree {
         let is_animated = image_format == ImageFormat::Gif;
         let is_webp = image_format == ImageFormat::WebP;
 
-        let read_raw_fn = file_handle.read_std().await;
-
         let id_ = id.clone();
         let task_fn = move || -> Result<_, ServerError> {
             let _guard =
@@ -1664,7 +1662,7 @@ impl ChatTree {
             } else {
                 tracing::debug!("loading original image and processing");
 
-                let raw = read_raw_fn()?;
+                let raw = file_handle.read_blocking()?;
 
                 let image = is_webp
                     .then(|| {

@@ -119,8 +119,8 @@ lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
-image = { git = "https://github.com/image-rs/image.git", branch = "master" }
-webp = { git = "https://github.com/yusdacra/webp.git", branch = "master" }
+image = "0.24"
+webp = "0.2"
 infer = "0.7"
 anyhow = "1"
 
