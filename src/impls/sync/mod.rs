@@ -12,7 +12,7 @@ use hrpc::exports::futures_util::TryFutureExt;
 use hrpc::{client::transport::http::Hyper, encode::encode_protobuf_message};
 use hyper::{http::HeaderValue, Uri};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tracing::error;
+use tracing::{error, Instrument};
 
 use crate::key::{self, Manager as KeyManager};
 
@@ -28,9 +28,14 @@ pub struct EventDispatch {
     pub event: Event,
 }
 
-struct Clients(DashMap<SmolStr, PostboxServiceClient<Hyper>, RandomState>);
+#[derive(Clone)]
+pub struct Clients(Arc<DashMap<SmolStr, PostboxServiceClient<Hyper>, RandomState>>);
 
 impl Clients {
+    fn new() -> Self {
+        Self(Arc::new(DashMap::default()))
+    }
+
     fn get_client(
         &self,
         host: SmolStr,
@@ -50,109 +55,139 @@ pub struct SyncServer {
 }
 
 impl SyncServer {
-    pub fn new(deps: Arc<Dependencies>, mut dispatch_rx: UnboundedReceiver<EventDispatch>) -> Self {
-        let sync = Self { deps };
-        let sync2 = sync.clone();
-        let clients = Clients(DashMap::default());
+    pub async fn pull_events(&self, clients: &Clients) {
+        let hosts = self
+            .deps
+            .sync_tree
+            .scan_prefix(HOST_PREFIX)
+            .await
+            .flat_map(|res| {
+                let key = match res {
+                    Ok((key, _)) => key,
+                    Err(err) => {
+                        let err = ServerError::DbError(err);
+                        error!("error occured while getting hosts for sync: {}", err);
+                        return None;
+                    }
+                };
+                let (_, host_raw) = key.split_at(HOST_PREFIX.len());
+                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+                Some(SmolStr::new(host))
+            });
 
-        tokio::spawn(async move {
-            let span = tracing::info_span!("federation_sync_task");
-            let _guard = span.enter();
-            loop {
-                tokio::select! {
-                    _ = async {
-                        let hosts = sync2.deps.sync_tree.scan_prefix(HOST_PREFIX).await.flat_map(|res| {
-                            let key = match res {
-                                Ok((key, _)) => key,
-                                Err(err) => {
-                                    let err = ServerError::DbError(err);
-                                    error!("error occured while getting hosts for sync: {}", err);
-                                    return None;
-                                }
-                            };
-                            let (_, host_raw) = key.split_at(HOST_PREFIX.len());
-                            let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-                            Some(SmolStr::new(host))
-                        });
-
-                        for host in hosts {
-                            if sync2.is_host_allowed(&host).is_ok() {
-                                let mut client = clients.get_client(host.clone());
-                                if let Ok(queue) = sync2
-                                    .generate_request(PullRequest {})
-                                    .map_err(|_| ())
-                                    .and_then(|req| {
-                                        client.pull(req).map_err(|_| ())
-                                    }).and_then(|resp| {
-                                        resp.into_message().map_err(|_| ())
-                                    })
-                                    .await
-                                {
-                                    for event in queue.event_queue {
-                                        if let Err(err) = sync2.push_logic(&host, event).await {
-                                            error!("error while executing sync event: {}", err);
-                                        }
-                                    }
-                                }
-                            }
+        for host in hosts {
+            if self.is_host_allowed(&host).is_ok() {
+                tracing::debug!("pulling from host {host}");
+                let mut client = clients.get_client(host.clone());
+                if let Ok(queue) = self
+                    .generate_request(PullRequest {})
+                    .map_err(|_| ())
+                    .and_then(|req| client.pull(req).map_err(|_| ()))
+                    .and_then(|resp| resp.into_message().map_err(|_| ()))
+                    .await
+                {
+                    for event in queue.event_queue {
+                        if let Err(err) = self.push_logic(&host, event).await {
+                            error!("error while executing sync event: {}", err);
                         }
-
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                    } => {}
-                    _ = async {
-                        while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
-                            if sync2.is_host_allowed(&host).is_ok() {
-                                match sync2.get_event_queue_raw(&host).await {
-                                    Ok(raw_queue) => {
-                                        let maybe_arch_queue = raw_queue.as_ref().map(|raw_queue| rkyv_arch::<PullResponse>(raw_queue));
-                                        if !maybe_arch_queue.map_or(false, |v| v.event_queue.is_empty()) {
-                                            let queue = maybe_arch_queue.map_or_else(
-                                                PullResponse::default,
-                                                |v| v.deserialize(&mut rkyv::Infallible).unwrap()
-                                            );
-                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event).await {
-                                                error!("error while pushing to event queue: {}", err);
-                                            }
-                                            continue;
-                                        }
-
-                                        let mut client = clients.get_client(host.clone());
-                                        let mut push_result = sync2
-                                            .generate_request(PushRequest { event: Some(event.clone()) })
-                                            .map_err(|_| ())
-                                            .and_then(|req| {
-                                                client.push(req).map_err(|_| ())
-                                            })
-                                            .await;
-                                        let mut try_count = 0;
-                                        while try_count < 5 && push_result.is_err() {
-                                            push_result = sync2
-                                                .generate_request(PushRequest { event: Some(event.clone()) })
-                                                .map_err(|_| ())
-                                                .and_then(|req| {
-                                                    client.push(req).map_err(|_| ())
-                                                })
-                                                .await;
-                                            try_count += 1;
-                                        }
-
-                                        if push_result.is_err() {
-                                            let queue = maybe_arch_queue.map_or_else(
-                                                PullResponse::default,
-                                                |v| v.deserialize(&mut rkyv::Infallible).unwrap()
-                                            );
-                                            if let Err(err) = sync2.push_to_event_queue(&host, queue, event).await {
-                                                error!("error while pushing to event queue: {}", err);
-                                            }
-                                        }
-                                    }
-                                    Err(err) => error!("error occured while getting event queue: {}", err),
-                                }
-                            }
-                        }
-                    } => {}
+                    }
                 }
             }
+        }
+    }
+
+    pub async fn push_events(
+        &self,
+        clients: &Clients,
+        dispatch_rx: &mut UnboundedReceiver<EventDispatch>,
+    ) {
+        while let Some(EventDispatch { host, event }) = dispatch_rx.recv().await {
+            if self.is_host_allowed(&host).is_ok() {
+                match self.get_event_queue_raw(&host).await {
+                    Ok(raw_queue) => {
+                        let maybe_arch_queue = raw_queue
+                            .as_ref()
+                            .map(|raw_queue| rkyv_arch::<PullResponse>(raw_queue));
+                        if !maybe_arch_queue.map_or(false, |v| v.event_queue.is_empty()) {
+                            let queue = maybe_arch_queue.map_or_else(PullResponse::default, |v| {
+                                v.deserialize(&mut rkyv::Infallible).unwrap()
+                            });
+                            if let Err(err) = self.push_to_event_queue(&host, queue, event).await {
+                                error!("error while pushing to event queue: {}", err);
+                            }
+                            continue;
+                        }
+
+                        let mut client = clients.get_client(host.clone());
+                        let mut push_result = self
+                            .generate_request(PushRequest {
+                                event: Some(event.clone()),
+                            })
+                            .map_err(|_| ())
+                            .and_then(|req| client.push(req).map_err(|_| ()))
+                            .await;
+                        let mut try_count = 0;
+                        while try_count < 5 && push_result.is_err() {
+                            push_result = self
+                                .generate_request(PushRequest {
+                                    event: Some(event.clone()),
+                                })
+                                .map_err(|_| ())
+                                .and_then(|req| client.push(req).map_err(|_| ()))
+                                .await;
+                            try_count += 1;
+                        }
+
+                        if push_result.is_err() {
+                            let queue = maybe_arch_queue.map_or_else(PullResponse::default, |v| {
+                                v.deserialize(&mut rkyv::Infallible).unwrap()
+                            });
+                            if let Err(err) = self.push_to_event_queue(&host, queue, event).await {
+                                error!("error while pushing to event queue: {}", err);
+                            }
+                        }
+                    }
+                    Err(err) => error!("error occured while getting event queue: {}", err),
+                }
+            }
+        }
+    }
+
+    pub fn new(deps: Arc<Dependencies>, mut dispatch_rx: UnboundedReceiver<EventDispatch>) -> Self {
+        let sync = Self { deps };
+        let clients = Clients::new();
+
+        let (initial_pull_tx, initial_pull_rx) = tokio::sync::oneshot::channel();
+
+        tokio::spawn({
+            let clients = clients.clone();
+            let sync = sync.clone();
+            let fut = async move {
+                tracing::info!("started task");
+                sync.pull_events(&clients).await;
+                initial_pull_tx
+                    .send(())
+                    .expect("failed to send initial pull complete notification");
+                loop {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    sync.pull_events(&clients).await;
+                }
+            };
+            fut.instrument(tracing::info_span!("federation_pull_task"))
+        });
+
+        tokio::spawn({
+            let sync = sync.clone();
+            let fut = async move {
+                tracing::info!("started task");
+                initial_pull_rx
+                    .await
+                    .expect("failed to get initial pull complete notification");
+                loop {
+                    sync.push_events(&clients, &mut dispatch_rx).await;
+                }
+            };
+            fut.instrument(tracing::info_span!("federation_push_task"))
         });
 
         sync

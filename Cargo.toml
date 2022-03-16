@@ -111,6 +111,7 @@ tracing-opentelemetry = { version = "0.17" }
 
 pin-project = "1"
 
+crossbeam-epoch = "=0.9.7"
 dashmap = "=4.0"
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "chore/deps", default-features = false }
 paste = "1.0"
