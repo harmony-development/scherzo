@@ -55,6 +55,7 @@ pub struct SyncServer {
 }
 
 impl SyncServer {
+    // TODO: actually print errors here
     pub async fn pull_events(&self, clients: &Clients) {
         let hosts = self
             .deps
@@ -96,6 +97,7 @@ impl SyncServer {
         }
     }
 
+    // TODO: actually print errors here
     pub async fn push_events(
         &self,
         clients: &Clients,
@@ -158,6 +160,9 @@ impl SyncServer {
         let clients = Clients::new();
 
         let (initial_pull_tx, initial_pull_rx) = tokio::sync::oneshot::channel();
+
+        // TODO: it should probably be made so that when a pull fails for a host,
+        // we shouldn't try to push anymore events to it until it's pull succeeds again
 
         tokio::task::Builder::new()
             .name("federation_pull_task")
