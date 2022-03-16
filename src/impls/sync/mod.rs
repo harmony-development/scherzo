@@ -159,36 +159,40 @@ impl SyncServer {
 
         let (initial_pull_tx, initial_pull_rx) = tokio::sync::oneshot::channel();
 
-        tokio::spawn({
-            let clients = clients.clone();
-            let sync = sync.clone();
-            let fut = async move {
-                tracing::info!("started task");
-                sync.pull_events(&clients).await;
-                initial_pull_tx
-                    .send(())
-                    .expect("failed to send initial pull complete notification");
-                loop {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
+        tokio::task::Builder::new()
+            .name("federation_pull_task")
+            .spawn({
+                let clients = clients.clone();
+                let sync = sync.clone();
+                let fut = async move {
+                    tracing::info!("started task");
                     sync.pull_events(&clients).await;
-                }
-            };
-            fut.instrument(tracing::info_span!("federation_pull_task"))
-        });
+                    initial_pull_tx
+                        .send(())
+                        .expect("failed to send initial pull complete notification");
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        sync.pull_events(&clients).await;
+                    }
+                };
+                fut.instrument(tracing::info_span!("federation_pull_task"))
+            });
 
-        tokio::spawn({
-            let sync = sync.clone();
-            let fut = async move {
-                tracing::info!("started task");
-                initial_pull_rx
-                    .await
-                    .expect("failed to get initial pull complete notification");
-                loop {
-                    sync.push_events(&clients, &mut dispatch_rx).await;
-                }
-            };
-            fut.instrument(tracing::info_span!("federation_push_task"))
-        });
+        tokio::task::Builder::new()
+            .name("federation_push_task")
+            .spawn({
+                let sync = sync.clone();
+                let fut = async move {
+                    tracing::info!("started task");
+                    initial_pull_rx
+                        .await
+                        .expect("failed to get initial pull complete notification");
+                    loop {
+                        sync.push_events(&clients, &mut dispatch_rx).await;
+                    }
+                };
+                fut.instrument(tracing::info_span!("federation_push_task"))
+            });
 
         sync
     }
