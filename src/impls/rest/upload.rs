@@ -90,7 +90,7 @@ impl Service<HttpRequest> for UploadService {
                         Ok(http::Response::builder()
                             .status(StatusCode::OK)
                             .body(box_body(Body::from(
-                                format!(r#"{{ "id": "{}" }}"#, id).into_bytes(),
+                                format!(r#"{{ "id": "{id}" }}"#).into_bytes(),
                             )))
                             .unwrap())
                     }

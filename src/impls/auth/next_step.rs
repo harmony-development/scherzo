@@ -80,7 +80,7 @@ pub async fn handler(
                             });
                         };
 
-                        tracing::debug!("handling form '{}'", title);
+                        tracing::debug!("handling form '{title}'");
 
                         let mut values = Vec::with_capacity(fields.len());
 
@@ -120,9 +120,9 @@ pub async fn handler(
         drop(step_stack);
 
         if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
-            tracing::debug!("sending next step: {:?}", next_step);
+            tracing::debug!("sending next step: {next_step:?}");
             if let Err(err) = chan.send(next_step.clone()).await {
-                tracing::error!("failed to send auth step: {}", err);
+                tracing::error!("failed to send auth step: {err}");
             }
         } else {
             tracing::debug!("no stream found, pushing to queue");
@@ -217,10 +217,7 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
                 step: form("register", fields),
             }
         }
-        choice => bail!((
-            "h.invalid-choice",
-            format!("got invalid choice: {}", choice),
-        )),
+        choice => bail!(("h.invalid-choice", format!("got invalid choice: {choice}"),)),
     };
 
     Ok(step)
@@ -292,7 +289,7 @@ pub fn handle_fields(
             }
             field => bail!((
                 "h.invalid-field-type",
-                format!("got invalid field type: {}", field)
+                format!("got invalid field type: {field}")
             )),
         }
     }

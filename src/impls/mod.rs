@@ -215,7 +215,7 @@ pub async fn send_email(
 ) -> ServerResult<()> {
     let to = to
         .parse::<Mailbox>()
-        .map_err(|err| ("h.invalid-email", format!("email is invalid: {}", err)))?;
+        .map_err(|err| ("h.invalid-email", format!("email is invalid: {err}")))?;
     let from = deps
         .config
         .email
@@ -259,13 +259,11 @@ pub async fn send_email(
         .map_err(|err| err.to_string())?;
 
     if !response.is_positive() {
+        let code = response.code();
+        let error = response.first_line().unwrap_or("unknown error");
         bail!((
             "scherzo.mailserver-error",
-            format!(
-                "failed to send email (code {}): {}",
-                response.code(),
-                response.first_line().unwrap_or("unknown error")
-            )
+            format!("failed to send email (code {code}): {error}")
         ));
     }
 

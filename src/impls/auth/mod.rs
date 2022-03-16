@@ -146,7 +146,7 @@ impl AuthServer {
                                             } else if profile.account_kind() != AccountKind::Bot
                                                 && auth_how_old >= SESSION_EXPIRE
                                             {
-                                                tracing::debug!("user {} session has expired", id);
+                                                tracing::debug!("user {id} session has expired");
                                                 batch.remove(auth_key);
                                                 batch.remove(token_key(id));
                                                 batch.remove(atime_key(id));
@@ -161,11 +161,11 @@ impl AuthServer {
                                 .await
                                 .map_err(ServerError::DbError)
                             {
-                                tracing::error!("error applying auth token batch: {}", err);
+                                tracing::error!("error applying auth token batch: {err}");
                             }
                         }
                         Err(err) => {
-                            tracing::error!("error scanning tree for tokens: {}", err);
+                            tracing::error!("error scanning tree for tokens: {err}");
                         }
                     }
 

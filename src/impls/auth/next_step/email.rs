@@ -38,7 +38,7 @@ pub async fn send_token_email(
         ),
     ];*/
 
-    let subject = format!("Harmony - {} for {}", action, &deps.config.host);
+    let subject = format!("Harmony - {action} for {}", &deps.config.host);
 
     send_email(deps, to, subject, plain_body, None, Vec::new()).await?;
 

@@ -77,7 +77,7 @@ impl Service<HttpRequest> for DownloadService {
 
             let (content_disposition, content_type, content_body, content_length) = match file_id {
                 FileId::External(url) => {
-                    info!("Serving external image from {}", url);
+                    info!("Serving external image from {url}");
                     let filename = url.path().split('/').last().unwrap_or("unknown");
                     let disposition = unsafe { disposition_header(filename) };
                     let resp = match make_request(http_client, url.to_string()).await {
@@ -122,14 +122,12 @@ impl Service<HttpRequest> for DownloadService {
                     } else {
                         // Safety: this is always valid, since HMC is a valid URL
                         let url = unsafe {
-                            format!(
-                                "https://{}:{}/_harmony/media/download/{}",
-                                hmc.server(),
-                                hmc.port(),
-                                hmc.id()
-                            )
-                            .parse()
-                            .unwrap_unchecked()
+                            let server = hmc.server();
+                            let port = hmc.port();
+                            let id = hmc.id();
+                            format!("https://{server}:{port}/_harmony/media/download/{id}")
+                                .parse()
+                                .unwrap_unchecked()
                         };
                         let resp = match make_request(http_client, url).await {
                             Ok(resp) => resp,
@@ -156,7 +154,7 @@ impl Service<HttpRequest> for DownloadService {
                     }
                 }
                 FileId::Id(id) => {
-                    info!("Serving local media with id {}", id);
+                    info!("Serving local media with id {id}");
                     match deps.media.get_file(&id).await {
                         Ok(handle) => file_handle_to_data(handle),
                         Err(err) => return Ok(err.into_rest_http_response()),
@@ -202,7 +200,7 @@ fn file_handle_to_data(handle: FileHandle) -> (HeaderValue, HeaderValue, Body, H
 
 // SAFETY: the `name` argument MUST ONLY contain ASCII characters.
 unsafe fn disposition_header(name: &str) -> HeaderValue {
-    string_header(format!("inline; filename={}", name))
+    string_header(format!("inline; filename={name}"))
 }
 
 // SAFETY: the `string` argument MUST ONLY contain ASCII characters.
@@ -242,7 +240,7 @@ fn file_stream(
                 let n = match ready!(poll_read_buf(Pin::new(&mut f), cx, &mut buf)) {
                     Ok(n) => n as u64,
                     Err(err) => {
-                        tracing::debug!("file read error: {}", err);
+                        tracing::debug!("file read error: {err}");
                         return Poll::Ready(Some(Err(err)));
                     }
                 };

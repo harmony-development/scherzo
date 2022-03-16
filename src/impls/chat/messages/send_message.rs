@@ -50,7 +50,7 @@ pub async fn handler(
 
     let action_content = opt_fut(admin_action.map(|action| {
         admin_action::run(svc.deps.as_ref(), action)
-            .map(|err| err.unwrap_or_else(|err| format!("error: {}", err)))
+            .map(|err| err.unwrap_or_else(|err| format!("error: {err}")))
     }))
     .await;
 

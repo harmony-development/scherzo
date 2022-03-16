@@ -67,7 +67,7 @@ impl SyncServer {
                     Ok((key, _)) => key,
                     Err(err) => {
                         let err = ServerError::DbError(err);
-                        error!("error occured while getting hosts for sync: {}", err);
+                        error!("error occured while getting hosts for sync: {err}");
                         return None;
                     }
                 };
@@ -89,7 +89,7 @@ impl SyncServer {
                 {
                     for event in queue.event_queue {
                         if let Err(err) = self.push_logic(&host, event).await {
-                            error!("error while executing sync event: {}", err);
+                            error!("error while executing sync event: {err}");
                         }
                     }
                 }
@@ -115,7 +115,7 @@ impl SyncServer {
                                 v.deserialize(&mut rkyv::Infallible).unwrap()
                             });
                             if let Err(err) = self.push_to_event_queue(&host, queue, event).await {
-                                error!("error while pushing to event queue: {}", err);
+                                error!("error while pushing to event queue: {err}");
                             }
                             continue;
                         }
@@ -145,11 +145,11 @@ impl SyncServer {
                                 v.deserialize(&mut rkyv::Infallible).unwrap()
                             });
                             if let Err(err) = self.push_to_event_queue(&host, queue, event).await {
-                                error!("error while pushing to event queue: {}", err);
+                                error!("error while pushing to event queue: {err}");
                             }
                         }
                     }
-                    Err(err) => error!("error occured while getting event queue: {}", err),
+                    Err(err) => error!("error occured while getting event queue: {err}"),
                 }
             }
         }
