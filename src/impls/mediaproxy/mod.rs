@@ -7,7 +7,7 @@ use dashmap::{mapref::one::Ref, DashMap};
 use reqwest::Client as HttpClient;
 use webpage::HTML;
 
-use std::time::Instant;
+use std::{ops::Not, time::Instant};
 
 use super::{get_mimetype, http, prelude::*};
 
@@ -67,16 +67,20 @@ impl From<Metadata> for HarmonyMetadata {
     }
 }
 
+const DEFAULT_MAX_AGE: u64 = 30 * 60;
+
 struct TimedCacheValue<T> {
     value: T,
     since: Instant,
+    max_age: u64,
 }
 
 impl<T> TimedCacheValue<T> {
-    fn new(value: T) -> Self {
+    fn new(value: T, max_age: u64) -> Self {
         Self {
             value,
             since: Instant::now(),
+            max_age,
         }
     }
 }
@@ -91,7 +95,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
         // Value is available, check if it is expired
         Some(val) => {
             // Remove value if it is expired
-            if val.since.elapsed().as_secs() >= 30 * 60 {
+            if val.since.elapsed().as_secs() >= val.max_age {
                 drop(val); // explicit drop to tell we don't need it anymore
                 CACHE.remove(url);
                 None
@@ -140,6 +144,27 @@ impl MediaproxyServer {
             .error_for_status()
             .map_err(ServerError::FailedToFetchLink)?;
 
+        let max_age = response
+            .headers()
+            .get(&http::header::CACHE_CONTROL)
+            .and_then(|v| {
+                let s = v.to_str().ok()?;
+                let parse_max_age = || {
+                    s.split(',')
+                        .map(str::trim)
+                        .find_map(|item| {
+                            item.strip_prefix("max-age=")
+                                .or_else(|| item.strip_prefix("s-maxage="))
+                        })
+                        .and_then(|raw| raw.parse::<u64>().ok())
+                };
+                s.contains("no-store")
+                    .not()
+                    .then(parse_max_age)
+                    .unwrap_or(Some(0))
+            })
+            .unwrap_or(DEFAULT_MAX_AGE);
+
         let is_html = response
             .headers()
             .get(&http::header::CONTENT_TYPE)
@@ -180,7 +205,7 @@ impl MediaproxyServer {
         };
 
         // Insert to cache since successful
-        CACHE.insert(raw_url, TimedCacheValue::new(metadata.clone()));
+        CACHE.insert(raw_url, TimedCacheValue::new(metadata.clone(), max_age));
 
         Ok(metadata)
     }
