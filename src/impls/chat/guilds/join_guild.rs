@@ -44,7 +44,7 @@ pub async fn handler(
         chat_tree.delete_invite_logic(invite_id).await?;
     }
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::JoinedMember(stream_event::MemberJoined {
             guild_id,

@@ -33,5 +33,5 @@ pub async fn handler(
         EventContext::new(equipped_users),
     );
 
-    Ok((DeleteEmoteFromPackResponse {}).into_response())
+    Ok(DeleteEmoteFromPackResponse::new().into_response())
 }

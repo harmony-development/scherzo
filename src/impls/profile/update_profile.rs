@@ -44,5 +44,5 @@ pub async fn handler(
         ),
     );
 
-    Ok((UpdateProfileResponse {}).into_response())
+    Ok(UpdateProfileResponse::new().into_response())
 }

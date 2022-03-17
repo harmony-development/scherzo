@@ -12,5 +12,5 @@ pub async fn handler(
         .insert(make_user_metadata_key(user_id, &app_id), app_data)
         .await?;
 
-    Ok((SetAppDataResponse {}).into_response())
+    Ok(SetAppDataResponse::new().into_response())
 }

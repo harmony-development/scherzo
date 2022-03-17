@@ -32,7 +32,7 @@ pub async fn handler(
         )
         .await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::LeftMember(stream_event::MemberLeft {
             guild_id,
@@ -45,5 +45,5 @@ pub async fn handler(
 
     svc.dispatch_guild_leave(guild_id, user_to_ban).await?;
 
-    Ok((BanUserResponse {}).into_response())
+    Ok(BanUserResponse::new().into_response())
 }

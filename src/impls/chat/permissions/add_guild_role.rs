@@ -29,7 +29,7 @@ pub async fn handler(
         pingable,
     };
     let role_id = chat_tree.add_guild_role_logic(guild_id, None, role).await?;
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleCreated(stream_event::RoleCreated {
             guild_id,

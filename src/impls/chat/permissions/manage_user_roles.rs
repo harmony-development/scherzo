@@ -30,7 +30,7 @@ pub async fn handler(
         .manage_user_roles_logic(guild_id, user_to_manage, give_role_ids, take_role_ids)
         .await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::UserRolesUpdated(stream_event::UserRolesUpdated {
             guild_id,
@@ -41,5 +41,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((ManageUserRolesResponse {}).into_response())
+    Ok(ManageUserRolesResponse::new().into_response())
 }

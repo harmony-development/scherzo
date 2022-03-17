@@ -54,7 +54,7 @@ pub async fn handler(
     }))
     .await;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::SentMessage(stream_event::MessageSent {
             echo_id,
@@ -77,7 +77,7 @@ pub async fn handler(
         let (message_id, message) = chat_tree
             .send_with_system(guild_id, channel_id, content)
             .await?;
-        svc.send_event_through_chan(
+        svc.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::SentMessage(stream_event::MessageSent {
                 echo_id,

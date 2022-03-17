@@ -33,7 +33,7 @@ pub async fn handler(
     pinned_msgs_raw.extend_from_slice(&message_id.to_be_bytes());
     chat_tree.insert(key, pinned_msgs_raw).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::MessagePinned(stream_event::MessagePinned {
             guild_id,

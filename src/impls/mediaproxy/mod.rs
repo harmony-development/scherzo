@@ -72,6 +72,7 @@ const DEFAULT_MAX_AGE: u64 = 30 * 60;
 struct TimedCacheValue<T> {
     value: T,
     since: Instant,
+    /// this corresponds to the `max-age` of `cache-control` header
     max_age: u64,
 }
 
@@ -82,6 +83,11 @@ impl<T> TimedCacheValue<T> {
             since: Instant::now(),
             max_age,
         }
+    }
+
+    /// whether this value is stale (and should not be used) or not
+    fn is_stale(&self) -> bool {
+        self.since.elapsed().as_secs() >= self.max_age
     }
 }
 
@@ -95,7 +101,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
         // Value is available, check if it is expired
         Some(val) => {
             // Remove value if it is expired
-            if val.since.elapsed().as_secs() >= val.max_age {
+            if val.is_stale() {
                 drop(val); // explicit drop to tell we don't need it anymore
                 CACHE.remove(url);
                 None
@@ -147,10 +153,11 @@ impl MediaproxyServer {
         let max_age = response
             .headers()
             .get(&http::header::CACHE_CONTROL)
-            .and_then(|v| {
-                let s = v.to_str().ok()?;
+            .and_then(|header| {
+                let header_str = header.to_str().ok()?;
                 let parse_max_age = || {
-                    s.split(',')
+                    header_str
+                        .split(',')
                         .map(str::trim)
                         .find_map(|item| {
                             item.strip_prefix("max-age=")
@@ -158,7 +165,8 @@ impl MediaproxyServer {
                         })
                         .and_then(|raw| raw.parse::<u64>().ok())
                 };
-                s.contains("no-store")
+                header_str
+                    .contains("no-store")
                     .not()
                     .then(parse_max_age)
                     .unwrap_or(Some(0))

@@ -39,7 +39,7 @@ pub async fn handler(
         .insert(make_pinned_msgs_key(guild_id, channel_id), pinned_msgs_raw)
         .await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::MessageUnpinned(stream_event::MessageUnpinned {
             guild_id,

@@ -25,5 +25,5 @@ pub async fn handler(
         return Err(ServerError::MustNotBeLastOwner.into());
     }
 
-    Ok((GiveUpOwnershipResponse {}).into_response())
+    Ok(GiveUpOwnershipResponse::new().into_response())
 }

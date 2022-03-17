@@ -309,7 +309,7 @@ impl ChatServer {
     }
 
     #[inline(always)]
-    fn send_event_through_chan(
+    fn broadcast(
         &self,
         sub: EventSub,
         event: stream_event::Event,
@@ -354,7 +354,7 @@ impl ChatServer {
                     .chat_tree
                     .remove_guild_from_guild_list(user_id, guild_id, "")
                     .await?;
-                self.send_event_through_chan(
+                self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
                         guild_id,
@@ -382,7 +382,7 @@ impl ChatServer {
                     .chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, "")
                     .await?;
-                self.send_event_through_chan(
+                self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
                         guild_id,
@@ -403,7 +403,7 @@ impl ChatServer {
         message_id: u64,
         reaction: Reaction,
     ) {
-        self.send_event_through_chan(
+        self.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::NewReactionAdded(stream_event::NewReactionAdded {
                 guild_id,
@@ -428,7 +428,7 @@ impl ChatServer {
         message_id: u64,
         data: String,
     ) {
-        self.send_event_through_chan(
+        self.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::ReactionAdded(stream_event::ReactionAdded {
                 guild_id,
@@ -453,7 +453,7 @@ impl ChatServer {
         message_id: u64,
         data: String,
     ) {
-        self.send_event_through_chan(
+        self.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::ReactionRemoved(stream_event::ReactionRemoved {
                 guild_id,

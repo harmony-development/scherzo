@@ -40,5 +40,5 @@ pub async fn handler(
         EventContext::new(equipped_users),
     );
 
-    Ok((AddEmoteToPackResponse {}).into_response())
+    Ok(AddEmoteToPackResponse::new().into_response())
 }

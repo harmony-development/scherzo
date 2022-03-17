@@ -45,7 +45,7 @@ pub async fn handler(
     let ser_role = rkyv_ser(&role);
     chat_tree.insert(key, ser_role).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleUpdated(stream_event::RoleUpdated {
             guild_id,
@@ -64,5 +64,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((ModifyGuildRoleResponse {}).into_response())
+    Ok(ModifyGuildRoleResponse::new().into_response())
 }

@@ -25,5 +25,5 @@ pub async fn handler(
         return Err(ServerError::EmotePackNotFound.into());
     }
 
-    Ok((EquipEmotePackResponse {}).into_response())
+    Ok(EquipEmotePackResponse::new().into_response())
 }

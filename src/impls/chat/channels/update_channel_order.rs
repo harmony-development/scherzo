@@ -32,7 +32,7 @@ pub async fn handler(
             .update_channel_order_logic(guild_id, channel_id, Some(position.clone()))
             .await?;
 
-        svc.send_event_through_chan(
+        svc.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::EditedChannelPosition(stream_event::ChannelPositionUpdated {
                 guild_id,
@@ -44,5 +44,5 @@ pub async fn handler(
         );
     }
 
-    Ok((UpdateChannelOrderResponse {}).into_response())
+    Ok(UpdateChannelOrderResponse::new().into_response())
 }

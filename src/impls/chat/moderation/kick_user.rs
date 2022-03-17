@@ -25,7 +25,7 @@ pub async fn handler(
 
     chat_tree.kick_user_logic(guild_id, user_to_kick).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::LeftMember(stream_event::MemberLeft {
             guild_id,
@@ -38,5 +38,5 @@ pub async fn handler(
 
     svc.dispatch_guild_leave(guild_id, user_to_kick).await?;
 
-    Ok((KickUserResponse {}).into_response())
+    Ok(KickUserResponse::new().into_response())
 }

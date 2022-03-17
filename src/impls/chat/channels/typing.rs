@@ -20,7 +20,7 @@ pub async fn handler(
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::Typing(stream_event::Typing {
             user_id,
@@ -36,5 +36,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((TypingResponse {}).into_response())
+    Ok(TypingResponse::new().into_response())
 }

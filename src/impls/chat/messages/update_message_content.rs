@@ -54,7 +54,7 @@ pub async fn handler(
     let buf = rkyv_ser(&message);
     chat_tree.insert(key, buf).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::EditedMessage(stream_event::MessageUpdated {
             guild_id,

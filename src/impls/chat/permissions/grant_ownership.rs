@@ -24,5 +24,5 @@ pub async fn handler(
     guild.owner_ids.push(new_owner_id);
     chat_tree.put_guild_logic(guild_id, guild).await?;
 
-    Ok((GrantOwnershipResponse {}).into_response())
+    Ok(GrantOwnershipResponse::new().into_response())
 }
