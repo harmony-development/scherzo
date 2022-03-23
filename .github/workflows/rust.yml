@@ -138,7 +138,7 @@ jobs:
           SSH_HOST: ${{secrets.ACTIONS_SSH_HOST}}
       - name: Trigger integration testing
         if: ${{ github.ref == 'refs/heads/master' }}
-        uses: peter-evans/repository-dispatch@v1
+        uses: peter-evans/repository-dispatch@v2
         with:
           token: ${{ secrets.INTEGRATION_TEST_PAT }}
           repository: harmony-development/integration-testing
