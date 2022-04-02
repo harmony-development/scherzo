@@ -12,13 +12,15 @@ pub async fn handler(
     } = request.into_message().await?;
 
     if user_id == user_to_kick {
-        return Err(ServerError::CantKickOrBanYourself.into());
+        bail!(ServerError::CantKickOrBanYourself);
     }
 
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree.check_guild_user(guild_id, user_id).await?;
-    chat_tree.is_user_in_guild(guild_id, user_to_kick).await?;
+    chat_tree
+        .check_user_in_guild(guild_id, user_to_kick)
+        .await?;
     chat_tree
         .check_perms(guild_id, None, user_id, "user.manage.kick", false)
         .await?;

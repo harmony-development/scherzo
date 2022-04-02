@@ -26,7 +26,7 @@ pub async fn handler(
     let mut role = if let Some(raw) = chat_tree.get(key).await? {
         db::deser_role(raw)
     } else {
-        return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
+        bail!(ServerError::NoSuchRole { guild_id, role_id });
     };
 
     if let Some(new_name) = new_name.clone() {

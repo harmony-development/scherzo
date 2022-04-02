@@ -617,8 +617,14 @@ impl ChatTree {
         })
     }
 
-    pub async fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+    pub async fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
         self.contains_key(&make_member_key(guild_id, user_id))
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn check_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+        self.is_user_in_guild(guild_id, user_id)
             .await?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::UserNotInGuild { guild_id, user_id }))
@@ -700,7 +706,7 @@ impl ChatTree {
 
     pub async fn check_guild_user(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
         self.check_guild(guild_id).await?;
-        self.is_user_in_guild(guild_id, user_id).await
+        self.check_user_in_guild(guild_id, user_id).await
     }
 
     #[inline(always)]

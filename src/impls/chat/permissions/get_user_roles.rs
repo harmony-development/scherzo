@@ -26,7 +26,9 @@ pub async fn handler(
         if user_to_fetch == user_id {
             fetch_other_user = true;
         }
-        chat_tree.is_user_in_guild(guild_id, user_to_fetch).await?;
+        chat_tree
+            .check_user_in_guild(guild_id, user_to_fetch)
+            .await?;
     }
     if fetch_other_user {
         chat_tree
