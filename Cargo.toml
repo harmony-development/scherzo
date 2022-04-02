@@ -36,7 +36,7 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "rkyv",
     "rkyv_validation",
 ] }
-prost = { version = "0.9" }
+prost = { version = "0.10" }
 hrpc = { version = "0.33", features = [
     "http_server",
     "http_hyper_client",
@@ -83,7 +83,7 @@ itertools = { version = "0.10", default-features = false, features = [
 ], optional = true }
 
 rand = "0.8"
-argon2 = "0.3"
+argon2 = "0.4"
 ed25519-compact = "1"
 ahash = "0.7"
 
