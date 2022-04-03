@@ -18,7 +18,7 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .check_channel_user(guild_id, user_id, channel_id)
         .await?;
     chat_tree
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
@@ -29,12 +29,14 @@ pub async fn handler(
         .process_message_content(svc.deps.as_ref(), request.content.take())
         .await?;
 
-    let admin_action = chat_tree
-        .admin_guild_keys
-        .get()
-        .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id))
-        .then(|| content.text.parse::<admin_action::AdminAction>().ok())
-        .flatten();
+    let admin_action = guild_id.and_then(|guild_id| {
+        chat_tree
+            .admin_guild_keys
+            .get()
+            .map_or(false, |keys| keys.check_if_cmd(guild_id, channel_id))
+            .then(|| content.text.parse::<admin_action::AdminAction>().ok())
+            .flatten()
+    });
 
     let (message_id, message) = chat_tree
         .send_message_logic(
@@ -45,6 +47,7 @@ pub async fn handler(
             request.overrides,
             request.in_reply_to,
             request.metadata,
+            request.actions,
         )
         .await?;
 
@@ -55,7 +58,7 @@ pub async fn handler(
     .await;
 
     svc.broadcast(
-        EventSub::Guild(guild_id),
+        guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
         stream_event::Event::SentMessage(stream_event::MessageSent {
             echo_id,
             guild_id,
@@ -63,12 +66,7 @@ pub async fn handler(
             message_id,
             message: Some(message),
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            "messages.view",
-            false,
-        )),
+        PermCheck::maybe_new(guild_id, channel_id, "messages.view"),
         EventContext::empty(),
     );
 
@@ -78,7 +76,7 @@ pub async fn handler(
             .send_with_system(guild_id, channel_id, content)
             .await?;
         svc.broadcast(
-            EventSub::Guild(guild_id),
+            guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
             stream_event::Event::SentMessage(stream_event::MessageSent {
                 echo_id,
                 guild_id,
@@ -86,12 +84,7 @@ pub async fn handler(
                 message_id,
                 message: Some(message),
             }),
-            Some(PermCheck::new(
-                guild_id,
-                Some(channel_id),
-                "messages.view",
-                false,
-            )),
+            PermCheck::maybe_new(guild_id, channel_id, "messages.view"),
             EventContext::empty(),
         );
     }

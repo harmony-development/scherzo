@@ -7,15 +7,7 @@ use super::prelude::*;
 
 use crate::api::{
     exports::hrpc::bail_result,
-    voice::{
-        stream_message_request::{Initialize, Message as RequestMessage},
-        stream_message_response::{
-            Initialized, JoinedChannel, Message as ResponseMessage, PreparedForJoinChannel,
-            UserJoined, UserLeft,
-        },
-        voice_service_server::VoiceService,
-        *,
-    },
+    webrtc::{web_rtc_service_server::WebRtcService, *},
 };
 use ahash::RandomState;
 use dashmap::DashMap;
@@ -51,14 +43,14 @@ enum Event {
 }
 
 #[derive(Clone)]
-pub struct VoiceServer {
+pub struct WebRtcServer {
     worker_pool: WorkerPool,
     channels: Channels,
     disable_ratelimits: bool,
     deps: Arc<Dependencies>,
 }
 
-impl VoiceServer {
+impl WebRtcServer {
     pub fn new(deps: Arc<Dependencies>, log_level: Level) -> Self {
         Self {
             worker_pool: WorkerPool::new(log_level),
@@ -69,7 +61,7 @@ impl VoiceServer {
     }
 }
 
-impl VoiceService for VoiceServer {
+impl WebRtcService for WebRtcServer {
     impl_ws_handlers! {
         #[rate(1, 10)]
         stream_message, StreamMessageRequest, StreamMessageResponse;

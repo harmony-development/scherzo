@@ -71,7 +71,6 @@ pub async fn handler(
                 guild_id,
                 None,
                 all_permissions::ROLES_MANAGE,
-                false,
             )),
             EventContext::empty(),
         );

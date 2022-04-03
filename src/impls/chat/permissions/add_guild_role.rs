@@ -39,12 +39,7 @@ pub async fn handler(
             hoist,
             pingable,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            None,
-            all_permissions::ROLES_GET,
-            false,
-        )),
+        Some(PermCheck::new(guild_id, None, all_permissions::ROLES_GET)),
         EventContext::empty(),
     );
 

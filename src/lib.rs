@@ -2,7 +2,6 @@
     once_cell,
     let_else,
     const_intrinsic_copy,
-    const_ptr_offset,
     const_mut_refs,
     type_alias_impl_trait
 )]

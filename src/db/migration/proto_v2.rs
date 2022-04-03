@@ -68,6 +68,7 @@ define_migration!(|db| {
         metadata: old.metadata.map(Into::into),
         overrides: old.overrides.map(Into::into),
         reactions: old.reactions.into_iter().map(Into::into).collect(),
+        actions: Vec::new(),
     })
     .await?;
     let profile_tree = db.open_tree(b"profile").await?;
@@ -135,9 +136,20 @@ impl From<chat::embed::EmbedHeading> for EmbedHeading {
 
 impl From<chat::Action> for Action {
     fn from(old: chat::Action) -> Self {
+        let info = old
+            .kind
+            .as_ref()
+            .map(|kind| match kind {
+                chat::action::Kind::Button(old) => old.data.clone(),
+                chat::action::Kind::Input(old) => old.data.clone(),
+                _ => Vec::new(),
+            })
+            .unwrap_or_else(Vec::new);
+
         Action {
             action_type: old.action_type,
             kind: old.kind.map(Into::into),
+            info,
         }
     }
 }
@@ -146,7 +158,6 @@ impl From<chat::action::Kind> for ActionKind {
     fn from(old: chat::action::Kind) -> Self {
         match old {
             chat::action::Kind::Button(old) => ActionKind::Button(ButtonAction {
-                data: old.data,
                 text: old.text,
                 url: old.url,
             }),
@@ -155,9 +166,9 @@ impl From<chat::action::Kind> for ActionKind {
                 label: old.label,
             }),
             chat::action::Kind::Input(old) => ActionKind::Input(InputAction {
-                data: old.data,
                 label: old.label,
                 multiline: old.multiline,
+                default: None,
             }),
         }
     }

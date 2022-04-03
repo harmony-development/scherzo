@@ -58,12 +58,7 @@ pub async fn handler(
             new_name,
             new_metadata,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            "messages.view",
-            false,
-        )),
+        Some(PermCheck::new(guild_id, Some(channel_id), "messages.view")),
         EventContext::empty(),
     );
 

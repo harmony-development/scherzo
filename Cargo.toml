@@ -20,7 +20,7 @@ required-features = ["sled", "sqlite"]
 
 [features]
 default = ["sled"]
-voice = ["mediasoup"]
+webrtc = ["mediasoup"]
 jemalloc = ["tikv-jemallocator"]
 
 # dbs

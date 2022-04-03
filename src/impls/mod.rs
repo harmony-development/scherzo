@@ -8,8 +8,8 @@ pub mod mediaproxy;
 pub mod profile;
 pub mod rest;
 pub mod sync;
-#[cfg(feature = "voice")]
-pub mod voice;
+#[cfg(feature = "webrtc")]
+pub mod webrtc;
 
 use prelude::*;
 
@@ -176,8 +176,8 @@ pub fn setup_server(
     let chat_server = ChatServer::new(deps.clone());
     let mediaproxy_server = MediaproxyServer::new(deps.clone());
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
-    #[cfg(feature = "voice")]
-    let voice_server = self::voice::VoiceServer::new(deps.clone(), log_level);
+    #[cfg(feature = "webrtc")]
+    let webrtc_server = self::webrtc::WebRtcServer::new(deps.clone(), log_level);
 
     let profile = ProfileServiceServer::new(profile_server);
     let emote = EmoteServiceServer::new(emote_server);
@@ -185,8 +185,9 @@ pub fn setup_server(
     let chat = ChatServiceServer::new(chat_server);
     let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
     let sync = PostboxServiceServer::new(sync_server);
-    #[cfg(feature = "voice")]
-    let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
+    #[cfg(feature = "webrtc")]
+    let webrtc =
+        crate::api::webrtc::web_rtc_service_server::WebRtcServiceServer::new(webrtc_server);
 
     let rest = RestServiceLayer::new(deps);
 
@@ -197,8 +198,8 @@ pub fn setup_server(
         chat,
         mediaproxy,
         sync,
-        #[cfg(feature = "voice")]
-        voice
+        #[cfg(feature = "webrtc")]
+        webrtc
     );
 
     (server, rest)

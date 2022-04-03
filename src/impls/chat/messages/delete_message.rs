@@ -15,7 +15,7 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .check_channel_user(guild_id, user_id, channel_id)
         .await?;
     if chat_tree
         .get_message_logic(guild_id, channel_id, message_id)
@@ -42,18 +42,13 @@ pub async fn handler(
         .map_err(ServerError::DbError)?;
 
     svc.broadcast(
-        EventSub::Guild(guild_id),
+        guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
         stream_event::Event::DeletedMessage(stream_event::MessageDeleted {
             guild_id,
             channel_id,
             message_id,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            "messages.view",
-            false,
-        )),
+        PermCheck::maybe_new(guild_id, channel_id, "messages.view"),
         EventContext::empty(),
     );
 

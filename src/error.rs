@@ -54,15 +54,20 @@ pub enum ServerError {
         guild_id: u64,
         user_id: u64,
     },
+    UserNotInPrivateChannel {
+        channel_id: u64,
+        user_id: u64,
+    },
     Unauthenticated,
     NotImplemented,
     NoSuchMessage {
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
         message_id: u64,
     },
     GuildAlreadyExists(u64),
     NoSuchGuild(u64),
+    NoSuchPrivateChannel(u64),
     ChannelAlreadyExists {
         guild_id: u64,
         channel_id: u64,
@@ -193,6 +198,12 @@ impl Display for ServerError {
             ServerError::UserNotInGuild { guild_id, user_id } => {
                 write!(f, "user {} not in guild {}", user_id, guild_id)
             }
+            ServerError::UserNotInPrivateChannel {
+                channel_id,
+                user_id,
+            } => {
+                write!(f, "user {} not in private channel {}", user_id, channel_id)
+            }
             ServerError::UserAlreadyExists => f.write_str("user already exists"),
             ServerError::UserAlreadyInGuild => f.write_str("user already in guild"),
             ServerError::Unauthenticated => f.write_str("invalid-session"),
@@ -220,6 +231,9 @@ impl Display for ServerError {
                 write!(f, "guild {} already exists", guild_id)
             }
             ServerError::NoSuchGuild(id) => write!(f, "no such guild with id {}", id),
+            ServerError::NoSuchPrivateChannel(id) => {
+                write!(f, "no such private channel with id {}", id)
+            }
             ServerError::NoSuchUser(id) => write!(f, "no such user with id {}", id),
             ServerError::NoSuchMessage {
                 guild_id,
@@ -227,7 +241,7 @@ impl Display for ServerError {
                 message_id,
             } => write!(
                 f,
-                "no such message {} in channel {} in guild {}",
+                "no such message {} in channel {} in guild {:?}",
                 message_id, channel_id, guild_id
             ),
             ServerError::NoSuchInvite(id) => write!(f, "no such invite with id {}", id),
@@ -368,7 +382,9 @@ impl ServerError {
             )
             | ServerError::MustNotBeLastOwner
             | ServerError::ContentCantBeSentByUser
-            | ServerError::InvalidProtoMessage(_) => StatusCode::BAD_REQUEST,
+            | ServerError::InvalidProtoMessage(_)
+            | ServerError::NoSuchPrivateChannel(_)
+            | ServerError::UserNotInPrivateChannel { .. } => StatusCode::BAD_REQUEST,
             ServerError::FederationDisabled | ServerError::HostNotAllowed => StatusCode::FORBIDDEN,
             ServerError::IoError(_)
             | ServerError::InternalServerError
@@ -426,7 +442,9 @@ impl ServerError {
             ServerError::WrongStep { .. } => "h.bad-auth-choice",
             ServerError::WrongTypeForField { .. } => "h.missing-form",
             ServerError::WrongEmailOrPassword { .. } => "h.bad-password\nh.bad-email",
-            ServerError::UserNotInGuild { .. } => "h.not-joined",
+            ServerError::UserNotInGuild { .. } | ServerError::UserNotInPrivateChannel { .. } => {
+                "h.not-joined"
+            }
             ServerError::NotImplemented => HrpcErrorIdentifier::NotImplemented.as_id(),
             ServerError::ChannelAlreadyExists { .. } => "h.channel-already-exists",
             ServerError::GuildAlreadyExists(_) => "h.guild-already-exists",
@@ -434,6 +452,7 @@ impl ServerError {
             ServerError::NoSuchChannel { .. } => "h.bad-channel-id",
             ServerError::UnderSpecifiedChannels => "h.underspecified-channels",
             ServerError::NoSuchGuild(_) => "h.bad-guild-id",
+            ServerError::NoSuchPrivateChannel(_) => "h.bad-private-channel-id",
             ServerError::NoSuchInvite(_) | ServerError::InviteNameEmpty => "h.bad-invite-id",
             ServerError::NoSuchUser(_) => "h.bad-user-id",
             ServerError::SessionExpired => "h.bad-session",

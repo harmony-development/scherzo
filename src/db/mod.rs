@@ -191,9 +191,19 @@ pub mod chat {
     use super::concat_static;
 
     pub const INVITE_PREFIX: &[u8] = b"invite_";
+    pub const PRIV_CHANNEL_PREFIX: &[u8] = b"priv_";
     pub const ADMIN_GUILD_KEY: &[u8] = b"admin_guild_key_data";
 
     // perms
+
+    #[inline(always)]
+    pub const fn make_guild_key(guild_id: u64) -> [u8; 8] {
+        guild_id.to_be_bytes()
+    }
+
+    pub const fn make_pc_key(channel_id: u64) -> [u8; 13] {
+        concat_static(&[PRIV_CHANNEL_PREFIX, &channel_id.to_be_bytes()])
+    }
 
     pub fn make_guild_perm_key(guild_id: u64, role_id: u64, matches: &str) -> Vec<u8> {
         [
@@ -239,12 +249,34 @@ pub mod chat {
 
     // message
 
-    pub const fn make_pinned_msgs_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
+    pub const fn make_pinned_msgs_key_guild(guild_id: u64, channel_id: u64) -> [u8; 18] {
         concat_static(&[&make_chan_key(guild_id, channel_id), &[6]])
     }
 
-    pub const fn make_next_msg_id_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
+    pub const fn make_pinned_msgs_key_pc(channel_id: u64) -> [u8; 14] {
+        concat_static(&[&make_pc_key(channel_id), &[6]])
+    }
+
+    pub fn make_pinned_msgs_key(guild_id: Option<u64>, channel_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_pinned_msgs_key_pc(channel_id).to_vec(),
+            |guild_id| make_pinned_msgs_key_guild(guild_id, channel_id).to_vec(),
+        )
+    }
+
+    pub const fn make_next_msg_id_key_guild(guild_id: u64, channel_id: u64) -> [u8; 18] {
         concat_static(&[&make_chan_key(guild_id, channel_id), &[7]])
+    }
+
+    pub const fn make_next_msg_id_key_pc(channel_id: u64) -> [u8; 14] {
+        concat_static(&[&make_pc_key(channel_id), &[7]])
+    }
+
+    pub fn make_next_msg_id_key(guild_id: Option<u64>, channel_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_next_msg_id_key_pc(channel_id).to_vec(),
+            |guild_id| make_next_msg_id_key_guild(guild_id, channel_id).to_vec(),
+        )
     }
 
     pub const fn make_role_channel_perms_prefix(
@@ -259,15 +291,45 @@ pub mod chat {
         ])
     }
 
+    pub const fn make_msg_prefix_pc(channel_id: u64) -> [u8; 13] {
+        concat_static(&[&make_pc_key(channel_id), &[9]])
+    }
+
     pub const fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
         concat_static(&[&make_chan_key(guild_id, channel_id), &[9]])
     }
 
-    pub const fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
+    pub const fn make_msg_key_pc(channel_id: u64, message_id: u64) -> [u8; 21] {
+        concat_static(&[&make_msg_prefix_pc(channel_id), &message_id.to_be_bytes()])
+    }
+
+    pub const fn make_msg_key_guild(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
         concat_static(&[
             &make_msg_prefix(guild_id, channel_id),
             &message_id.to_be_bytes(),
         ])
+    }
+
+    pub fn make_msg_key(guild_id: Option<u64>, channel_id: u64, message_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_msg_key_pc(channel_id, message_id).to_vec(),
+            |guild_id| make_msg_key_guild(guild_id, channel_id, message_id).to_vec(),
+        )
+    }
+
+    pub fn make_user_reacted_msg_key_pc(
+        channel_id: u64,
+        message_id: u64,
+        user_id: u64,
+        data: &str,
+    ) -> Vec<u8> {
+        [
+            make_msg_key_pc(channel_id, message_id).as_ref(),
+            &[0],
+            user_id.to_be_bytes().as_ref(),
+            data.as_bytes(),
+        ]
+        .concat()
     }
 
     pub fn make_user_reacted_msg_key(
@@ -278,7 +340,7 @@ pub mod chat {
         data: &str,
     ) -> Vec<u8> {
         [
-            make_msg_key(guild_id, channel_id, message_id).as_ref(),
+            make_msg_key_guild(guild_id, channel_id, message_id).as_ref(),
             &[0],
             user_id.to_be_bytes().as_ref(),
             data.as_bytes(),
@@ -289,6 +351,14 @@ pub mod chat {
     // message
 
     // member
+
+    pub const fn make_pc_mem_prefix(channel_id: u64) -> [u8; 14] {
+        concat_static(&[&make_pc_key(channel_id), &[8]])
+    }
+
+    pub const fn make_member_key_pc(channel_id: u64, user_id: u64) -> [u8; 22] {
+        concat_static(&[&make_pc_mem_prefix(channel_id), &user_id.to_be_bytes()])
+    }
 
     pub const fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
         concat_static(&[&make_guild_mem_prefix(guild_id), &user_id.to_be_bytes()])
