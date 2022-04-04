@@ -12,7 +12,7 @@ use std::{
 };
 
 use harmony_rust_sdk::api::{
-    chat::{guild, ChannelKind, Permission},
+    chat::{ChannelKind, Permission},
     exports::hrpc::server::transport::{http::Hyper, Transport},
 };
 use hrpc::{
@@ -361,13 +361,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
 async fn setup_admin_guild(deps: &Dependencies) {
     let guild_id = deps
         .chat_tree
-        .create_guild_logic(
-            0,
-            "Admin".to_string(),
-            None,
-            None,
-            guild::Kind::NormalUnspecified,
-        )
+        .create_guild_logic(0, "Admin".to_string(), None, None)
         .await
         .unwrap();
     deps.chat_tree
@@ -401,7 +395,7 @@ async fn setup_admin_guild(deps: &Dependencies) {
         .unwrap();
     deps.chat_tree
         .send_with_system(
-            guild_id,
+            Some(guild_id),
             cmd_id,
             Content::default().with_text(admin_action::HELP_TEXT),
         )

@@ -1,6 +1,5 @@
 use std::{
-    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
-    path::Path,
+    collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
 };
 
 use crate::api::{
@@ -13,7 +12,9 @@ use crate::api::{
     harmonytypes::{item_position, Empty, ItemPosition, Metadata},
     sync::{
         event::{
-            Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
+            Kind as DispatchKind, UserAddedToChannel as SyncUserAddedToChannel,
+            UserAddedToGuild as SyncUserAddedToGuild,
+            UserRemovedFromChannel as SyncUserRemovedFromChannel,
             UserRemovedFromGuild as SyncUserRemovedFromGuild,
         },
         Event as DispatchEvent,
@@ -40,6 +41,7 @@ use invites::*;
 use messages::*;
 use moderation::*;
 use permissions::*;
+use private_channels::*;
 
 use super::media::FileHandle;
 
@@ -49,6 +51,7 @@ pub mod invites;
 pub mod messages;
 pub mod moderation;
 pub mod permissions;
+pub mod private_channels;
 pub mod stream_events;
 pub mod trigger_action;
 
@@ -168,11 +171,14 @@ impl ChatServer {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
 
             // add initial subs
-            // TODO: optimize local guild fetching
-            let user_guilds = chat_tree.get_user_guilds(user_id).await?;
-            let initial_subs = user_guilds
-                .into_iter()
-                .filter_map(|g| g.server_id.is_empty().then(|| EventSub::Guild(g.guild_id)));
+            let user_guilds = chat_tree.get_user_local_guilds(user_id).await?;
+            let user_pcs = chat_tree.get_user_local_private_channels(user_id).await?;
+            let initial_subs = user_guilds.into_iter().map(|e| EventSub::Guild(e.guild_id));
+            let initial_subs = initial_subs.chain(
+                user_pcs
+                    .into_iter()
+                    .map(|e| EventSub::PrivateChannel(e.channel_id)),
+            );
             let initial_subs =
                 initial_subs.chain([EventSub::Actions, EventSub::Homeserver].into_iter());
             subs.extend(initial_subs);
@@ -211,7 +217,15 @@ impl ChatServer {
                             tracing::debug!("got new stream events request");
 
                             let sub = match req {
-                                Request::SubscribeToPrivateChannel(_) => todo!("private channels"),
+                                Request::SubscribeToPrivateChannel(SubscribeToPrivateChannel { channel_id }) => {
+                                    match chat_tree.check_private_channel_user(channel_id, user_id).await {
+                                        Ok(_) => EventSub::PrivateChannel(channel_id),
+                                        Err(err) => {
+                                            tracing::error!("{}", err);
+                                            continue;
+                                        }
+                                    }
+                                },
                                 Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
                                     match chat_tree.check_guild_user(guild_id, user_id).await {
                                         Ok(_) => EventSub::Guild(guild_id),
@@ -239,9 +253,16 @@ impl ChatServer {
                         // handle automatic sub handling BEFORE all the other logic because otherwise
                         // `subs.contains()` will just return
                         if manual_sub_handling.not() {
+                            // TODO: i think we need to check whether the server_id is empty here before inserting?
                             match &broadcast.event {
-                                Event::Chat(stream_event::Event::GuildAddedToList(guild)) => subs.insert(EventSub::Guild(guild.guild_id)),
-                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild)) => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildAddedToList(guild))
+                                    => subs.insert(EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild))
+                                    => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::PrivateChannelAddedToList(channel))
+                                    => subs.insert(EventSub::PrivateChannel(channel.channel_id)),
+                                Event::Chat(stream_event::Event::PrivateChannelRemovedFromList(channel))
+                                    => subs.remove(&EventSub::PrivateChannel(channel.channel_id)),
                                 _ => false,
                             };
                         }
@@ -392,6 +413,74 @@ impl ChatServer {
                         guild_id,
                         server_id: String::new(),
                     }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_private_channel_leave(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        match self.deps.profile_tree.local_to_foreign_id(user_id).await? {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromChannel(SyncUserRemovedFromChannel {
+                    user_id: foreign_id,
+                    channel_id,
+                }),
+            ),
+            None => {
+                self.deps
+                    .chat_tree
+                    .remove_pc_from_pc_list(user_id, channel_id, "")
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::PrivateChannelRemovedFromList(
+                        stream_event::PrivateChannelRemovedFromList {
+                            channel_id,
+                            server_id: String::new(),
+                        },
+                    ),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_private_channel_join(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        match self.deps.profile_tree.local_to_foreign_id(user_id).await? {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserAddedToChannel(SyncUserAddedToChannel {
+                    user_id: foreign_id,
+                    channel_id,
+                }),
+            ),
+            None => {
+                self.deps
+                    .chat_tree
+                    .add_pc_to_pc_list(user_id, channel_id, "")
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::PrivateChannelAddedToList(
+                        stream_event::PrivateChannelAddedToList {
+                            channel_id,
+                            server_id: String::new(),
+                        },
+                    ),
                     None,
                     EventContext::new(vec![user_id]),
                 );
@@ -556,6 +645,9 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(2, 60)]
         give_up_ownership, GiveUpOwnershipRequest, GiveUpOwnershipResponse;
         create_private_channel, CreatePrivateChannelRequest, CreatePrivateChannelResponse;
+        delete_private_channel, DeletePrivateChannelRequest, DeletePrivateChannelResponse;
+        get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
+        update_private_channel_members, UpdatePrivateChannelMembersRequest, UpdatePrivateChannelMembersResponse;
         invite_user_to_guild, InviteUserToGuildRequest, InviteUserToGuildResponse;
         get_pending_invites, GetPendingInvitesRequest, GetPendingInvitesResponse;
         reject_pending_invite, RejectPendingInviteRequest, RejectPendingInviteResponse;
@@ -790,31 +882,76 @@ impl ChatTree {
         Ok((message, key))
     }
 
+    pub async fn get_user_local_private_channels(
+        &self,
+        user_id: u64,
+    ) -> ServerResult<Vec<PrivateChannelListEntry>> {
+        let prefix = make_pc_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |channel_id, host| {
+            host.is_empty().then(|| PrivateChannelListEntry {
+                channel_id,
+                server_id: String::new(),
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_private_channels(
+        &self,
+        user_id: u64,
+    ) -> ServerResult<Vec<PrivateChannelListEntry>> {
+        let prefix = make_pc_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |channel_id, host| {
+            Some(PrivateChannelListEntry {
+                channel_id,
+                server_id: host.to_string(),
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_local_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
+        let prefix = make_guild_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |guild_id, host| {
+            host.is_empty().then(|| GuildListEntry {
+                guild_id,
+                server_id: String::new(),
+            })
+        })
+        .await
+    }
+
     pub async fn get_user_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
         let prefix = make_guild_list_key_prefix(user_id);
-        let guild_list = self
+        self.get_user_pc_guilds(prefix, |guild_id, host| {
+            Some(GuildListEntry {
+                guild_id,
+                server_id: host.to_string(),
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_pc_guilds<T>(
+        &self,
+        prefix: impl AsRef<[u8]>,
+        f: impl Fn(u64, &str) -> Option<T>,
+    ) -> ServerResult<Vec<T>> {
+        let prefix = prefix.as_ref();
+        let list = self
             .scan_prefix(&prefix)
             .await
             .try_fold(Vec::new(), |mut all, res| {
-                let (guild_id_raw, _) = res?;
-                let (id_raw, host_raw) = guild_id_raw
-                    .split_at(prefix.len())
-                    .1
-                    .split_at(size_of::<u64>());
+                let (id_raw, _) = res?;
+                let (id, host) = deserialize_id_host(&id_raw, prefix.len());
 
-                // Safety: this unwrap can never cause UB since we split at u64 boundary
-                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
-                // Safety: we never store non UTF-8 hosts, so this can't cause UB
-                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-
-                all.push(GuildListEntry {
-                    guild_id,
-                    server_id: host.to_string(),
-                });
+                if let Some(item) = f(id, host) {
+                    all.push(item);
+                }
 
                 ServerResult::Ok(all)
             })?;
-        Ok(guild_list)
+        Ok(list)
     }
 
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {
@@ -1441,23 +1578,42 @@ impl ChatTree {
         Ok(all)
     }
 
+    /// Adds a private channel to a user's private channel list
+    pub async fn add_pc_to_pc_list(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        server_id: &str,
+    ) -> ServerResult<()> {
+        self.insert(make_pc_list_key(user_id, channel_id, server_id), [])
+            .await?;
+        Ok(())
+    }
+
+    /// Removes a private channel from a user's private channel list
+    pub async fn remove_pc_from_pc_list(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        server_id: &str,
+    ) -> ServerResult<()> {
+        self.chat_tree
+            .remove(&make_pc_list_key(user_id, channel_id, server_id))
+            .await
+            .map(|_| ())
+            .map_err(ServerError::from)
+            .map_err(Into::into)
+    }
+
     /// Adds a guild to a user's guild list
     pub async fn add_guild_to_guild_list(
         &self,
         user_id: u64,
         guild_id: u64,
-        homeserver: &str,
+        server_id: &str,
     ) -> ServerResult<()> {
-        self.insert(
-            [
-                make_guild_list_key_prefix(user_id).as_ref(),
-                guild_id.to_be_bytes().as_ref(),
-                homeserver.as_bytes(),
-            ]
-            .concat(),
-            [],
-        )
-        .await?;
+        self.insert(make_guild_list_key(user_id, guild_id, server_id), [])
+            .await?;
         Ok(())
     }
 
@@ -1466,10 +1622,10 @@ impl ChatTree {
         &self,
         user_id: u64,
         guild_id: u64,
-        homeserver: &str,
+        server_id: &str,
     ) -> ServerResult<()> {
         self.chat_tree
-            .remove(&make_guild_list_key(user_id, guild_id, homeserver))
+            .remove(&make_guild_list_key(user_id, guild_id, server_id))
             .await
             .map(|_| ())
             .map_err(ServerError::from)
@@ -2034,4 +2190,17 @@ impl ChatTree {
         self.remove(make_invite_key(invite_id.as_str())).await?;
         Ok(())
     }
+}
+
+// used for deserializing private channel or guild entries from the db
+// this function assumes that the passed id_raw is of structure `prefix + u64 + utf-8 string`
+fn deserialize_id_host(id_raw: &[u8], prefix_len: usize) -> (u64, &str) {
+    let (id_raw, host_raw) = id_raw.split_at(prefix_len).1.split_at(size_of::<u64>());
+
+    // Safety: this unwrap can never cause UB since we split at u64 boundary
+    let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+    // Safety: we never store non UTF-8 hosts, so this can't cause UB
+    let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+
+    (guild_id, host)
 }

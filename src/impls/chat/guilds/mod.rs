@@ -1,7 +1,6 @@
 use super::*;
 
 pub mod create_guild;
-pub mod create_private_channel;
 pub mod delete_guild;
 pub mod get_guild;
 pub mod get_guild_list;

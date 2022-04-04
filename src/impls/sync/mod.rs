@@ -281,22 +281,36 @@ impl SyncServer {
     }
 
     async fn push_logic(&self, host: &str, event: Event) -> ServerResult<()> {
-        if let Some(kind) = event.kind {
-            match kind {
-                Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
-                    self.deps
-                        .chat_tree
-                        .remove_guild_from_guild_list(user_id, guild_id, host)
-                        .await?;
-                }
-                Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
-                    self.deps
-                        .chat_tree
-                        .add_guild_to_guild_list(user_id, guild_id, host)
-                        .await?;
-                }
-                Kind::UserInvited(_) => todo!(),
-                Kind::UserRejectedInvite(_) => todo!(),
+        let chat_tree = &self.deps.chat_tree;
+        let Some(kind) = event.kind else { return Ok(()) };
+        match kind {
+            Kind::UserRemovedFromGuild(UserRemovedFromGuild { user_id, guild_id }) => {
+                chat_tree
+                    .remove_guild_from_guild_list(user_id, guild_id, host)
+                    .await?;
+            }
+            Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
+                chat_tree
+                    .add_guild_to_guild_list(user_id, guild_id, host)
+                    .await?;
+            }
+            Kind::UserInvited(_) => todo!("invites"),
+            Kind::UserRejectedInvite(_) => todo!("invites"),
+            Kind::UserRemovedFromChannel(UserRemovedFromChannel {
+                user_id,
+                channel_id,
+            }) => {
+                chat_tree
+                    .remove_pc_from_pc_list(user_id, channel_id, host)
+                    .await?;
+            }
+            Kind::UserAddedToChannel(UserAddedToChannel {
+                user_id,
+                channel_id,
+            }) => {
+                chat_tree
+                    .add_pc_to_pc_list(user_id, channel_id, host)
+                    .await?;
             }
         }
         Ok(())

@@ -36,7 +36,7 @@ use std::{
 use crate::{config::DbConfig, utils::evec::EVec, ServerError, ServerResult};
 
 use crate::api::{
-    chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
+    chat::{Channel, Guild, Invite, Message as HarmonyMessage, PrivateChannel, Role},
     emote::{Emote, EmotePack},
     profile::Profile,
 };
@@ -203,6 +203,10 @@ pub mod chat {
 
     pub const fn make_pc_key(channel_id: u64) -> [u8; 13] {
         concat_static(&[PRIV_CHANNEL_PREFIX, &channel_id.to_be_bytes()])
+    }
+
+    pub const fn make_pc_creator_key(channel_id: u64) -> [u8; 14] {
+        concat_static(&[&make_pc_key(channel_id), &[5]])
     }
 
     pub fn make_guild_perm_key(guild_id: u64, role_id: u64, matches: &str) -> Vec<u8> {
@@ -395,6 +399,10 @@ pub mod chat {
         concat_static(&[&guild_id.to_be_bytes(), &[4]])
     }
 
+    pub const fn make_pc_list_key_prefix(user_id: u64) -> [u8; 10] {
+        concat_static(&[&user_id.to_be_bytes(), &[1, 4]])
+    }
+
     pub const fn make_guild_role_ordering_key(guild_id: u64) -> [u8; 10] {
         concat_static(&[&guild_id.to_be_bytes(), &[1, 3]])
     }
@@ -411,6 +419,15 @@ pub mod chat {
         [
             make_guild_list_key_prefix(user_id).as_ref(),
             guild_id.to_be_bytes().as_ref(),
+            host.as_bytes(),
+        ]
+        .concat()
+    }
+
+    pub fn make_pc_list_key(user_id: u64, channel_id: u64, host: &str) -> Vec<u8> {
+        [
+            make_pc_list_key_prefix(user_id).as_ref(),
+            channel_id.to_be_bytes().as_ref(),
             host.as_bytes(),
         ]
         .concat()
@@ -486,6 +503,7 @@ crate::impl_deser! {
     role, Role;
     emote, Emote;
     emote_pack, EmotePack;
+    private_channel, PrivateChannel;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
