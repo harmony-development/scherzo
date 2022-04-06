@@ -64,7 +64,7 @@ pub async fn handler(
         EventSub::Homeserver,
         stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
             guild_id,
-            server_id: String::new(),
+            server_id: None,
         }),
         None,
         EventContext::new(local_ids),

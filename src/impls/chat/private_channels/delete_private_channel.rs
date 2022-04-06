@@ -49,5 +49,12 @@ pub async fn logic(
 
     batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
 
+    // also delete invite, if any
+    batch_delete_prefix(
+        &chat_tree.chat_tree,
+        make_priv_invite_key(&channel_id.to_string()),
+    )
+    .await?;
+
     Ok(private_channel)
 }

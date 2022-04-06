@@ -46,6 +46,8 @@ use rkyv::{
 };
 use tracing::Instrument;
 
+use self::chat::{UserOutgoingInvites, UserPendingInvites};
+
 pub mod migration;
 #[cfg(feature = "sled")]
 pub mod sled;
@@ -188,9 +190,14 @@ pub mod emote {
 }
 
 pub mod chat {
+    use harmony_rust_sdk::api::chat::{OutgoingInvite, PendingInvite};
+
     use super::concat_static;
 
+    pub const OUTGOING_INVITES_PREFIX: &[u8] = b"outgoing_invites_";
+    pub const PENDING_INVITES_PREFIX: &[u8] = b"pending_invites_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
+    pub const PRIV_INVITE_PREFIX: &[u8] = b"priv_invite_";
     pub const PRIV_CHANNEL_PREFIX: &[u8] = b"priv_";
     pub const ADMIN_GUILD_KEY: &[u8] = b"admin_guild_key_data";
 
@@ -442,6 +449,34 @@ pub mod chat {
     pub fn make_invite_key(name: &str) -> Vec<u8> {
         [INVITE_PREFIX, name.as_bytes()].concat()
     }
+
+    pub fn make_priv_invite_key(name: &str) -> Vec<u8> {
+        [PRIV_INVITE_PREFIX, name.as_bytes()].concat()
+    }
+
+    pub fn make_pc_invite_allowed_key(name: &str) -> Vec<u8> {
+        [&make_priv_invite_key(name), "_allowed_users".as_bytes()].concat()
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default, Debug)]
+    #[archive_attr(derive(bytecheck::CheckBytes))]
+    pub struct UserPendingInvites {
+        pub invites: Vec<PendingInvite>,
+    }
+
+    pub const fn make_user_pending_invites_key(user_id: u64) -> [u8; 24] {
+        concat_static(&[PENDING_INVITES_PREFIX, &user_id.to_be_bytes()])
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default, Debug)]
+    #[archive_attr(derive(bytecheck::CheckBytes))]
+    pub struct UserOutgoingInvites {
+        pub invites: Vec<OutgoingInvite>,
+    }
+
+    pub const fn make_user_outgoing_invites_key(user_id: u64) -> [u8; 25] {
+        concat_static(&[OUTGOING_INVITES_PREFIX, &user_id.to_be_bytes()])
+    }
 }
 
 pub mod auth {
@@ -504,6 +539,8 @@ crate::impl_deser! {
     emote, Emote;
     emote_pack, EmotePack;
     private_channel, PrivateChannel;
+    pending_invites, UserPendingInvites;
+    outgoing_invites, UserOutgoingInvites;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {

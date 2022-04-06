@@ -2,23 +2,29 @@ use std::{
     collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
 };
 
-use crate::api::{
-    chat::{
-        attachment::ImageInfo, get_channel_messages_request::Direction, overrides::Reason,
-        permission::has_permission, send_message_request::attachment::ImageInfo as SendImageInfo,
-        stream_event, Message as HarmonyMessage, *,
-    },
-    exports::hrpc::{server::socket::Socket, Request},
-    harmonytypes::{item_position, Empty, ItemPosition, Metadata},
-    sync::{
-        event::{
-            Kind as DispatchKind, UserAddedToChannel as SyncUserAddedToChannel,
-            UserAddedToGuild as SyncUserAddedToGuild,
-            UserRemovedFromChannel as SyncUserRemovedFromChannel,
-            UserRemovedFromGuild as SyncUserRemovedFromGuild,
+use crate::{
+    api::{
+        chat::{
+            attachment::ImageInfo, get_channel_messages_request::Direction, overrides::Reason,
+            permission::has_permission,
+            send_message_request::attachment::ImageInfo as SendImageInfo, stream_event,
+            Message as HarmonyMessage, *,
         },
-        Event as DispatchEvent,
+        exports::hrpc::{server::socket::Socket, Request},
+        harmonytypes::{item_position, Empty, ItemPosition, Metadata},
+        sync::{
+            event::{
+                user_invited, user_rejected_invite, Kind as DispatchKind,
+                UserAddedToChannel as SyncUserAddedToChannel,
+                UserAddedToGuild as SyncUserAddedToGuild, UserInvited as SyncUserInvited,
+                UserRejectedInvite as SyncUserRejectedInvite,
+                UserRemovedFromChannel as SyncUserRemovedFromChannel,
+                UserRemovedFromGuild as SyncUserRemovedFromGuild,
+            },
+            Event as DispatchEvent,
+        },
     },
+    db::deser_invite_entry,
 };
 use image::{GenericImageView, ImageFormat};
 use rand::{Rng, SeedableRng};
@@ -334,26 +340,14 @@ impl ChatServer {
     }
 
     #[inline(always)]
-    fn broadcast(
+    pub fn broadcast(
         &self,
         sub: EventSub,
         event: stream_event::Event,
         perm_check: Option<PermCheck<'static>>,
         context: EventContext,
     ) {
-        let broadcast = EventBroadcast {
-            sub,
-            event: Event::Chat(event),
-            perm_check,
-            context,
-        };
-
-        tracing::debug!(
-            "broadcasting events to {} receivers",
-            self.deps.chat_event_sender.receiver_count()
-        );
-
-        drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
+        self.deps.broadcast_chat(sub, event, perm_check, context)
     }
 
     #[inline(always)]
@@ -383,7 +377,7 @@ impl ChatServer {
                     EventSub::Homeserver,
                     stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
                         guild_id,
-                        server_id: String::new(),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -411,7 +405,7 @@ impl ChatServer {
                     EventSub::Homeserver,
                     stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
                         guild_id,
-                        server_id: String::new(),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -444,7 +438,7 @@ impl ChatServer {
                     stream_event::Event::PrivateChannelRemovedFromList(
                         stream_event::PrivateChannelRemovedFromList {
                             channel_id,
-                            server_id: String::new(),
+                            server_id: None,
                         },
                     ),
                     None,
@@ -478,11 +472,111 @@ impl ChatServer {
                     stream_event::Event::PrivateChannelAddedToList(
                         stream_event::PrivateChannelAddedToList {
                             channel_id,
-                            server_id: String::new(),
+                            server_id: None,
                         },
                     ),
                     None,
                     EventContext::new(vec![user_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_user_invite_rejected(
+        &self,
+        inviter_id: u64,
+        invitee_id: u64,
+        location: outgoing_invite::Location,
+    ) -> ServerResult<()> {
+        match self
+            .deps
+            .profile_tree
+            .local_to_foreign_id(inviter_id)
+            .await?
+        {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRejectedInvite(SyncUserRejectedInvite {
+                    user_id: invitee_id,
+                    inviter_id: foreign_id,
+                    location: Some(match location {
+                        outgoing_invite::Location::ChannelId(channel_id) => {
+                            user_rejected_invite::Location::ChannelId(channel_id)
+                        }
+                        outgoing_invite::Location::GuildInviteId(invite_id) => {
+                            user_rejected_invite::Location::GuildInviteId(invite_id)
+                        }
+                    }),
+                }),
+            ),
+            None => {
+                let invite = OutgoingInvite {
+                    invitee_id,
+                    location: Some(location),
+                    server_id: None,
+                };
+                self.deps
+                    .chat_tree
+                    .remove_user_outgoing_invite(inviter_id, &invite)
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::InviteRejected(stream_event::InviteRejected {
+                        invite: Some(invite),
+                    }),
+                    None,
+                    EventContext::new(vec![inviter_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_user_invite_received(
+        &self,
+        inviter_id: u64,
+        invitee_id: u64,
+        location: pending_invite::Location,
+    ) -> ServerResult<()> {
+        match self
+            .deps
+            .profile_tree
+            .local_to_foreign_id(invitee_id)
+            .await?
+        {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserInvited(SyncUserInvited {
+                    user_id: foreign_id,
+                    inviter_id,
+                    location: Some(match location {
+                        pending_invite::Location::ChannelId(channel_id) => {
+                            user_invited::Location::ChannelId(channel_id)
+                        }
+                        pending_invite::Location::GuildInviteId(invite_id) => {
+                            user_invited::Location::GuildInviteId(invite_id)
+                        }
+                    }),
+                }),
+            ),
+            None => {
+                let invite = PendingInvite {
+                    inviter_id,
+                    location: Some(location),
+                    server_id: None,
+                };
+                self.deps
+                    .chat_tree
+                    .add_user_pending_invite(invitee_id, invite.clone())
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::InviteReceived(stream_event::InviteReceived {
+                        invite: Some(invite),
+                    }),
+                    None,
+                    EventContext::new(vec![invitee_id]),
                 );
             }
         }
@@ -552,11 +646,11 @@ impl ChatServer {
 
 impl chat_service_server::ChatService for ChatServer {
     impl_unary_handlers! {
-        #[rate(1, 5)]
+        #[rate(1, 20)]
         create_guild, CreateGuildRequest, CreateGuildResponse;
-        #[rate(3, 5)]
+        #[rate(3, 10)]
         create_invite, CreateInviteRequest, CreateInviteResponse;
-        #[rate(4, 5)]
+        #[rate(4, 8)]
         create_channel, CreateChannelRequest, CreateChannelResponse;
         #[rate(5, 5)]
         get_guild_list, GetGuildListRequest, GetGuildListResponse;
@@ -590,7 +684,7 @@ impl chat_service_server::ChatService for ChatServer {
         delete_channel, DeleteChannelRequest, DeleteChannelResponse;
         #[rate(7, 5)]
         delete_message, DeleteMessageRequest, DeleteMessageResponse;
-        #[rate(3, 5)]
+        #[rate(3, 8)]
         join_guild, JoinGuildRequest, JoinGuildResponse;
         #[rate(3, 5)]
         leave_guild, LeaveGuildRequest, LeaveGuildResponse;
@@ -644,14 +738,26 @@ impl chat_service_server::ChatService for ChatServer {
         grant_ownership, GrantOwnershipRequest, GrantOwnershipResponse;
         #[rate(2, 60)]
         give_up_ownership, GiveUpOwnershipRequest, GiveUpOwnershipResponse;
+        #[rate(1, 20)]
         create_private_channel, CreatePrivateChannelRequest, CreatePrivateChannelResponse;
+        #[rate(3, 8)]
         delete_private_channel, DeletePrivateChannelRequest, DeletePrivateChannelResponse;
+        #[rate(5, 5)]
         get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
+        #[rate(3, 8)]
         update_private_channel_members, UpdatePrivateChannelMembersRequest, UpdatePrivateChannelMembersResponse;
+        #[rate(4, 8)]
         invite_user_to_guild, InviteUserToGuildRequest, InviteUserToGuildResponse;
+        #[rate(5 ,5)]
         get_pending_invites, GetPendingInvitesRequest, GetPendingInvitesResponse;
+        #[rate(3, 5)]
         reject_pending_invite, RejectPendingInviteRequest, RejectPendingInviteResponse;
+        #[rate(3, 5)]
         ignore_pending_invite, IgnorePendingInviteRequest, IgnorePendingInviteResponse;
+        #[rate(5, 5)]
+        get_outgoing_invites, GetOutgoingInvitesRequest, GetOutgoingInvitesResponse;
+        #[rate(3, 5)]
+        delete_outgoing_invite, DeleteOutgoingInviteRequest, DeleteOutgoingInviteResponse;
     }
 
     impl_ws_handlers! {
@@ -1529,6 +1635,164 @@ impl ChatTree {
             .await?;
 
         Ok(guild_id)
+    }
+
+    #[inline]
+    pub async fn remove_user_outgoing_invite(
+        &self,
+        user_id: u64,
+        invite: &OutgoingInvite,
+    ) -> ServerResult<OutgoingInvite> {
+        self.modify_user_outgoing_invites(user_id, |invites| {
+            if let Some(pos) = invites.iter().position(|inv| inv == invite) {
+                Ok(invites.remove(pos))
+            } else {
+                Err(("h.no-such-outgoing-invite", "no such outgoing invite found").into())
+            }
+        })
+        .await
+    }
+
+    #[inline]
+    pub async fn add_user_outgoing_invite(
+        &self,
+        user_id: u64,
+        invite: OutgoingInvite,
+    ) -> ServerResult<()> {
+        self.modify_user_outgoing_invites(user_id, |invites| Ok(invites.push(invite)))
+            .await
+    }
+
+    pub async fn modify_user_outgoing_invites<T>(
+        &self,
+        user_id: u64,
+        f: impl FnOnce(&mut Vec<OutgoingInvite>) -> ServerResult<T>,
+    ) -> ServerResult<T> {
+        let key = make_user_outgoing_invites_key(user_id);
+
+        let mut outgoing = self
+            .get(key)
+            .await?
+            .map_or_else(UserOutgoingInvites::default, db::deser_outgoing_invites);
+
+        let result = f(&mut outgoing.invites)?;
+
+        let outgoing_ser = rkyv_ser(&outgoing);
+        self.insert(key, outgoing_ser).await?;
+
+        Ok(result)
+    }
+
+    #[inline]
+    pub async fn remove_user_pending_invite(
+        &self,
+        user_id: u64,
+        invite: &PendingInvite,
+    ) -> ServerResult<PendingInvite> {
+        self.modify_user_pending_invites(user_id, |invites| {
+            if let Some(pos) = invites.iter().position(|inv| inv == invite) {
+                Ok(invites.remove(pos))
+            } else {
+                Err(("h.no-such-pending-invite", "no such pending invite found").into())
+            }
+        })
+        .await
+    }
+
+    #[inline]
+    pub async fn add_user_pending_invite(
+        &self,
+        user_id: u64,
+        invite: PendingInvite,
+    ) -> ServerResult<()> {
+        self.modify_user_pending_invites(user_id, |invites| Ok(invites.push(invite)))
+            .await
+    }
+
+    pub async fn modify_user_pending_invites<T>(
+        &self,
+        user_id: u64,
+        f: impl FnOnce(&mut Vec<PendingInvite>) -> ServerResult<T>,
+    ) -> ServerResult<T> {
+        let key = make_user_pending_invites_key(user_id);
+
+        let mut pending = self
+            .get(key)
+            .await?
+            .map_or_else(UserPendingInvites::default, db::deser_pending_invites);
+
+        let result = f(&mut pending.invites)?;
+
+        let pending_ser = rkyv_ser(&pending);
+        self.insert(key, pending_ser).await?;
+
+        Ok(result)
+    }
+
+    pub async fn use_priv_invite_logic(&self, user_id: u64, invite_id: &str) -> ServerResult<u64> {
+        let allowed_users_key = make_pc_invite_allowed_key(&invite_id);
+        let mut allowed_users = self.get_list_u64_logic(&allowed_users_key).await?;
+
+        if let Some(pos) = allowed_users.iter().position(|id| user_id.eq(id)) {
+            allowed_users.remove(pos);
+        } else {
+            bail!((
+                "h.not-invited",
+                "you can't use this invite because you aren't invited"
+            ));
+        }
+
+        let Some(invite_raw) = self.get(make_priv_invite_key(&invite_id)).await? else {
+            bail!(ServerError::NoSuchInvite(invite_id.into()));
+        };
+
+        let (id, mut invite) = deser_invite_entry(invite_raw);
+        invite.use_count += 1;
+
+        let invite_buf = rkyv_ser(&invite);
+
+        let mut batch = Batch::default();
+        batch.insert(
+            make_priv_invite_key(&invite_id),
+            [id.to_be_bytes().as_ref(), invite_buf.as_ref()].concat(),
+        );
+        batch.insert(
+            allowed_users_key,
+            self.serialize_list_u64_logic(allowed_users),
+        );
+        self.apply_batch(batch).await?;
+
+        Ok(id)
+    }
+
+    pub async fn create_priv_invite_logic(
+        &self,
+        id: u64,
+        users_allowed: Vec<u64>,
+        use_id_as_invite_id: bool,
+    ) -> ServerResult<String> {
+        let invite_id = use_id_as_invite_id
+            .then(|| id.to_string())
+            .unwrap_or_else(|| gen_rand_inline_str().to_string());
+
+        let invite = Invite {
+            possible_uses: users_allowed.len() as u32,
+            use_count: 0,
+        };
+        let buf = rkyv_ser(&invite);
+
+        let mut batch = Batch::default();
+        batch.insert(
+            make_priv_invite_key(&invite_id),
+            [id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+        );
+        batch.insert(
+            make_pc_invite_allowed_key(&invite_id),
+            self.serialize_list_u64_logic(users_allowed),
+        );
+        self.apply_batch(batch).await?;
+
+        Ok(invite_id)
     }
 
     pub async fn create_invite_logic(

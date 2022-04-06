@@ -8,6 +8,10 @@ use crate::api::{
 };
 use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
+use harmony_rust_sdk::api::chat::{
+    outgoing_invite, pending_invite, stream_event as chat_stream_event,
+    stream_event::Event as ChatEvent, OutgoingInvite, PendingInvite,
+};
 use hrpc::exports::futures_util::TryFutureExt;
 use hrpc::{client::transport::http::Hyper, encode::encode_protobuf_message};
 use hyper::{http::HeaderValue, Uri};
@@ -16,7 +20,11 @@ use tracing::{error, Instrument};
 
 use crate::key::{self, Manager as KeyManager};
 
-use super::{http, prelude::*};
+use super::{
+    chat::{EventContext, EventSub},
+    http,
+    prelude::*,
+};
 use db::sync::*;
 
 pub mod notify_new_id;
@@ -288,21 +296,117 @@ impl SyncServer {
                 chat_tree
                     .remove_guild_from_guild_list(user_id, guild_id, host)
                     .await?;
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::GuildRemovedFromList(chat_stream_event::GuildRemovedFromList {
+                        guild_id,
+                        server_id: Some(host.to_string()),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
             }
             Kind::UserAddedToGuild(UserAddedToGuild { user_id, guild_id }) => {
                 chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, host)
                     .await?;
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::GuildAddedToList(chat_stream_event::GuildAddedToList {
+                        guild_id,
+                        server_id: Some(host.to_string()),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
             }
-            Kind::UserInvited(_) => todo!("invites"),
-            Kind::UserRejectedInvite(_) => todo!("invites"),
+            Kind::UserInvited(UserInvited {
+                inviter_id,
+                location,
+                user_id,
+            }) => {
+                // TODO: add checks for location, user_id and inviter
+                let location = match location.ok_or("location can't be empty")? {
+                    user_invited::Location::GuildInviteId(invite) => {
+                        pending_invite::Location::GuildInviteId(invite)
+                    }
+                    user_invited::Location::ChannelId(channel_id) => {
+                        pending_invite::Location::ChannelId(channel_id)
+                    }
+                };
+
+                let invite = PendingInvite {
+                    inviter_id,
+                    location: Some(location),
+                    server_id: Some(host.to_string()),
+                };
+
+                chat_tree
+                    .add_user_pending_invite(user_id, invite.clone())
+                    .await?;
+
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::InviteReceived(chat_stream_event::InviteReceived {
+                        invite: Some(invite),
+                    }),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+            Kind::UserRejectedInvite(UserRejectedInvite {
+                location,
+                user_id,
+                inviter_id,
+            }) => {
+                // TODO: add checks for location, user_id and inviter
+                let location = match location.ok_or("location can't be empty")? {
+                    user_rejected_invite::Location::GuildInviteId(invite) => {
+                        outgoing_invite::Location::GuildInviteId(invite)
+                    }
+                    user_rejected_invite::Location::ChannelId(channel_id) => {
+                        outgoing_invite::Location::ChannelId(channel_id)
+                    }
+                };
+
+                let invite = OutgoingInvite {
+                    invitee_id: user_id,
+                    location: Some(location),
+                    server_id: Some(host.to_string()),
+                };
+
+                chat_tree
+                    .remove_user_outgoing_invite(inviter_id, &invite)
+                    .await?;
+
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::InviteRejected(chat_stream_event::InviteRejected {
+                        invite: Some(invite),
+                    }),
+                    None,
+                    EventContext::new(vec![inviter_id]),
+                );
+            }
             Kind::UserRemovedFromChannel(UserRemovedFromChannel {
                 user_id,
                 channel_id,
             }) => {
+                // TODO: do we need to send events here? probably? is the user_id foreign or not???
                 chat_tree
                     .remove_pc_from_pc_list(user_id, channel_id, host)
                     .await?;
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::PrivateChannelRemovedFromList(
+                        chat_stream_event::PrivateChannelRemovedFromList {
+                            channel_id,
+                            server_id: Some(host.to_string()),
+                        },
+                    ),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
             }
             Kind::UserAddedToChannel(UserAddedToChannel {
                 user_id,
@@ -311,6 +415,17 @@ impl SyncServer {
                 chat_tree
                     .add_pc_to_pc_list(user_id, channel_id, host)
                     .await?;
+                self.deps.broadcast_chat(
+                    EventSub::Homeserver,
+                    ChatEvent::PrivateChannelAddedToList(
+                        chat_stream_event::PrivateChannelAddedToList {
+                            channel_id,
+                            server_id: Some(host.to_string()),
+                        },
+                    ),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
             }
         }
         Ok(())

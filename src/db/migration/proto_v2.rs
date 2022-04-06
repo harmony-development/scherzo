@@ -372,6 +372,7 @@ impl From<chat::format::Format> for Option<NewFormatData> {
                     // TODO: actually get the emote name using the pack_id from old
                     name: String::new(),
                 }),
+                pack_id: Some(old.pack_id),
             }),
             chat::format::Format::Color(old) => NewFormatData::Color(Color { kind: old.kind }),
             _ => return None,

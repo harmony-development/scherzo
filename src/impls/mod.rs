@@ -11,11 +11,12 @@ pub mod sync;
 #[cfg(feature = "webrtc")]
 pub mod webrtc;
 
+use harmony_rust_sdk::api::chat::{stream_event, Event};
 use prelude::*;
 
 use std::str::FromStr;
 
-use crate::api::HomeserverIdentifier;
+use crate::{api::HomeserverIdentifier, impls::chat::EventBroadcast};
 use hyper::{http, Uri};
 use lettre::{
     message::{header, Mailbox, MultiPart, SinglePart},
@@ -29,8 +30,13 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
 
 use self::{
-    auth::AuthTree, chat::ChatTree, emote::EmoteTree, media::MediaStore, profile::ProfileTree,
-    rest::RestServiceLayer, sync::EventDispatch,
+    auth::AuthTree,
+    chat::{ChatTree, EventContext, EventSub, PermCheck},
+    emote::EmoteTree,
+    media::MediaStore,
+    profile::ProfileTree,
+    rest::RestServiceLayer,
+    sync::EventDispatch,
 };
 
 pub mod prelude {
@@ -149,6 +155,23 @@ impl Dependencies {
         };
 
         Ok((Arc::new(this), fed_event_receiver))
+    }
+
+    pub fn broadcast_chat(
+        &self,
+        sub: EventSub,
+        event: stream_event::Event,
+        perm_check: Option<PermCheck<'static>>,
+        context: EventContext,
+    ) {
+        let broadcast = EventBroadcast::new(sub, Event::Chat(event), perm_check, context);
+
+        tracing::trace!(
+            "broadcasting events to {} receivers",
+            self.chat_event_sender.receiver_count()
+        );
+
+        drop(self.chat_event_sender.send(Arc::new(broadcast)));
     }
 }
 
