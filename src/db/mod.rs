@@ -46,7 +46,7 @@ use rkyv::{
 };
 use tracing::Instrument;
 
-use self::chat::{UserOutgoingInvites, UserPendingInvites};
+use self::chat::UserPendingInvites;
 
 pub mod migration;
 #[cfg(feature = "sled")]
@@ -190,11 +190,10 @@ pub mod emote {
 }
 
 pub mod chat {
-    use harmony_rust_sdk::api::chat::{OutgoingInvite, PendingInvite};
+    use harmony_rust_sdk::api::chat::PendingInvite;
 
     use super::concat_static;
 
-    pub const OUTGOING_INVITES_PREFIX: &[u8] = b"outgoing_invites_";
     pub const PENDING_INVITES_PREFIX: &[u8] = b"pending_invites_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
     pub const PRIV_INVITE_PREFIX: &[u8] = b"priv_invite_";
@@ -467,16 +466,6 @@ pub mod chat {
     pub const fn make_user_pending_invites_key(user_id: u64) -> [u8; 24] {
         concat_static(&[PENDING_INVITES_PREFIX, &user_id.to_be_bytes()])
     }
-
-    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default, Debug)]
-    #[archive_attr(derive(bytecheck::CheckBytes))]
-    pub struct UserOutgoingInvites {
-        pub invites: Vec<OutgoingInvite>,
-    }
-
-    pub const fn make_user_outgoing_invites_key(user_id: u64) -> [u8; 25] {
-        concat_static(&[OUTGOING_INVITES_PREFIX, &user_id.to_be_bytes()])
-    }
 }
 
 pub mod auth {
@@ -540,7 +529,6 @@ crate::impl_deser! {
     emote_pack, EmotePack;
     private_channel, PrivateChannel;
     pending_invites, UserPendingInvites;
-    outgoing_invites, UserOutgoingInvites;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {

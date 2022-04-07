@@ -15,6 +15,15 @@ pub async fn handler(
 
     let deleted_channel = logic(svc.deps.as_ref(), user_id, channel_id).await?;
 
+    svc.broadcast(
+        EventSub::PrivateChannel(channel_id),
+        stream_event::Event::PrivateChannelDeleted(stream_event::PrivateChannelDeleted {
+            channel_id,
+        }),
+        None,
+        EventContext::empty(),
+    );
+
     for member in deleted_channel.members {
         svc.dispatch_private_channel_leave(channel_id, member)
             .await?;

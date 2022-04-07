@@ -19,40 +19,6 @@ pub async fn handler(
 
     let (added, removed) = logic(svc, channel_id, added_members, removed_members).await?;
 
-    // update invite allowed users
-    svc.deps
-        .chat_tree
-        .update_priv_invite_allowed_users(channel_id.to_string(), |allowed_users| {
-            allowed_users.retain(|id| removed.contains(id).not());
-            allowed_users.extend(added.iter().copied());
-        })
-        .await?;
-
-    // insert new outgoing invites for user
-    let mut user_outgoing_invites = Vec::with_capacity(added.len());
-    for invitee_id in added.iter().copied() {
-        let (invitee_id, server_id) = svc
-            .deps
-            .profile_tree
-            .local_to_foreign_id(invitee_id)
-            .await?
-            .map_or((invitee_id, None), |(id, server_id)| {
-                (id, Some(server_id.to_string()))
-            });
-
-        let invite = OutgoingInvite {
-            invitee_id,
-            server_id,
-            location: Some(outgoing_invite::Location::ChannelId(channel_id)),
-        };
-
-        user_outgoing_invites.push(invite);
-    }
-    svc.deps
-        .chat_tree
-        .modify_user_outgoing_invites(user_id, |invites| Ok(invites.extend(user_outgoing_invites)))
-        .await?;
-
     // dispatch invites to new members
     for invitee_id in added {
         svc.dispatch_user_invite_received(
@@ -82,6 +48,13 @@ pub async fn logic(
 
     let mut private_channel = chat_tree.get_private_channel_logic(channel_id).await?;
 
+    if private_channel.is_dm {
+        bail!((
+            "h.cant-update-members",
+            "private channel is a direct message channel, cant change members"
+        ));
+    }
+
     let members_before = private_channel.members.clone();
 
     private_channel
@@ -106,6 +79,27 @@ pub async fn logic(
         .iter()
         .filter_map(|id| private_channel.members.contains(id).not().then(|| *id))
         .collect::<Vec<_>>();
+
+    // remove added members, they didnt join yet
+    private_channel
+        .members
+        .retain(|id| members_added.contains(id).not());
+
+    // insert new channel
+    let serialized = rkyv_ser(&private_channel);
+    svc.deps
+        .chat_tree
+        .insert(make_pc_key(channel_id), serialized)
+        .await?;
+
+    // update invite allowed users
+    svc.deps
+        .chat_tree
+        .update_priv_invite_allowed_users(channel_id.to_string(), |allowed_users| {
+            allowed_users.retain(|id| members_removed.contains(id).not());
+            allowed_users.extend(members_added.iter().copied());
+        })
+        .await?;
 
     Ok((members_added, members_removed))
 }

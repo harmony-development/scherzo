@@ -6,21 +6,36 @@ pub async fn handler(
 ) -> ServerResult<Response<RejectPendingInviteResponse>> {
     let user_id = svc.deps.auth(&request).await?;
 
-    let RejectPendingInviteRequest { invite } = request.into_message().await?;
+    let RejectPendingInviteRequest {
+        server_id,
+        location,
+    } = request.into_message().await?;
 
-    let invite = invite.ok_or(("h.no-invite", "expected pending invite to be specified"))?;
+    let location = location.ok_or((
+        "h.location-expected",
+        "location not specified while it was expected",
+    ))?;
+    let location = match location {
+        reject_pending_invite_request::Location::ChannelId(channel_id) => {
+            pending_invite::Location::ChannelId(channel_id)
+        }
+        reject_pending_invite_request::Location::GuildInviteId(invite_id) => {
+            pending_invite::Location::GuildInviteId(invite_id)
+        }
+    };
 
-    svc.deps
+    let invite = svc
+        .deps
         .chat_tree
-        .remove_user_pending_invite(user_id, &invite)
+        .remove_user_pending_invite(user_id, server_id.as_deref(), &location)
         .await?;
 
-    let location = match invite.location.ok_or("expected location")? {
+    let location = match location {
         pending_invite::Location::ChannelId(channel_id) => {
-            outgoing_invite::Location::ChannelId(channel_id)
+            user_rejected_invite::Location::ChannelId(channel_id)
         }
         pending_invite::Location::GuildInviteId(invite_id) => {
-            outgoing_invite::Location::GuildInviteId(invite_id)
+            user_rejected_invite::Location::GuildInviteId(invite_id)
         }
     };
     svc.dispatch_user_invite_rejected(invite.inviter_id, user_id, location)

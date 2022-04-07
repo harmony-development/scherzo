@@ -487,7 +487,7 @@ impl ChatServer {
         &self,
         inviter_id: u64,
         invitee_id: u64,
-        location: outgoing_invite::Location,
+        location: user_rejected_invite::Location,
     ) -> ServerResult<()> {
         match self
             .deps
@@ -500,30 +500,24 @@ impl ChatServer {
                 DispatchKind::UserRejectedInvite(SyncUserRejectedInvite {
                     user_id: invitee_id,
                     inviter_id: foreign_id,
-                    location: Some(match location {
-                        outgoing_invite::Location::ChannelId(channel_id) => {
-                            user_rejected_invite::Location::ChannelId(channel_id)
-                        }
-                        outgoing_invite::Location::GuildInviteId(invite_id) => {
-                            user_rejected_invite::Location::GuildInviteId(invite_id)
-                        }
-                    }),
+                    location: Some(location),
                 }),
             ),
             None => {
-                let invite = OutgoingInvite {
-                    invitee_id,
-                    location: Some(location),
-                    server_id: None,
+                let location = match location {
+                    user_rejected_invite::Location::ChannelId(channel_id) => {
+                        stream_event::invite_rejected::Location::ChannelId(channel_id)
+                    }
+                    user_rejected_invite::Location::GuildInviteId(invite_id) => {
+                        stream_event::invite_rejected::Location::GuildInviteId(invite_id)
+                    }
                 };
-                self.deps
-                    .chat_tree
-                    .remove_user_outgoing_invite(inviter_id, &invite)
-                    .await?;
                 self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::InviteRejected(stream_event::InviteRejected {
-                        invite: Some(invite),
+                        invitee_id,
+                        location: Some(location),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![inviter_id]),
@@ -561,19 +555,31 @@ impl ChatServer {
                 }),
             ),
             None => {
-                let invite = PendingInvite {
-                    inviter_id,
-                    location: Some(location),
-                    server_id: None,
-                };
                 self.deps
                     .chat_tree
-                    .add_user_pending_invite(invitee_id, invite.clone())
+                    .add_user_pending_invite(
+                        invitee_id,
+                        PendingInvite {
+                            inviter_id,
+                            location: Some(location.clone()),
+                            server_id: None,
+                        },
+                    )
                     .await?;
+                let location = match location {
+                    pending_invite::Location::ChannelId(channel_id) => {
+                        stream_event::invite_received::Location::ChannelId(channel_id)
+                    }
+                    pending_invite::Location::GuildInviteId(invite_id) => {
+                        stream_event::invite_received::Location::GuildInviteId(invite_id)
+                    }
+                };
                 self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::InviteReceived(stream_event::InviteReceived {
-                        invite: Some(invite),
+                        inviter_id,
+                        location: Some(location),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![invitee_id]),
@@ -684,7 +690,7 @@ impl chat_service_server::ChatService for ChatServer {
         delete_channel, DeleteChannelRequest, DeleteChannelResponse;
         #[rate(7, 5)]
         delete_message, DeleteMessageRequest, DeleteMessageResponse;
-        #[rate(3, 8)]
+        #[rate(3, 15)]
         join_guild, JoinGuildRequest, JoinGuildResponse;
         #[rate(3, 5)]
         leave_guild, LeaveGuildRequest, LeaveGuildResponse;
@@ -742,6 +748,10 @@ impl chat_service_server::ChatService for ChatServer {
         create_private_channel, CreatePrivateChannelRequest, CreatePrivateChannelResponse;
         #[rate(3, 8)]
         delete_private_channel, DeletePrivateChannelRequest, DeletePrivateChannelResponse;
+        #[rate(3, 15)]
+        join_private_channel, JoinPrivateChannelRequest, JoinPrivateChannelResponse;
+        #[rate(3, 5)]
+        leave_private_channel, LeavePrivateChannelRequest, LeavePrivateChannelResponse;
         #[rate(5, 5)]
         get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
         #[rate(3, 8)]
@@ -754,10 +764,6 @@ impl chat_service_server::ChatService for ChatServer {
         reject_pending_invite, RejectPendingInviteRequest, RejectPendingInviteResponse;
         #[rate(3, 5)]
         ignore_pending_invite, IgnorePendingInviteRequest, IgnorePendingInviteResponse;
-        #[rate(5, 5)]
-        get_outgoing_invites, GetOutgoingInvitesRequest, GetOutgoingInvitesResponse;
-        #[rate(3, 5)]
-        delete_outgoing_invite, DeleteOutgoingInviteRequest, DeleteOutgoingInviteResponse;
     }
 
     impl_ws_handlers! {
@@ -1676,59 +1682,16 @@ impl ChatTree {
     }
 
     #[inline]
-    pub async fn remove_user_outgoing_invite(
-        &self,
-        user_id: u64,
-        invite: &OutgoingInvite,
-    ) -> ServerResult<OutgoingInvite> {
-        self.modify_user_outgoing_invites(user_id, |invites| {
-            if let Some(pos) = invites.iter().position(|inv| inv == invite) {
-                Ok(invites.remove(pos))
-            } else {
-                Err(("h.no-such-outgoing-invite", "no such outgoing invite found").into())
-            }
-        })
-        .await
-    }
-
-    #[inline]
-    pub async fn add_user_outgoing_invite(
-        &self,
-        user_id: u64,
-        invite: OutgoingInvite,
-    ) -> ServerResult<()> {
-        self.modify_user_outgoing_invites(user_id, |invites| Ok(invites.push(invite)))
-            .await
-    }
-
-    pub async fn modify_user_outgoing_invites<T>(
-        &self,
-        user_id: u64,
-        f: impl FnOnce(&mut Vec<OutgoingInvite>) -> ServerResult<T>,
-    ) -> ServerResult<T> {
-        let key = make_user_outgoing_invites_key(user_id);
-
-        let mut outgoing = self
-            .get(key)
-            .await?
-            .map_or_else(UserOutgoingInvites::default, db::deser_outgoing_invites);
-
-        let result = f(&mut outgoing.invites)?;
-
-        let outgoing_ser = rkyv_ser(&outgoing);
-        self.insert(key, outgoing_ser).await?;
-
-        Ok(result)
-    }
-
-    #[inline]
     pub async fn remove_user_pending_invite(
         &self,
         user_id: u64,
-        invite: &PendingInvite,
+        server_id: Option<&str>,
+        location: &pending_invite::Location,
     ) -> ServerResult<PendingInvite> {
         self.modify_user_pending_invites(user_id, |invites| {
-            if let Some(pos) = invites.iter().position(|inv| inv == invite) {
+            if let Some(pos) = invites.iter().position(|inv| {
+                inv.server_id.as_deref() == server_id && inv.location.as_ref() == Some(location)
+            }) {
                 Ok(invites.remove(pos))
             } else {
                 Err(("h.no-such-pending-invite", "no such pending invite found").into())

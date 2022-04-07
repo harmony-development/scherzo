@@ -4,7 +4,8 @@
     const_intrinsic_copy,
     const_mut_refs,
     type_alias_impl_trait,
-    drain_filter
+    drain_filter,
+    is_some_with
 )]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 

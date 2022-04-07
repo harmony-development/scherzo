@@ -9,8 +9,8 @@ use crate::api::{
 use ahash::RandomState;
 use dashmap::{mapref::one::RefMut, DashMap};
 use harmony_rust_sdk::api::chat::{
-    outgoing_invite, pending_invite, stream_event as chat_stream_event,
-    stream_event::Event as ChatEvent, OutgoingInvite, PendingInvite,
+    pending_invite, stream_event as chat_stream_event, stream_event::Event as ChatEvent,
+    PendingInvite,
 };
 use hrpc::exports::futures_util::TryFutureExt;
 use hrpc::{client::transport::http::Hyper, encode::encode_protobuf_message};
@@ -310,6 +310,9 @@ impl SyncServer {
                 chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, host)
                     .await?;
+
+                // TODO: figure out how to remove pending invites for guilds
+
                 self.deps.broadcast_chat(
                     EventSub::Homeserver,
                     ChatEvent::GuildAddedToList(chat_stream_event::GuildAddedToList {
@@ -337,18 +340,27 @@ impl SyncServer {
 
                 let invite = PendingInvite {
                     inviter_id,
-                    location: Some(location),
+                    location: Some(location.clone()),
                     server_id: Some(host.to_string()),
                 };
 
-                chat_tree
-                    .add_user_pending_invite(user_id, invite.clone())
-                    .await?;
+                chat_tree.add_user_pending_invite(user_id, invite).await?;
+
+                let location = match location {
+                    pending_invite::Location::ChannelId(channel_id) => {
+                        chat_stream_event::invite_received::Location::ChannelId(channel_id)
+                    }
+                    pending_invite::Location::GuildInviteId(invite_id) => {
+                        chat_stream_event::invite_received::Location::GuildInviteId(invite_id)
+                    }
+                };
 
                 self.deps.broadcast_chat(
                     EventSub::Homeserver,
                     ChatEvent::InviteReceived(chat_stream_event::InviteReceived {
-                        invite: Some(invite),
+                        inviter_id,
+                        location: Some(location),
+                        server_id: Some(host.to_string()),
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -362,27 +374,19 @@ impl SyncServer {
                 // TODO: add checks for location, user_id and inviter
                 let location = match location.ok_or("location can't be empty")? {
                     user_rejected_invite::Location::GuildInviteId(invite) => {
-                        outgoing_invite::Location::GuildInviteId(invite)
+                        chat_stream_event::invite_rejected::Location::GuildInviteId(invite)
                     }
                     user_rejected_invite::Location::ChannelId(channel_id) => {
-                        outgoing_invite::Location::ChannelId(channel_id)
+                        chat_stream_event::invite_rejected::Location::ChannelId(channel_id)
                     }
                 };
-
-                let invite = OutgoingInvite {
-                    invitee_id: user_id,
-                    location: Some(location),
-                    server_id: Some(host.to_string()),
-                };
-
-                chat_tree
-                    .remove_user_outgoing_invite(inviter_id, &invite)
-                    .await?;
 
                 self.deps.broadcast_chat(
                     EventSub::Homeserver,
                     ChatEvent::InviteRejected(chat_stream_event::InviteRejected {
-                        invite: Some(invite),
+                        invitee_id: user_id,
+                        location: Some(location),
+                        server_id: Some(host.to_string()),
                     }),
                     None,
                     EventContext::new(vec![inviter_id]),
@@ -415,6 +419,15 @@ impl SyncServer {
                 chat_tree
                     .add_pc_to_pc_list(user_id, channel_id, host)
                     .await?;
+
+                let location = pending_invite::Location::ChannelId(channel_id);
+                let res = chat_tree
+                    .remove_user_pending_invite(user_id, Some(host), &location)
+                    .await;
+                if res.is_err_and(|err| err.identifier == "h.no-such-pending-invite") {
+                    res?;
+                }
+
                 self.deps.broadcast_chat(
                     EventSub::Homeserver,
                     ChatEvent::PrivateChannelAddedToList(

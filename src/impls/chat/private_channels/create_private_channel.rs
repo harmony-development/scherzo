@@ -6,10 +6,16 @@ pub async fn handler(
 ) -> ServerResult<Response<CreatePrivateChannelResponse>> {
     let user_id = svc.deps.auth(&request).await?;
 
-    let CreatePrivateChannelRequest { members, is_locked } = request.into_message().await?;
+    let CreatePrivateChannelRequest {
+        members: mut users_allowed,
+        is_dm,
+    } = request.into_message().await?;
 
-    let channel_id = logic(svc.deps.as_ref(), user_id, members.clone(), is_locked).await?;
-    let users_allowed = members;
+    let channel_id = logic(svc.deps.as_ref(), user_id, is_dm).await?;
+
+    // TODO: add logic for detecting an already existing dm for user with the other user
+
+    users_allowed.dedup();
 
     svc.dispatch_private_channel_join(channel_id, user_id)
         .await?;
@@ -18,31 +24,6 @@ pub async fn handler(
     svc.deps
         .chat_tree
         .create_priv_invite_logic(channel_id, users_allowed.clone(), true)
-        .await?;
-
-    // insert outgoing invites for user
-    let mut user_outgoing_invites = Vec::with_capacity(users_allowed.len());
-    for invitee_id in users_allowed.iter().copied() {
-        let (invitee_id, server_id) = svc
-            .deps
-            .profile_tree
-            .local_to_foreign_id(invitee_id)
-            .await?
-            .map_or((invitee_id, None), |(id, server_id)| {
-                (id, Some(server_id.to_string()))
-            });
-
-        let invite = OutgoingInvite {
-            invitee_id,
-            server_id,
-            location: Some(outgoing_invite::Location::ChannelId(channel_id)),
-        };
-
-        user_outgoing_invites.push(invite);
-    }
-    svc.deps
-        .chat_tree
-        .modify_user_outgoing_invites(user_id, |invites| Ok(invites.extend(user_outgoing_invites)))
         .await?;
 
     // dispatch invites to users
@@ -58,12 +39,7 @@ pub async fn handler(
     Ok(CreatePrivateChannelResponse::new(channel_id).into_response())
 }
 
-pub async fn logic(
-    deps: &Dependencies,
-    creator_id: u64,
-    mut members: Vec<u64>,
-    is_locked: bool,
-) -> ServerResult<u64> {
+pub async fn logic(deps: &Dependencies, creator_id: u64, is_dm: bool) -> ServerResult<u64> {
     let chat_tree = &deps.chat_tree;
 
     let channel_id = {
@@ -75,12 +51,10 @@ pub async fn logic(
         channel_id
     };
 
-    // add creator to members since it might not be in the members list
-    members.push(creator_id);
-    // deduplicate user ids
-    members.dedup();
-
-    let private_channel = PrivateChannel { members, is_locked };
+    let private_channel = PrivateChannel {
+        members: vec![creator_id],
+        is_dm,
+    };
     let serialized = rkyv_ser(&private_channel);
 
     let mut batch = Batch::default();
