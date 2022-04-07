@@ -94,6 +94,11 @@ impl Batch {
     pub fn remove(&mut self, key: impl Into<EVec>) {
         self.inserts.push((key.into(), None));
     }
+
+    pub fn merge(mut self, other: Batch) -> Self {
+        self.inserts.extend(other.inserts);
+        self
+    }
 }
 
 #[derive(Debug)]
@@ -194,6 +199,7 @@ pub mod chat {
 
     use super::concat_static;
 
+    pub const DM_WITH_USER_PREFIX: &[u8] = b"dm_with_";
     pub const PENDING_INVITES_PREFIX: &[u8] = b"pending_invites_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
     pub const PRIV_INVITE_PREFIX: &[u8] = b"priv_invite_";
@@ -457,6 +463,15 @@ pub mod chat {
         [&make_priv_invite_key(name), "_allowed_users".as_bytes()].concat()
     }
 
+    pub const fn make_dm_with_user_key(user_id: u64, other_user_id: u64) -> [u8; 25] {
+        concat_static(&[
+            DM_WITH_USER_PREFIX,
+            &user_id.to_be_bytes(),
+            &[b'_'],
+            &other_user_id.to_be_bytes(),
+        ])
+    }
+
     #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default, Debug)]
     #[archive_attr(derive(bytecheck::CheckBytes))]
     pub struct UserPendingInvites {
@@ -501,15 +516,22 @@ pub mod sync {
     }
 }
 
+pub async fn create_batch_delete_prefix(
+    tree: &Tree,
+    prefix: impl AsRef<[u8]>,
+) -> ServerResult<Batch> {
+    tree.scan_prefix(prefix.as_ref())
+        .await
+        .try_fold(Batch::default(), |mut batch, res| {
+            let (key, _) = res.map_err(ServerError::from)?;
+            batch.remove(key);
+            ServerResult::Ok(batch)
+        })
+        .map_err(Into::into)
+}
+
 pub async fn batch_delete_prefix(tree: &Tree, prefix: impl AsRef<[u8]>) -> ServerResult<()> {
-    let batch =
-        tree.scan_prefix(prefix.as_ref())
-            .await
-            .try_fold(Batch::default(), |mut batch, res| {
-                let (key, _) = res.map_err(ServerError::from)?;
-                batch.remove(key);
-                ServerResult::Ok(batch)
-            })?;
+    let batch = create_batch_delete_prefix(tree, prefix).await?;
     tree.apply_batch(batch).await?;
     Ok(())
 }

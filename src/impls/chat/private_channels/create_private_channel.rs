@@ -11,11 +11,52 @@ pub async fn handler(
         is_dm,
     } = request.into_message().await?;
 
-    let channel_id = logic(svc.deps.as_ref(), user_id, is_dm).await?;
-
-    // TODO: add logic for detecting an already existing dm for user with the other user
-
     users_allowed.dedup();
+
+    if users_allowed.contains(&user_id) {
+        bail!((
+            "h.cant-allow-self",
+            "you cant add yourself to members for private channel, it is implied"
+        ));
+    }
+
+    if is_dm && users_allowed.len() != 1 {
+        bail!((
+            "h.must-have-one-member",
+            "private channels must have one member if they are direct message channels"
+        ));
+    }
+
+    let maybe_dm_channel = if is_dm {
+        svc.deps
+            .chat_tree
+            .get(make_dm_with_user_key(user_id, users_allowed[0]))
+            .await?
+            .map(db::deser_id)
+    } else {
+        None
+    };
+
+    if let Some(channel_id) = maybe_dm_channel {
+        join_private_channel::logic(svc.deps.as_ref(), user_id, channel_id).await?;
+
+        svc.broadcast(
+            EventSub::PrivateChannel(channel_id),
+            stream_event::Event::UserJoinedPrivateChannel(stream_event::UserJoinedPrivateChannel {
+                channel_id,
+                user_id,
+            }),
+            None,
+            EventContext::empty(),
+        );
+
+        svc.dispatch_private_channel_join(channel_id, user_id)
+            .await?;
+
+        return Ok(CreatePrivateChannelResponse::new(channel_id).into_response());
+    }
+
+    let channel_id = logic(svc.deps.as_ref(), &users_allowed, user_id, is_dm).await?;
 
     svc.dispatch_private_channel_join(channel_id, user_id)
         .await?;
@@ -39,7 +80,12 @@ pub async fn handler(
     Ok(CreatePrivateChannelResponse::new(channel_id).into_response())
 }
 
-pub async fn logic(deps: &Dependencies, creator_id: u64, is_dm: bool) -> ServerResult<u64> {
+pub async fn logic(
+    deps: &Dependencies,
+    users_allowed: &[u64],
+    creator_id: u64,
+    is_dm: bool,
+) -> ServerResult<u64> {
     let chat_tree = &deps.chat_tree;
 
     let channel_id = {
@@ -60,6 +106,12 @@ pub async fn logic(deps: &Dependencies, creator_id: u64, is_dm: bool) -> ServerR
     let mut batch = Batch::default();
     batch.insert(make_pc_creator_key(channel_id), creator_id.to_be_bytes());
     batch.insert(make_pc_key(channel_id), serialized);
+    if is_dm {
+        batch.insert(
+            make_dm_with_user_key(creator_id, users_allowed[0]),
+            channel_id.to_be_bytes(),
+        );
+    }
     chat_tree.apply_batch(batch).await?;
 
     Ok(channel_id)

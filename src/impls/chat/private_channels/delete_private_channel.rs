@@ -54,14 +54,30 @@ pub async fn logic(
 
     let private_channel = chat_tree.get_private_channel_logic(channel_id).await?;
 
-    db::batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
+    let batch =
+        db::create_batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
 
     // also delete invite, if any
-    db::batch_delete_prefix(
-        &chat_tree.chat_tree,
-        make_priv_invite_key(&channel_id.to_string()),
-    )
-    .await?;
+    let mut batch = batch.merge(
+        db::create_batch_delete_prefix(
+            &chat_tree.chat_tree,
+            make_priv_invite_key(&channel_id.to_string()),
+        )
+        .await?,
+    );
+
+    if private_channel.is_dm {
+        batch.remove(make_dm_with_user_key(
+            private_channel.members[0],
+            private_channel.members[1],
+        ));
+        batch.remove(make_dm_with_user_key(
+            private_channel.members[1],
+            private_channel.members[0],
+        ));
+    }
+
+    chat_tree.apply_batch(batch).await?;
 
     Ok(private_channel)
 }
