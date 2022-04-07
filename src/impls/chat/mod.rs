@@ -1056,7 +1056,7 @@ impl ChatTree {
         self.get_user_pc_guilds(prefix, |guild_id, host| {
             host.is_empty().then(|| GuildListEntry {
                 guild_id,
-                server_id: String::new(),
+                server_id: None,
             })
         })
         .await
@@ -1067,7 +1067,7 @@ impl ChatTree {
         self.get_user_pc_guilds(prefix, |guild_id, host| {
             Some(GuildListEntry {
                 guild_id,
-                server_id: host.to_string(),
+                server_id: host.is_empty().not().then(|| host.to_string()),
             })
         })
         .await
