@@ -921,10 +921,6 @@ impl ChatTree {
         guild_id: u64,
         user_id: u64,
     ) -> Result<bool, ServerError> {
-        if user_id == 0 {
-            return Ok(true);
-        }
-
         let is_owner = self
             .get_guild_owners(guild_id)
             .await?
@@ -932,6 +928,39 @@ impl ChatTree {
             .any(|owner| owner == user_id);
 
         Ok(is_owner)
+    }
+
+    pub async fn get_private_channel_creator(&self, channel_id: u64) -> ServerResult<u64> {
+        let raw = self
+            .get(make_pc_creator_key(channel_id))
+            .await?
+            .ok_or("private channels must have a creator")?;
+        Ok(db::deser_id(raw))
+    }
+
+    pub async fn is_user_private_channel_creator(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<bool> {
+        self.get_private_channel_creator(channel_id)
+            .await
+            .map(|creator_id| creator_id == user_id)
+    }
+
+    pub async fn check_private_channel_creator(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        self.is_user_private_channel_creator(channel_id, user_id)
+            .await?
+            .then(|| Ok(()))
+            .unwrap_or(Err((
+                "h.not-channel-creator",
+                "you are not the private channel creator",
+            )))
+            .map_err(Into::into)
     }
 
     pub async fn check_guild_user_channel(
@@ -1058,6 +1087,15 @@ impl ChatTree {
                 ServerResult::Ok(all)
             })?;
         Ok(list)
+    }
+
+    pub async fn get_private_channel_logic(&self, channel_id: u64) -> ServerResult<PrivateChannel> {
+        let key = make_pc_key(channel_id);
+        let private_channel_raw = self
+            .get(&key)
+            .await?
+            .ok_or(ServerError::NoSuchPrivateChannel(channel_id))?;
+        Ok(db::deser_private_channel(private_channel_raw))
     }
 
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {
@@ -1730,7 +1768,7 @@ impl ChatTree {
     }
 
     pub async fn use_priv_invite_logic(&self, user_id: u64, invite_id: &str) -> ServerResult<u64> {
-        let allowed_users_key = make_pc_invite_allowed_key(&invite_id);
+        let allowed_users_key = make_priv_invite_allowed_key(&invite_id);
         let mut allowed_users = self.get_list_u64_logic(&allowed_users_key).await?;
 
         if let Some(pos) = allowed_users.iter().position(|id| user_id.eq(id)) {
@@ -1765,12 +1803,32 @@ impl ChatTree {
         Ok(id)
     }
 
+    // returns new allowed users
+    pub async fn update_priv_invite_allowed_users(
+        &self,
+        invite_id: String,
+        f: impl FnOnce(&mut Vec<u64>),
+    ) -> ServerResult<Vec<u64>> {
+        let key = make_priv_invite_allowed_key(&invite_id);
+
+        let mut allowed_users = self.get_list_u64_logic(&key).await?;
+        f(&mut allowed_users);
+
+        let serialized = self.serialize_list_u64_logic(allowed_users.clone());
+        self.insert(key, serialized).await?;
+
+        Ok(allowed_users)
+    }
+
+    // returns invite id
     pub async fn create_priv_invite_logic(
         &self,
         id: u64,
-        users_allowed: Vec<u64>,
+        mut users_allowed: Vec<u64>,
         use_id_as_invite_id: bool,
     ) -> ServerResult<String> {
+        users_allowed.dedup();
+
         let invite_id = use_id_as_invite_id
             .then(|| id.to_string())
             .unwrap_or_else(|| gen_rand_inline_str().to_string());
@@ -1787,7 +1845,7 @@ impl ChatTree {
             [id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
         );
         batch.insert(
-            make_pc_invite_allowed_key(&invite_id),
+            make_priv_invite_allowed_key(&invite_id),
             self.serialize_list_u64_logic(users_allowed),
         );
         self.apply_batch(batch).await?;

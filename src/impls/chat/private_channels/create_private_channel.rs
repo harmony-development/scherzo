@@ -21,20 +21,28 @@ pub async fn handler(
         .await?;
 
     // insert outgoing invites for user
-    let user_outgoing_invites = UserOutgoingInvites {
-        invites: users_allowed
-            .iter()
-            .map(|invitee_id| OutgoingInvite {
-                invitee_id: *invitee_id,
-                location: Some(outgoing_invite::Location::ChannelId(channel_id)),
-                server_id: None,
-            })
-            .collect(),
-    };
-    let serialized = rkyv_ser(&user_outgoing_invites);
+    let mut user_outgoing_invites = Vec::with_capacity(users_allowed.len());
+    for invitee_id in users_allowed.iter().copied() {
+        let (invitee_id, server_id) = svc
+            .deps
+            .profile_tree
+            .local_to_foreign_id(invitee_id)
+            .await?
+            .map_or((invitee_id, None), |(id, server_id)| {
+                (id, Some(server_id.to_string()))
+            });
+
+        let invite = OutgoingInvite {
+            invitee_id,
+            server_id,
+            location: Some(outgoing_invite::Location::ChannelId(channel_id)),
+        };
+
+        user_outgoing_invites.push(invite);
+    }
     svc.deps
         .chat_tree
-        .insert(make_user_outgoing_invites_key(user_id), serialized)
+        .modify_user_outgoing_invites(user_id, |invites| Ok(invites.extend(user_outgoing_invites)))
         .await?;
 
     // dispatch invites to users

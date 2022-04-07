@@ -3,7 +3,8 @@
     let_else,
     const_intrinsic_copy,
     const_mut_refs,
-    type_alias_impl_trait
+    type_alias_impl_trait,
+    drain_filter
 )]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 

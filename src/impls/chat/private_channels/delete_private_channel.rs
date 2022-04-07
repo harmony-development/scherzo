@@ -1,5 +1,3 @@
-use crate::db::{batch_delete_prefix, deser_private_channel};
-
 use super::*;
 
 pub async fn handler(
@@ -9,6 +7,11 @@ pub async fn handler(
     let user_id = svc.deps.auth(&request).await?;
 
     let DeletePrivateChannelRequest { channel_id } = request.into_message().await?;
+
+    svc.deps
+        .chat_tree
+        .check_private_channel_creator(channel_id, user_id)
+        .await?;
 
     let deleted_channel = logic(svc.deps.as_ref(), user_id, channel_id).await?;
 
@@ -40,17 +43,12 @@ pub async fn logic(
         ));
     }
 
-    let key = make_pc_key(channel_id);
-    let private_channel_raw = chat_tree
-        .get(&key)
-        .await?
-        .ok_or(ServerError::NoSuchPrivateChannel(channel_id))?;
-    let private_channel = deser_private_channel(private_channel_raw);
+    let private_channel = chat_tree.get_private_channel_logic(channel_id).await?;
 
-    batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
+    db::batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
 
     // also delete invite, if any
-    batch_delete_prefix(
+    db::batch_delete_prefix(
         &chat_tree.chat_tree,
         make_priv_invite_key(&channel_id.to_string()),
     )

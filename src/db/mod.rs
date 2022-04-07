@@ -454,7 +454,7 @@ pub mod chat {
         [PRIV_INVITE_PREFIX, name.as_bytes()].concat()
     }
 
-    pub fn make_pc_invite_allowed_key(name: &str) -> Vec<u8> {
+    pub fn make_priv_invite_allowed_key(name: &str) -> Vec<u8> {
         [&make_priv_invite_key(name), "_allowed_users".as_bytes()].concat()
     }
 
