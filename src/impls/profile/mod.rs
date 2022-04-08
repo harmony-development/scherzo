@@ -125,8 +125,8 @@ impl ProfileTree {
     pub async fn does_username_exist(&self, username: &str) -> ServerResult<bool> {
         for res in self.scan_prefix(USER_PREFIX).await {
             let (_, value) = res?;
-            let profile = db::rkyv_arch::<Profile>(&value);
-            if profile.user_name == username {
+            let maybe_profile = rkyv::check_archived_root::<Profile>(&value);
+            if maybe_profile.map_or(false, |profile| profile.user_name == username) {
                 return Ok(true);
             }
         }

@@ -814,8 +814,8 @@ impl ChatTree {
     pub async fn check_channel_user(
         &self,
         guild_id: Option<u64>,
-        channel_id: u64,
         user_id: u64,
+        channel_id: u64,
     ) -> ServerResult<()> {
         if let Some(guild_id) = guild_id {
             self.check_guild_user_channel(guild_id, user_id, channel_id)
@@ -1449,8 +1449,8 @@ impl ChatTree {
         check_for: &str,
         must_be_guild_owner: bool,
     ) -> Result<(), ServerError> {
-        let guild_id = guild_id.into();
-        let Some(guild_id) = guild_id else {
+        let Some(guild_id) = guild_id.into() else {
+            // For private channels, everyone in the channel can do anything
             return Ok(());
         };
         let is_owner = self.is_user_guild_owner(guild_id, user_id).await?;
