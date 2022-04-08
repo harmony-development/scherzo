@@ -2083,7 +2083,7 @@ impl ChatTree {
         Ok((message_id, message))
     }
 
-    pub fn process_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
+    pub fn check_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
         if let Some(ov) = overrides {
             if ov.username.as_ref().map_or(false, String::is_empty) {
                 bail!((

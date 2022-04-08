@@ -24,7 +24,24 @@ pub async fn handler(
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
-    chat_tree.process_message_overrides(request.overrides.as_ref())?;
+    // check if the in reply to message actually exists
+    if let Some(in_reply_to) = request.in_reply_to {
+        let has_msg = chat_tree
+            .contains_key(make_msg_key(guild_id, channel_id, in_reply_to))
+            .await?;
+        if has_msg.not() {
+            bail!(ServerError::NoSuchMessage {
+                guild_id,
+                channel_id,
+                message_id: in_reply_to
+            });
+        }
+    }
+
+    // check overrides
+    chat_tree.check_message_overrides(request.overrides.as_ref())?;
+
+    // process content (attachments etc)
     let content = chat_tree
         .process_message_content(svc.deps.as_ref(), request.content.take())
         .await?;
