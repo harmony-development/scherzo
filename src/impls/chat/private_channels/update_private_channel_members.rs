@@ -44,9 +44,7 @@ pub async fn logic(
     added: Vec<u64>,
     removed: Vec<u64>,
 ) -> ServerResult<(Vec<u64>, Vec<u64>)> {
-    let chat_tree = &svc.deps.chat_tree;
-
-    let mut private_channel = chat_tree.get_private_channel_logic(channel_id).await?;
+    let mut private_channel = get_private_channel::logic(svc.deps.as_ref(), channel_id).await?;
 
     if private_channel.is_dm {
         bail!((

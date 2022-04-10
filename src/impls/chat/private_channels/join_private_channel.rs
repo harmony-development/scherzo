@@ -34,7 +34,7 @@ pub async fn handler(
 }
 
 pub async fn logic(deps: &Dependencies, user_id: u64, channel_id: u64) -> ServerResult<()> {
-    let mut private_channel = deps.chat_tree.get_private_channel_logic(channel_id).await?;
+    let mut private_channel = get_private_channel::logic(deps, channel_id).await?;
 
     if private_channel.members.contains(&user_id) {
         bail!(("h.already-joined", "you are already in the private channel"));

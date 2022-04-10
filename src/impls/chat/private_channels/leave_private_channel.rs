@@ -43,7 +43,7 @@ pub async fn logic(deps: &Dependencies, user_id: u64, channel_id: u64) -> Server
         ));
     }
 
-    let mut private_channel = deps.chat_tree.get_private_channel_logic(channel_id).await?;
+    let mut private_channel = get_private_channel::logic(deps, channel_id).await?;
 
     if let Some(pos) = private_channel.members.iter().position(|id| user_id.eq(id)) {
         private_channel.members.remove(pos);

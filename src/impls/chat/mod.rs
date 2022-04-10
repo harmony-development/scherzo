@@ -744,6 +744,8 @@ impl chat_service_server::ChatService for ChatServer {
         grant_ownership, GrantOwnershipRequest, GrantOwnershipResponse;
         #[rate(2, 60)]
         give_up_ownership, GiveUpOwnershipRequest, GiveUpOwnershipResponse;
+        #[rate(5, 5)]
+        get_private_channel, GetPrivateChannelRequest, GetPrivateChannelResponse;
         #[rate(1, 20)]
         create_private_channel, CreatePrivateChannelRequest, CreatePrivateChannelResponse;
         #[rate(3, 8)]
@@ -756,6 +758,8 @@ impl chat_service_server::ChatService for ChatServer {
         get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
         #[rate(3, 8)]
         update_private_channel_members, UpdatePrivateChannelMembersRequest, UpdatePrivateChannelMembersResponse;
+        #[rate(3, 8)]
+        update_private_channel_name, UpdatePrivateChannelNameRequest, UpdatePrivateChannelNameResponse;
         #[rate(4, 8)]
         invite_user_to_guild, InviteUserToGuildRequest, InviteUserToGuildResponse;
         #[rate(5 ,5)]
@@ -1023,12 +1027,6 @@ impl ChatTree {
         Ok((message, key))
     }
 
-    pub async fn get_user_local_private_channel_data(
-        &self,
-        user_id: u64,
-    ) -> ServerResult<Vec<PrivateChannel>> {
-    }
-
     pub async fn get_user_local_private_channels(
         &self,
         user_id: u64,
@@ -1099,15 +1097,6 @@ impl ChatTree {
                 ServerResult::Ok(all)
             })?;
         Ok(list)
-    }
-
-    pub async fn get_private_channel_logic(&self, channel_id: u64) -> ServerResult<PrivateChannel> {
-        let key = make_pc_key(channel_id);
-        let private_channel_raw = self
-            .get(&key)
-            .await?
-            .ok_or(ServerError::NoSuchPrivateChannel(channel_id))?;
-        Ok(db::deser_private_channel(private_channel_raw))
     }
 
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {

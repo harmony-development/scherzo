@@ -52,7 +52,7 @@ pub async fn logic(
         ));
     }
 
-    let private_channel = chat_tree.get_private_channel_logic(channel_id).await?;
+    let private_channel = get_private_channel::logic(deps, channel_id).await?;
 
     let batch =
         db::create_batch_delete_prefix(&chat_tree.chat_tree, make_pc_key(channel_id)).await?;
