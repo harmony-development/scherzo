@@ -9,6 +9,7 @@ pub async fn handler(
     let CreatePrivateChannelRequest {
         members: mut users_allowed,
         is_dm,
+        name,
     } = request.into_message().await?;
 
     users_allowed.dedup();
@@ -56,7 +57,7 @@ pub async fn handler(
         return Ok(CreatePrivateChannelResponse::new(channel_id).into_response());
     }
 
-    let channel_id = logic(svc.deps.as_ref(), &users_allowed, user_id, is_dm).await?;
+    let channel_id = logic(svc.deps.as_ref(), &users_allowed, user_id, is_dm, name).await?;
 
     svc.dispatch_private_channel_join(channel_id, user_id)
         .await?;
@@ -85,6 +86,7 @@ pub async fn logic(
     users_allowed: &[u64],
     creator_id: u64,
     is_dm: bool,
+    name: Option<String>,
 ) -> ServerResult<u64> {
     let chat_tree = &deps.chat_tree;
 
@@ -100,6 +102,7 @@ pub async fn logic(
     let private_channel = PrivateChannel {
         members: vec![creator_id],
         is_dm,
+        name,
     };
     let serialized = rkyv_ser(&private_channel);
 

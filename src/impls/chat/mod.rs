@@ -1023,6 +1023,12 @@ impl ChatTree {
         Ok((message, key))
     }
 
+    pub async fn get_user_local_private_channel_data(
+        &self,
+        user_id: u64,
+    ) -> ServerResult<Vec<PrivateChannel>> {
+    }
+
     pub async fn get_user_local_private_channels(
         &self,
         user_id: u64,
@@ -1031,7 +1037,7 @@ impl ChatTree {
         self.get_user_pc_guilds(prefix, |channel_id, host| {
             host.is_empty().then(|| PrivateChannelListEntry {
                 channel_id,
-                server_id: String::new(),
+                server_id: None,
             })
         })
         .await
@@ -1045,7 +1051,7 @@ impl ChatTree {
         self.get_user_pc_guilds(prefix, |channel_id, host| {
             Some(PrivateChannelListEntry {
                 channel_id,
-                server_id: host.to_string(),
+                server_id: Some(host.to_string()),
             })
         })
         .await
