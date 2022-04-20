@@ -424,7 +424,10 @@ impl SyncServer {
                 let res = chat_tree
                     .remove_user_pending_invite(user_id, Some(host), &location)
                     .await;
-                if res.is_err_and(|err| err.identifier == "h.no-such-pending-invite") {
+                if res.as_ref().map_or_else(
+                    |err| err.identifier == "h.no-such-pending-invite",
+                    |_| false,
+                ) {
                     res?;
                 }
 
