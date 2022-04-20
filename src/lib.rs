@@ -5,7 +5,8 @@
     const_mut_refs,
     type_alias_impl_trait,
     drain_filter,
-    is_some_with
+    is_some_with,
+    const_ptr_offset
 )]
 #![allow(clippy::unit_arg, clippy::blocks_in_if_conditions)]
 
