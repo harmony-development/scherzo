@@ -53,8 +53,9 @@ EXPOSE 2289
 # scherzo needs:
 #   ca-certificates: for https
 #   curl: for the healthcheck script
+#   libgcc: for scherzo bin
 #   shadow: needed for useradd groupadd
-RUN apk add --no-cache ca-certificates curl shadow
+RUN apk add --no-cache ca-certificates curl shadow libgcc
 
 # Created directory for the database and media files
 RUN mkdir -p /srv/scherzo
@@ -63,7 +64,7 @@ RUN mkdir -p /srv/scherzo
 HEALTHCHECK --start-period=5s --interval=5s CMD curl --fail -s http://localhost:2289/_harmony/about || curl -k --fail -s https://localhost:2289/_harmony/about || exit 1
 
 # Copy over the actual scherzo binary from the builder stage
-COPY --from=builder /usr/src/scherzo/target/release/scherzo /src/scherzo/scherzo
+COPY --from=builder /usr/src/scherzo/target/release/scherzo /srv/scherzo/scherzo
 
 # Improve security: Don't run stuff as root, that does not need to run as root
 # Most distros also use 1000:1000 for the first real user, so this should resolve volume mounting problems.
