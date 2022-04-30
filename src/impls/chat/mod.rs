@@ -757,9 +757,7 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(5, 5)]
         get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
         #[rate(3, 8)]
-        update_private_channel_members, UpdatePrivateChannelMembersRequest, UpdatePrivateChannelMembersResponse;
-        #[rate(3, 8)]
-        update_private_channel_name, UpdatePrivateChannelNameRequest, UpdatePrivateChannelNameResponse;
+        update_private_channel, UpdatePrivateChannelRequest, UpdatePrivateChannelResponse;
         #[rate(4, 8)]
         invite_user_to_guild, InviteUserToGuildRequest, InviteUserToGuildResponse;
         #[rate(5 ,5)]

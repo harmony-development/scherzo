@@ -15,18 +15,17 @@ pub async fn handler(
 
     logic(svc.deps.as_ref(), user_id, channel_id).await?;
 
-    svc.broadcast(
-        EventSub::PrivateChannel(channel_id),
-        stream_event::Event::UserLeftPrivateChannel(stream_event::UserLeftPrivateChannel {
-            channel_id,
-            user_id,
-        }),
-        None,
-        EventContext::empty(),
-    );
-
     svc.dispatch_private_channel_leave(channel_id, user_id)
         .await?;
+
+    broadcast!(
+        svc,
+        EventSub::PrivateChannel(channel_id),
+        UserLeftPrivateChannel {
+            channel_id,
+            user_id,
+        }
+    );
 
     Ok(LeavePrivateChannelResponse::new().into_response())
 }

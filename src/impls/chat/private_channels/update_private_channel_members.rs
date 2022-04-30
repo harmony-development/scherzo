@@ -1,43 +1,5 @@
 use super::*;
 
-pub async fn handler(
-    svc: &ChatServer,
-    request: Request<UpdatePrivateChannelMembersRequest>,
-) -> ServerResult<Response<UpdatePrivateChannelMembersResponse>> {
-    let user_id = svc.deps.auth(&request).await?;
-
-    let UpdatePrivateChannelMembersRequest {
-        channel_id,
-        added_members,
-        removed_members,
-    } = request.into_message().await?;
-
-    svc.deps
-        .chat_tree
-        .check_private_channel_user(channel_id, user_id)
-        .await?;
-
-    let (added, removed) = logic(svc, channel_id, added_members, removed_members).await?;
-
-    // dispatch invites to new members
-    for invitee_id in added {
-        svc.dispatch_user_invite_received(
-            user_id,
-            invitee_id,
-            pending_invite::Location::ChannelId(channel_id),
-        )
-        .await?;
-    }
-
-    // dispatch left events to removed users
-    for member in removed {
-        svc.dispatch_private_channel_leave(channel_id, member)
-            .await?;
-    }
-
-    Ok(UpdatePrivateChannelMembersResponse::new().into_response())
-}
-
 pub async fn logic(
     svc: &ChatServer,
     channel_id: u64,
