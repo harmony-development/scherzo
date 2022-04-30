@@ -1,8 +1,8 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixCargoIntegration = {
-      url = "github:yusdacra/nix-cargo-integration/master";
+    nci = {
+      url = "github:yusdacra/nix-cargo-integration";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flakeCompat = {
@@ -12,16 +12,13 @@
   };
 
   outputs = inputs:
-    inputs.nixCargoIntegration.lib.makeOutputs {
+    inputs.nci.lib.makeOutputs {
       root = ./.;
       overrides = {
-        crateOverrides = common: _: {
+        crates = common: _: {
           mediasoup-sys = prev: let
             pkgs = common.pkgs;
-            pythonPkgs = pkgs:
-              with pkgs; [
-                pip
-              ];
+            pythonPkgs = pkgs: with pkgs; [pip];
             pythonWithPkgs = pkgs.python3.withPackages pythonPkgs;
             all = (with pkgs; [cmake gnumake nodejs meson ninja]) ++ [pythonWithPkgs];
           in {
