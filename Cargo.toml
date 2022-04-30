@@ -21,7 +21,7 @@ required-features = ["sled", "sqlite"]
 [features]
 default = ["sled"]
 webrtc = ["mediasoup"]
-jemalloc = ["tikv-jemallocator"]
+jemalloc = ["jemallocator"]
 
 # dbs
 sqlite = ["sqlx", "itertools"]
@@ -57,7 +57,7 @@ hyper-rustls = { version = "0.23", default-features = false, features = [
     "http2",
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
-tower-http = { version = "0.2", default-features = false, features = [
+tower-http = { version = "0.3", default-features = false, features = [
     "trace",
     "sensitive-headers",
     "map-response-body",
@@ -135,7 +135,7 @@ bytecheck = { version = "0.6" }
 
 mediasoup = { version = "0.9", optional = true }
 
-tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
+jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
 
 [build-dependencies]
 harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "refactored", features = [
