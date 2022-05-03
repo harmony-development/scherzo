@@ -1,5 +1,4 @@
+image: yusdacra/gitpod-workspace-base-nix:latest
 tasks:
-  - init: echo "entering devshell..."
-    command: nix develop
-
-
+  - init: nix develop -c echo
+  - command: nix develop
