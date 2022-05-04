@@ -22,8 +22,8 @@ pub async fn handler(
             guild.owner_ids.remove(pos);
         }
     } else {
-        return Err(ServerError::MustNotBeLastOwner.into());
+        bail!(ServerError::MustNotBeLastOwner);
     }
 
-    Ok((GiveUpOwnershipResponse {}).into_response())
+    Ok(GiveUpOwnershipResponse::new().into_response())
 }

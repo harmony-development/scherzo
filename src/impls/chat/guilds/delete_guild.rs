@@ -35,7 +35,7 @@ pub async fn handler(
         .await
         .map_err(ServerError::DbError)?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::DeletedGuild(stream_event::GuildDeleted { guild_id }),
         None,
@@ -60,15 +60,15 @@ pub async fn handler(
             }
         }
     }
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Homeserver,
         stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
             guild_id,
-            homeserver: String::new(),
+            server_id: None,
         }),
         None,
         EventContext::new(local_ids),
     );
 
-    Ok((DeleteGuildResponse {}).into_response())
+    Ok(DeleteGuildResponse::new().into_response())
 }

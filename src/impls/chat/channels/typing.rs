@@ -14,27 +14,22 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .check_channel_user(guild_id, user_id, channel_id)
         .await?;
     chat_tree
         .check_perms(guild_id, Some(channel_id), user_id, "messages.send", false)
         .await?;
 
-    svc.send_event_through_chan(
-        EventSub::Guild(guild_id),
+    svc.broadcast(
+        guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
         stream_event::Event::Typing(stream_event::Typing {
             user_id,
             guild_id,
             channel_id,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            "messages.view",
-            false,
-        )),
+        PermCheck::maybe_new(guild_id, channel_id, "messages.view"),
         EventContext::empty(),
     );
 
-    Ok((TypingResponse {}).into_response())
+    Ok(TypingResponse::new().into_response())
 }

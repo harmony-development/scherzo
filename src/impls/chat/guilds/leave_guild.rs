@@ -22,7 +22,7 @@ pub async fn handler(
         .await
         .map_err(ServerError::DbError)?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::LeftMember(stream_event::MemberLeft {
             guild_id,
@@ -35,5 +35,5 @@ pub async fn handler(
 
     svc.dispatch_guild_leave(guild_id, user_id).await?;
 
-    Ok((LeaveGuildResponse {}).into_response())
+    Ok(LeaveGuildResponse::new().into_response())
 }

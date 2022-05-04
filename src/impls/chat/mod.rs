@@ -1,27 +1,32 @@
 use std::{
-    collections::HashSet, io::BufReader, iter, lazy::SyncOnceCell, mem::size_of, ops::Not,
-    path::Path, str::FromStr,
+    collections::HashSet, io::BufReader, lazy::SyncOnceCell, mem::size_of, ops::Not, path::Path,
 };
 
-use crate::api::{
-    chat::{
-        get_channel_messages_request::Direction, overrides::Reason, permission::has_permission,
-        stream_event, FormattedText, Message as HarmonyMessage, *,
-    },
-    emote::Emote,
-    exports::hrpc::{server::socket::Socket, Request},
-    harmonytypes::{item_position, Empty, ItemPosition, Metadata},
-    rest::FileId,
-    sync::{
-        event::{
-            Kind as DispatchKind, UserAddedToGuild as SyncUserAddedToGuild,
-            UserRemovedFromGuild as SyncUserRemovedFromGuild,
+use crate::{
+    api::{
+        chat::{
+            attachment::ImageInfo, get_channel_messages_request::Direction, overrides::Reason,
+            permission::has_permission,
+            send_message_request::attachment::ImageInfo as SendImageInfo, stream_event,
+            Message as HarmonyMessage, *,
         },
-        Event as DispatchEvent,
+        exports::hrpc::{server::socket::Socket, Request},
+        harmonytypes::{item_position, Empty, ItemPosition, Metadata},
+        sync::{
+            event::{
+                user_invited, user_rejected_invite, Kind as DispatchKind,
+                UserAddedToChannel as SyncUserAddedToChannel,
+                UserAddedToGuild as SyncUserAddedToGuild, UserInvited as SyncUserInvited,
+                UserRejectedInvite as SyncUserRejectedInvite,
+                UserRemovedFromChannel as SyncUserRemovedFromChannel,
+                UserRemovedFromGuild as SyncUserRemovedFromGuild,
+            },
+            Event as DispatchEvent,
+        },
     },
-    Hmc,
+    db::deser_invite_entry,
 };
-use image::GenericImageView;
+use image::{GenericImageView, ImageFormat};
 use rand::{Rng, SeedableRng};
 use scherzo_derive::*;
 use smol_str::SmolStr;
@@ -33,12 +38,7 @@ use triomphe::Arc;
 
 use crate::{
     db::{self, chat::*, rkyv_ser, Batch, Db, DbResult},
-    impls::{
-        get_time_millisecs,
-        prelude::*,
-        rest::download::{calculate_range, get_file_full, get_file_handle, is_id_jpeg, read_bufs},
-        sync::EventDispatch,
-    },
+    impls::{get_time_secs, prelude::*, sync::EventDispatch},
 };
 
 use channels::*;
@@ -47,6 +47,9 @@ use invites::*;
 use messages::*;
 use moderation::*;
 use permissions::*;
+use private_channels::*;
+
+use super::media::FileHandle;
 
 pub mod channels;
 pub mod guilds;
@@ -54,6 +57,7 @@ pub mod invites;
 pub mod messages;
 pub mod moderation;
 pub mod permissions;
+pub mod private_channels;
 pub mod stream_events;
 pub mod trigger_action;
 
@@ -61,6 +65,7 @@ pub const DEFAULT_ROLE_ID: u64 = 0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EventSub {
+    PrivateChannel(u64),
     Guild(u64),
     Homeserver,
     Actions,
@@ -75,18 +80,22 @@ pub struct PermCheck<'a> {
 }
 
 impl<'a> PermCheck<'a> {
-    pub const fn new(
-        guild_id: u64,
-        channel_id: Option<u64>,
-        check_for: &'a str,
-        must_be_guild_owner: bool,
-    ) -> Self {
+    pub const fn new(guild_id: u64, channel_id: Option<u64>, check_for: &'a str) -> Self {
         Self {
             guild_id,
             channel_id,
             check_for,
-            must_be_guild_owner,
+            must_be_guild_owner: false,
         }
+    }
+
+    pub fn maybe_new(guild_id: Option<u64>, channel_id: u64, check_for: &'a str) -> Option<Self> {
+        guild_id.map(|guild_id| Self::new(guild_id, Some(channel_id), check_for))
+    }
+
+    pub fn must_be_guild_owner(mut self) -> Self {
+        self.must_be_guild_owner = true;
+        self
     }
 }
 
@@ -168,18 +177,17 @@ impl ChatServer {
             let mut subs = HashSet::with_hasher(ahash::RandomState::new());
 
             // add initial subs
-            // TODO: optimize local guild fetching
-            let user_guilds = chat_tree.get_user_guilds(user_id).await?;
-            let initial_subs = user_guilds
-                .into_iter()
-                .filter(|g| g.server_id.is_empty())
-                .map(|g| EventSub::Guild(g.guild_id));
-            let initial_subs = initial_subs
-                .chain(iter::once(EventSub::Actions))
-                .chain(iter::once(EventSub::Homeserver));
-            for sub in initial_subs {
-                subs.insert(sub);
-            }
+            let user_guilds = chat_tree.get_user_local_guilds(user_id).await?;
+            let user_pcs = chat_tree.get_user_local_private_channels(user_id).await?;
+            let initial_subs = user_guilds.into_iter().map(|e| EventSub::Guild(e.guild_id));
+            let initial_subs = initial_subs.chain(
+                user_pcs
+                    .into_iter()
+                    .map(|e| EventSub::PrivateChannel(e.channel_id)),
+            );
+            let initial_subs =
+                initial_subs.chain([EventSub::Actions, EventSub::Homeserver].into_iter());
+            subs.extend(initial_subs);
 
             // keep track of failed writes and reads to decide if closing the socket is worth it
             let mut failed_writes: u8 = 0;
@@ -215,6 +223,15 @@ impl ChatServer {
                             tracing::debug!("got new stream events request");
 
                             let sub = match req {
+                                Request::SubscribeToPrivateChannel(SubscribeToPrivateChannel { channel_id }) => {
+                                    match chat_tree.check_private_channel_user(channel_id, user_id).await {
+                                        Ok(_) => EventSub::PrivateChannel(channel_id),
+                                        Err(err) => {
+                                            tracing::error!("{}", err);
+                                            continue;
+                                        }
+                                    }
+                                },
                                 Request::SubscribeToGuild(SubscribeToGuild { guild_id }) => {
                                     match chat_tree.check_guild_user(guild_id, user_id).await {
                                         Ok(_) => EventSub::Guild(guild_id),
@@ -242,9 +259,16 @@ impl ChatServer {
                         // handle automatic sub handling BEFORE all the other logic because otherwise
                         // `subs.contains()` will just return
                         if manual_sub_handling.not() {
+                            // TODO: i think we need to check whether the server_id is empty here before inserting?
                             match &broadcast.event {
-                                Event::Chat(stream_event::Event::GuildAddedToList(guild)) => subs.insert(EventSub::Guild(guild.guild_id)),
-                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild)) => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildAddedToList(guild))
+                                    => subs.insert(EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::GuildRemovedFromList(guild))
+                                    => subs.remove(&EventSub::Guild(guild.guild_id)),
+                                Event::Chat(stream_event::Event::PrivateChannelAddedToList(channel))
+                                    => subs.insert(EventSub::PrivateChannel(channel.channel_id)),
+                                Event::Chat(stream_event::Event::PrivateChannelRemovedFromList(channel))
+                                    => subs.remove(&EventSub::PrivateChannel(channel.channel_id)),
                                 _ => false,
                             };
                         }
@@ -316,26 +340,14 @@ impl ChatServer {
     }
 
     #[inline(always)]
-    fn send_event_through_chan(
+    pub fn broadcast(
         &self,
         sub: EventSub,
         event: stream_event::Event,
         perm_check: Option<PermCheck<'static>>,
         context: EventContext,
     ) {
-        let broadcast = EventBroadcast {
-            sub,
-            event: Event::Chat(event),
-            perm_check,
-            context,
-        };
-
-        tracing::debug!(
-            "broadcasting events to {} receivers",
-            self.deps.chat_event_sender.receiver_count()
-        );
-
-        drop(self.deps.chat_event_sender.send(Arc::new(broadcast)));
+        self.deps.broadcast_chat(sub, event, perm_check, context)
     }
 
     #[inline(always)]
@@ -361,11 +373,11 @@ impl ChatServer {
                     .chat_tree
                     .remove_guild_from_guild_list(user_id, guild_id, "")
                     .await?;
-                self.send_event_through_chan(
+                self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::GuildRemovedFromList(stream_event::GuildRemovedFromList {
                         guild_id,
-                        homeserver: String::new(),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -389,11 +401,11 @@ impl ChatServer {
                     .chat_tree
                     .add_guild_to_guild_list(user_id, guild_id, "")
                     .await?;
-                self.send_event_through_chan(
+                self.broadcast(
                     EventSub::Homeserver,
                     stream_event::Event::GuildAddedToList(stream_event::GuildAddedToList {
                         guild_id,
-                        homeserver: String::new(),
+                        server_id: None,
                     }),
                     None,
                     EventContext::new(vec![user_id]),
@@ -403,27 +415,236 @@ impl ChatServer {
         Ok(())
     }
 
-    fn send_reaction_event(
+    async fn dispatch_private_channel_leave(
         &self,
-        guild_id: u64,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        match self.deps.profile_tree.local_to_foreign_id(user_id).await? {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRemovedFromChannel(SyncUserRemovedFromChannel {
+                    user_id: foreign_id,
+                    channel_id,
+                }),
+            ),
+            None => {
+                self.deps
+                    .chat_tree
+                    .remove_pc_from_pc_list(user_id, channel_id, "")
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::PrivateChannelRemovedFromList(
+                        stream_event::PrivateChannelRemovedFromList {
+                            channel_id,
+                            server_id: None,
+                        },
+                    ),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_private_channel_join(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        match self.deps.profile_tree.local_to_foreign_id(user_id).await? {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserAddedToChannel(SyncUserAddedToChannel {
+                    user_id: foreign_id,
+                    channel_id,
+                }),
+            ),
+            None => {
+                self.deps
+                    .chat_tree
+                    .add_pc_to_pc_list(user_id, channel_id, "")
+                    .await?;
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::PrivateChannelAddedToList(
+                        stream_event::PrivateChannelAddedToList {
+                            channel_id,
+                            server_id: None,
+                        },
+                    ),
+                    None,
+                    EventContext::new(vec![user_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_user_invite_rejected(
+        &self,
+        inviter_id: u64,
+        invitee_id: u64,
+        location: user_rejected_invite::Location,
+    ) -> ServerResult<()> {
+        match self
+            .deps
+            .profile_tree
+            .local_to_foreign_id(inviter_id)
+            .await?
+        {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserRejectedInvite(SyncUserRejectedInvite {
+                    user_id: invitee_id,
+                    inviter_id: foreign_id,
+                    location: Some(location),
+                }),
+            ),
+            None => {
+                let location = match location {
+                    user_rejected_invite::Location::ChannelId(channel_id) => {
+                        stream_event::invite_rejected::Location::ChannelId(channel_id)
+                    }
+                    user_rejected_invite::Location::GuildInviteId(invite_id) => {
+                        stream_event::invite_rejected::Location::GuildInviteId(invite_id)
+                    }
+                };
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::InviteRejected(stream_event::InviteRejected {
+                        invitee_id,
+                        location: Some(location),
+                        server_id: None,
+                    }),
+                    None,
+                    EventContext::new(vec![inviter_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    async fn dispatch_user_invite_received(
+        &self,
+        inviter_id: u64,
+        invitee_id: u64,
+        location: pending_invite::Location,
+    ) -> ServerResult<()> {
+        match self
+            .deps
+            .profile_tree
+            .local_to_foreign_id(invitee_id)
+            .await?
+        {
+            Some((foreign_id, target)) => self.dispatch_event(
+                target,
+                DispatchKind::UserInvited(SyncUserInvited {
+                    user_id: foreign_id,
+                    inviter_id,
+                    location: Some(match location {
+                        pending_invite::Location::ChannelId(channel_id) => {
+                            user_invited::Location::ChannelId(channel_id)
+                        }
+                        pending_invite::Location::GuildInviteId(invite_id) => {
+                            user_invited::Location::GuildInviteId(invite_id)
+                        }
+                    }),
+                }),
+            ),
+            None => {
+                self.deps
+                    .chat_tree
+                    .add_user_pending_invite(
+                        invitee_id,
+                        PendingInvite {
+                            inviter_id,
+                            location: Some(location.clone()),
+                            server_id: None,
+                        },
+                    )
+                    .await?;
+                let location = match location {
+                    pending_invite::Location::ChannelId(channel_id) => {
+                        stream_event::invite_received::Location::ChannelId(channel_id)
+                    }
+                    pending_invite::Location::GuildInviteId(invite_id) => {
+                        stream_event::invite_received::Location::GuildInviteId(invite_id)
+                    }
+                };
+                self.broadcast(
+                    EventSub::Homeserver,
+                    stream_event::Event::InviteReceived(stream_event::InviteReceived {
+                        inviter_id,
+                        location: Some(location),
+                        server_id: None,
+                    }),
+                    None,
+                    EventContext::new(vec![invitee_id]),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn send_new_reaction_event(
+        &self,
+        guild_id: Option<u64>,
         channel_id: u64,
         message_id: u64,
-        reaction: Option<Reaction>,
+        reaction: Reaction,
     ) {
-        self.send_event_through_chan(
-            EventSub::Guild(guild_id),
-            stream_event::Event::ReactionUpdated(stream_event::ReactionUpdated {
+        self.broadcast(
+            guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
+            stream_event::Event::NewReactionAdded(stream_event::NewReactionAdded {
                 guild_id,
                 channel_id,
                 message_id,
-                reaction,
+                reaction: Some(reaction),
             }),
-            Some(PermCheck {
+            PermCheck::maybe_new(guild_id, channel_id, all_permissions::MESSAGES_VIEW),
+            EventContext::empty(),
+        );
+    }
+
+    fn send_added_reaction_event(
+        &self,
+        guild_id: Option<u64>,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+    ) {
+        self.broadcast(
+            guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
+            stream_event::Event::ReactionAdded(stream_event::ReactionAdded {
                 guild_id,
-                channel_id: Some(channel_id),
-                check_for: all_permissions::MESSAGES_VIEW,
-                must_be_guild_owner: false,
+                channel_id,
+                message_id,
+                reaction_data: data,
             }),
+            PermCheck::maybe_new(guild_id, channel_id, all_permissions::MESSAGES_VIEW),
+            EventContext::empty(),
+        );
+    }
+
+    fn send_removed_reaction_event(
+        &self,
+        guild_id: Option<u64>,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+    ) {
+        self.broadcast(
+            guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
+            stream_event::Event::ReactionRemoved(stream_event::ReactionRemoved {
+                guild_id,
+                channel_id,
+                message_id,
+                reaction_data: data,
+            }),
+            PermCheck::maybe_new(guild_id, channel_id, all_permissions::MESSAGES_VIEW),
             EventContext::empty(),
         );
     }
@@ -431,11 +652,11 @@ impl ChatServer {
 
 impl chat_service_server::ChatService for ChatServer {
     impl_unary_handlers! {
-        #[rate(1, 5)]
+        #[rate(1, 20)]
         create_guild, CreateGuildRequest, CreateGuildResponse;
-        #[rate(3, 5)]
+        #[rate(3, 10)]
         create_invite, CreateInviteRequest, CreateInviteResponse;
-        #[rate(4, 5)]
+        #[rate(4, 8)]
         create_channel, CreateChannelRequest, CreateChannelResponse;
         #[rate(5, 5)]
         get_guild_list, GetGuildListRequest, GetGuildListResponse;
@@ -460,7 +681,7 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(1, 5)]
         update_all_channel_order, UpdateAllChannelOrderRequest, UpdateAllChannelOrderResponse;
         #[rate(5, 5)]
-        update_message_text, UpdateMessageTextRequest, UpdateMessageTextResponse;
+        update_message_content, UpdateMessageContentRequest, UpdateMessageContentResponse;
         #[rate(1, 15)]
         delete_guild, DeleteGuildRequest, DeleteGuildResponse;
         #[rate(4, 5)]
@@ -469,7 +690,7 @@ impl chat_service_server::ChatService for ChatServer {
         delete_channel, DeleteChannelRequest, DeleteChannelResponse;
         #[rate(7, 5)]
         delete_message, DeleteMessageRequest, DeleteMessageResponse;
-        #[rate(3, 5)]
+        #[rate(3, 15)]
         join_guild, JoinGuildRequest, JoinGuildResponse;
         #[rate(3, 5)]
         leave_guild, LeaveGuildRequest, LeaveGuildResponse;
@@ -478,7 +699,7 @@ impl chat_service_server::ChatService for ChatServer {
         #[rate(15, 8)]
         send_message, SendMessageRequest, SendMessageResponse;
         #[rate(5, 7)]
-        query_has_permission, QueryHasPermissionRequest, QueryHasPermissionResponse;
+        has_permission, HasPermissionRequest, HasPermissionResponse;
         #[rate(5, 7)]
         set_permissions, SetPermissionsRequest, SetPermissionsResponse;
         #[rate(7, 5)]
@@ -509,8 +730,11 @@ impl chat_service_server::ChatService for ChatServer {
         kick_user, KickUserRequest, KickUserResponse;
         #[rate(4, 5)]
         unban_user, UnbanUserRequest, UnbanUserResponse;
+        #[rate(4, 5)]
         get_pinned_messages, GetPinnedMessagesRequest, GetPinnedMessagesResponse;
+        #[rate(4, 10)]
         pin_message, PinMessageRequest, PinMessageResponse;
+        #[rate(4, 10)]
         unpin_message, UnpinMessageRequest, UnpinMessageResponse;
         #[rate(5, 7)]
         add_reaction, AddReactionRequest, AddReactionResponse;
@@ -520,12 +744,27 @@ impl chat_service_server::ChatService for ChatServer {
         grant_ownership, GrantOwnershipRequest, GrantOwnershipResponse;
         #[rate(2, 60)]
         give_up_ownership, GiveUpOwnershipRequest, GiveUpOwnershipResponse;
-        create_room, CreateRoomRequest, CreateRoomResponse;
-        create_direct_message, CreateDirectMessageRequest, CreateDirectMessageResponse;
-        upgrade_room_to_guild, UpgradeRoomToGuildRequest, UpgradeRoomToGuildResponse;
+        #[rate(5, 5)]
+        get_private_channel, GetPrivateChannelRequest, GetPrivateChannelResponse;
+        #[rate(1, 20)]
+        create_private_channel, CreatePrivateChannelRequest, CreatePrivateChannelResponse;
+        #[rate(3, 8)]
+        delete_private_channel, DeletePrivateChannelRequest, DeletePrivateChannelResponse;
+        #[rate(3, 15)]
+        join_private_channel, JoinPrivateChannelRequest, JoinPrivateChannelResponse;
+        #[rate(3, 5)]
+        leave_private_channel, LeavePrivateChannelRequest, LeavePrivateChannelResponse;
+        #[rate(5, 5)]
+        get_private_channel_list, GetPrivateChannelListRequest, GetPrivateChannelListResponse;
+        #[rate(3, 8)]
+        update_private_channel, UpdatePrivateChannelRequest, UpdatePrivateChannelResponse;
+        #[rate(4, 8)]
         invite_user_to_guild, InviteUserToGuildRequest, InviteUserToGuildResponse;
+        #[rate(5 ,5)]
         get_pending_invites, GetPendingInvitesRequest, GetPendingInvitesResponse;
+        #[rate(3, 5)]
         reject_pending_invite, RejectPendingInviteRequest, RejectPendingInviteResponse;
+        #[rate(3, 5)]
         ignore_pending_invite, IgnorePendingInviteRequest, IgnorePendingInviteResponse;
     }
 
@@ -574,11 +813,70 @@ impl ChatTree {
         })
     }
 
-    pub async fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+    pub async fn check_channel_user(
+        &self,
+        guild_id: Option<u64>,
+        user_id: u64,
+        channel_id: u64,
+    ) -> ServerResult<()> {
+        if let Some(guild_id) = guild_id {
+            self.check_guild_user_channel(guild_id, user_id, channel_id)
+                .await
+        } else {
+            self.check_private_channel_user(channel_id, user_id).await
+        }
+    }
+
+    pub async fn is_user_in_private_channel(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<bool> {
+        self.contains_key(&make_member_key_pc(channel_id, user_id))
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn check_user_in_private_channel(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        self.is_user_in_private_channel(channel_id, user_id)
+            .await?
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::UserNotInPrivateChannel {
+                channel_id,
+                user_id,
+            }))
+            .map_err(Into::into)
+    }
+
+    pub async fn is_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<bool> {
         self.contains_key(&make_member_key(guild_id, user_id))
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn check_user_in_guild(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
+        self.is_user_in_guild(guild_id, user_id)
             .await?
             .then(|| Ok(()))
             .unwrap_or(Err(ServerError::UserNotInGuild { guild_id, user_id }))
+            .map_err(Into::into)
+    }
+
+    pub async fn does_private_channel_exist(&self, channel_id: u64) -> ServerResult<bool> {
+        self.contains_key(&make_pc_key(channel_id))
+            .await
+            .map_err(Into::into)
+    }
+
+    pub async fn check_private_channel_exist(&self, channel_id: u64) -> ServerResult<()> {
+        self.does_private_channel_exist(channel_id)
+            .await?
+            .then(|| Ok(()))
+            .unwrap_or(Err(ServerError::NoSuchPrivateChannel(channel_id)))
             .map_err(Into::into)
     }
 
@@ -631,10 +929,6 @@ impl ChatTree {
         guild_id: u64,
         user_id: u64,
     ) -> Result<bool, ServerError> {
-        if user_id == 0 {
-            return Ok(true);
-        }
-
         let is_owner = self
             .get_guild_owners(guild_id)
             .await?
@@ -642,6 +936,39 @@ impl ChatTree {
             .any(|owner| owner == user_id);
 
         Ok(is_owner)
+    }
+
+    pub async fn get_private_channel_creator(&self, channel_id: u64) -> ServerResult<u64> {
+        let raw = self
+            .get(make_pc_creator_key(channel_id))
+            .await?
+            .ok_or("private channels must have a creator")?;
+        Ok(db::deser_id(raw))
+    }
+
+    pub async fn is_user_private_channel_creator(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<bool> {
+        self.get_private_channel_creator(channel_id)
+            .await
+            .map(|creator_id| creator_id == user_id)
+    }
+
+    pub async fn check_private_channel_creator(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        self.is_user_private_channel_creator(channel_id, user_id)
+            .await?
+            .then(|| Ok(()))
+            .unwrap_or(Err((
+                "h.not-channel-creator",
+                "you are not the private channel creator",
+            )))
+            .map_err(Into::into)
     }
 
     pub async fn check_guild_user_channel(
@@ -657,7 +984,7 @@ impl ChatTree {
 
     pub async fn check_guild_user(&self, guild_id: u64, user_id: u64) -> ServerResult<()> {
         self.check_guild(guild_id).await?;
-        self.is_user_in_guild(guild_id, user_id).await
+        self.check_user_in_guild(guild_id, user_id).await
     }
 
     #[inline(always)]
@@ -665,12 +992,23 @@ impl ChatTree {
         self.does_guild_exist(guild_id).await
     }
 
+    pub async fn check_private_channel_user(
+        &self,
+        channel_id: u64,
+        user_id: u64,
+    ) -> ServerResult<()> {
+        self.check_private_channel_exist(channel_id).await?;
+        self.check_user_in_private_channel(channel_id, user_id)
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_message_logic(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
         message_id: u64,
-    ) -> ServerResult<(HarmonyMessage, [u8; 26])> {
+    ) -> ServerResult<(HarmonyMessage, Vec<u8>)> {
         let key = make_msg_key(guild_id, channel_id, message_id);
 
         let message = if let Some(msg) = self.get(&key).await? {
@@ -687,31 +1025,76 @@ impl ChatTree {
         Ok((message, key))
     }
 
+    pub async fn get_user_local_private_channels(
+        &self,
+        user_id: u64,
+    ) -> ServerResult<Vec<PrivateChannelListEntry>> {
+        let prefix = make_pc_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |channel_id, host| {
+            host.is_empty().then(|| PrivateChannelListEntry {
+                channel_id,
+                server_id: None,
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_private_channels(
+        &self,
+        user_id: u64,
+    ) -> ServerResult<Vec<PrivateChannelListEntry>> {
+        let prefix = make_pc_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |channel_id, host| {
+            Some(PrivateChannelListEntry {
+                channel_id,
+                server_id: Some(host.to_string()),
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_local_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
+        let prefix = make_guild_list_key_prefix(user_id);
+        self.get_user_pc_guilds(prefix, |guild_id, host| {
+            host.is_empty().then(|| GuildListEntry {
+                guild_id,
+                server_id: None,
+            })
+        })
+        .await
+    }
+
     pub async fn get_user_guilds(&self, user_id: u64) -> ServerResult<Vec<GuildListEntry>> {
         let prefix = make_guild_list_key_prefix(user_id);
-        let guild_list = self
+        self.get_user_pc_guilds(prefix, |guild_id, host| {
+            Some(GuildListEntry {
+                guild_id,
+                server_id: host.is_empty().not().then(|| host.to_string()),
+            })
+        })
+        .await
+    }
+
+    pub async fn get_user_pc_guilds<T>(
+        &self,
+        prefix: impl AsRef<[u8]>,
+        f: impl Fn(u64, &str) -> Option<T>,
+    ) -> ServerResult<Vec<T>> {
+        let prefix = prefix.as_ref();
+        let list = self
             .scan_prefix(&prefix)
             .await
             .try_fold(Vec::new(), |mut all, res| {
-                let (guild_id_raw, _) = res?;
-                let (id_raw, host_raw) = guild_id_raw
-                    .split_at(prefix.len())
-                    .1
-                    .split_at(size_of::<u64>());
+                let (id_raw, _) = res?;
+                let (id, host) = deserialize_id_host(&id_raw, prefix.len());
 
-                // Safety: this unwrap can never cause UB since we split at u64 boundary
-                let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
-                // Safety: we never store non UTF-8 hosts, so this can't cause UB
-                let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
-
-                all.push(GuildListEntry {
-                    guild_id,
-                    server_id: host.to_string(),
-                });
+                if let Some(item) = f(id, host) {
+                    all.push(item);
+                }
 
                 ServerResult::Ok(all)
             })?;
-        Ok(guild_list)
+        Ok(list)
     }
 
     pub async fn get_guild_logic(&self, guild_id: u64) -> ServerResult<Guild> {
@@ -926,7 +1309,7 @@ impl ChatTree {
 
     pub async fn get_channel_messages_logic(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
         message_id: Option<u64>,
         direction: Option<Direction>,
@@ -977,8 +1360,11 @@ impl ChatTree {
             .try_fold(Vec::new(), |mut all, res| {
                 let (key, value) = res.map_err(ServerError::from)?;
                 // Safety: this is safe since the only keys we get are message keys, which after stripping prefix are message IDs
-                let message_id =
-                    deser_id(key.split_at(make_msg_prefix(guild_id, channel_id).len()).1);
+                let prefix_len = guild_id.map_or_else(
+                    || make_msg_prefix_pc(channel_id).len(),
+                    |guild_id| make_msg_prefix(guild_id, channel_id).len(),
+                );
+                let message_id = deser_id(key.split_at(prefix_len).1);
                 let message = db::deser_message(value);
                 all.push(MessageWithId {
                     message_id,
@@ -1011,7 +1397,7 @@ impl ChatTree {
             }))
     }
 
-    pub async fn query_has_permission_logic(
+    pub async fn has_permission_logic(
         &self,
         guild_id: u64,
         channel_id: Option<u64>,
@@ -1046,14 +1432,20 @@ impl ChatTree {
         Ok(false)
     }
 
+    // TODO: make this return bool so we can differ db errors
+    // from actual permission error
     pub async fn check_perms(
         &self,
-        guild_id: u64,
+        guild_id: impl Into<Option<u64>>,
         channel_id: Option<u64>,
         user_id: u64,
         check_for: &str,
         must_be_guild_owner: bool,
     ) -> Result<(), ServerError> {
+        let Some(guild_id) = guild_id.into() else {
+            // For private channels, everyone in the channel can do anything
+            return Ok(());
+        };
         let is_owner = self.is_user_guild_owner(guild_id, user_id).await?;
         if must_be_guild_owner {
             if is_owner {
@@ -1061,7 +1453,7 @@ impl ChatTree {
             }
         } else if is_owner
             || self
-                .query_has_permission_logic(guild_id, channel_id, user_id, check_for)
+                .has_permission_logic(guild_id, channel_id, user_id, check_for)
                 .await?
         {
             return Ok(());
@@ -1195,7 +1587,7 @@ impl ChatTree {
         let mut batch = Batch::default();
         batch.insert(key, buf);
         batch.insert(
-            make_next_msg_id_key(guild_id, channel_id),
+            make_next_msg_id_key_guild(guild_id, channel_id),
             1_u64.to_be_bytes(),
         );
         self.chat_tree.apply_batch(batch).await?;
@@ -1213,7 +1605,6 @@ impl ChatTree {
         name: String,
         picture: Option<String>,
         metadata: Option<Metadata>,
-        kind: guild_kind::Kind,
     ) -> ServerResult<u64> {
         let guild_id = {
             let mut rng = rand::rngs::SmallRng::from_entropy();
@@ -1229,7 +1620,6 @@ impl ChatTree {
             picture,
             owner_ids: vec![user_id],
             metadata,
-            kind: Some(GuildKind { kind: Some(kind) }),
         };
         let buf = rkyv_ser(&guild);
 
@@ -1284,6 +1674,141 @@ impl ChatTree {
         Ok(guild_id)
     }
 
+    #[inline]
+    pub async fn remove_user_pending_invite(
+        &self,
+        user_id: u64,
+        server_id: Option<&str>,
+        location: &pending_invite::Location,
+    ) -> ServerResult<PendingInvite> {
+        self.modify_user_pending_invites(user_id, |invites| {
+            if let Some(pos) = invites.iter().position(|inv| {
+                inv.server_id.as_deref() == server_id && inv.location.as_ref() == Some(location)
+            }) {
+                Ok(invites.remove(pos))
+            } else {
+                Err(("h.no-such-pending-invite", "no such pending invite found").into())
+            }
+        })
+        .await
+    }
+
+    #[inline]
+    pub async fn add_user_pending_invite(
+        &self,
+        user_id: u64,
+        invite: PendingInvite,
+    ) -> ServerResult<()> {
+        self.modify_user_pending_invites(user_id, |invites| Ok(invites.push(invite)))
+            .await
+    }
+
+    pub async fn modify_user_pending_invites<T>(
+        &self,
+        user_id: u64,
+        f: impl FnOnce(&mut Vec<PendingInvite>) -> ServerResult<T>,
+    ) -> ServerResult<T> {
+        let key = make_user_pending_invites_key(user_id);
+
+        let mut pending = self
+            .get(key)
+            .await?
+            .map_or_else(UserPendingInvites::default, db::deser_pending_invites);
+
+        let result = f(&mut pending.invites)?;
+
+        let pending_ser = rkyv_ser(&pending);
+        self.insert(key, pending_ser).await?;
+
+        Ok(result)
+    }
+
+    pub async fn use_priv_invite_logic(&self, user_id: u64, invite_id: &str) -> ServerResult<u64> {
+        let allowed_users_key = make_priv_invite_allowed_key(&invite_id);
+        let mut allowed_users = self.get_list_u64_logic(&allowed_users_key).await?;
+
+        if let Some(pos) = allowed_users.iter().position(|id| user_id.eq(id)) {
+            allowed_users.remove(pos);
+        } else {
+            bail!((
+                "h.not-invited",
+                "you can't use this invite because you aren't invited"
+            ));
+        }
+
+        let Some(invite_raw) = self.get(make_priv_invite_key(&invite_id)).await? else {
+            bail!(ServerError::NoSuchInvite(invite_id.into()));
+        };
+
+        let (id, mut invite) = deser_invite_entry(invite_raw);
+        invite.use_count += 1;
+
+        let invite_buf = rkyv_ser(&invite);
+
+        let mut batch = Batch::default();
+        batch.insert(
+            make_priv_invite_key(&invite_id),
+            [id.to_be_bytes().as_ref(), invite_buf.as_ref()].concat(),
+        );
+        batch.insert(
+            allowed_users_key,
+            self.serialize_list_u64_logic(allowed_users),
+        );
+        self.apply_batch(batch).await?;
+
+        Ok(id)
+    }
+
+    // returns new allowed users
+    pub async fn update_priv_invite_allowed_users(
+        &self,
+        invite_id: String,
+        f: impl FnOnce(&mut Vec<u64>),
+    ) -> ServerResult<Vec<u64>> {
+        let key = make_priv_invite_allowed_key(&invite_id);
+
+        let mut allowed_users = self.get_list_u64_logic(&key).await?;
+        f(&mut allowed_users);
+
+        let serialized = self.serialize_list_u64_logic(allowed_users.clone());
+        self.insert(key, serialized).await?;
+
+        Ok(allowed_users)
+    }
+
+    // returns invite id
+    pub async fn create_priv_invite_logic(
+        &self,
+        id: u64,
+        mut users_allowed: Vec<u64>,
+        use_id_as_invite_id: bool,
+    ) -> ServerResult<String> {
+        users_allowed.dedup();
+
+        let invite_id = use_id_as_invite_id
+            .then(|| id.to_string())
+            .unwrap_or_else(|| gen_rand_inline_str().to_string());
+
+        let invite = Invite {
+            possible_uses: users_allowed.len() as u32,
+            use_count: 0,
+        };
+        let buf = rkyv_ser(&invite);
+
+        let mut batch = Batch::default();
+        batch.insert(
+            make_priv_invite_key(&invite_id),
+            [id.to_be_bytes().as_ref(), buf.as_ref()].concat(),
+        );
+        batch.insert(
+            make_priv_invite_allowed_key(&invite_id),
+            self.serialize_list_u64_logic(users_allowed),
+        );
+        self.apply_batch(batch).await?;
+
+        Ok(invite_id)
+    }
+
     pub async fn create_invite_logic(
         &self,
         guild_id: u64,
@@ -1331,23 +1856,42 @@ impl ChatTree {
         Ok(all)
     }
 
+    /// Adds a private channel to a user's private channel list
+    pub async fn add_pc_to_pc_list(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        server_id: &str,
+    ) -> ServerResult<()> {
+        self.insert(make_pc_list_key(user_id, channel_id, server_id), [])
+            .await?;
+        Ok(())
+    }
+
+    /// Removes a private channel from a user's private channel list
+    pub async fn remove_pc_from_pc_list(
+        &self,
+        user_id: u64,
+        channel_id: u64,
+        server_id: &str,
+    ) -> ServerResult<()> {
+        self.chat_tree
+            .remove(&make_pc_list_key(user_id, channel_id, server_id))
+            .await
+            .map(|_| ())
+            .map_err(ServerError::from)
+            .map_err(Into::into)
+    }
+
     /// Adds a guild to a user's guild list
     pub async fn add_guild_to_guild_list(
         &self,
         user_id: u64,
         guild_id: u64,
-        homeserver: &str,
+        server_id: &str,
     ) -> ServerResult<()> {
-        self.insert(
-            [
-                make_guild_list_key_prefix(user_id).as_ref(),
-                guild_id.to_be_bytes().as_ref(),
-                homeserver.as_bytes(),
-            ]
-            .concat(),
-            [],
-        )
-        .await?;
+        self.insert(make_guild_list_key(user_id, guild_id, server_id), [])
+            .await?;
         Ok(())
     }
 
@@ -1356,10 +1900,10 @@ impl ChatTree {
         &self,
         user_id: u64,
         guild_id: u64,
-        homeserver: &str,
+        server_id: &str,
     ) -> ServerResult<()> {
         self.chat_tree
-            .remove(&make_guild_list_key(user_id, guild_id, homeserver))
+            .remove(&make_guild_list_key(user_id, guild_id, server_id))
             .await
             .map(|_| ())
             .map_err(ServerError::from)
@@ -1425,12 +1969,12 @@ impl ChatTree {
         }
     }
 
-    pub async fn query_has_permission_request(
+    pub async fn has_permission_request(
         &self,
         user_id: u64,
-        request: QueryHasPermissionRequest,
-    ) -> ServerResult<QueryHasPermissionResponse> {
-        let QueryHasPermissionRequest {
+        request: HasPermissionRequest,
+    ) -> ServerResult<HasPermissionResponse> {
+        let HasPermissionRequest {
             guild_id,
             channel_id,
             check_for,
@@ -1450,17 +1994,21 @@ impl ChatTree {
             return Err(ServerError::EmptyPermissionQuery.into());
         }
 
-        Ok(QueryHasPermissionResponse {
-            ok: self
+        let mut perms = Vec::with_capacity(check_for.len());
+        for check_for in check_for {
+            let ok = self
                 .check_perms(guild_id, channel_id, check_as, &check_for, false)
                 .await
-                .is_ok(),
-        })
+                .is_ok();
+            perms.push(Permission::new(check_for, ok));
+        }
+
+        Ok(HasPermissionResponse::new(perms))
     }
 
     pub async fn get_next_message_id(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
     ) -> Result<u64, ServerError> {
         let next_id_key = make_next_msg_id_key(guild_id, channel_id);
@@ -1473,12 +2021,11 @@ impl ChatTree {
 
     pub async fn get_last_message_id(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
     ) -> Result<u64, ServerError> {
         let next_id_key = make_next_msg_id_key(guild_id, channel_id);
         let raw = self
-            .chat_tree
             .get(&next_id_key)
             .await?
             .expect("no next message id for channel - this is a bug");
@@ -1487,21 +2034,18 @@ impl ChatTree {
         Ok(id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_message_logic(
         &self,
+        guild_id: Option<u64>,
+        channel_id: u64,
         user_id: u64,
-        request: SendMessageRequest,
+        content: Content,
+        overrides: Option<Overrides>,
+        in_reply_to: Option<u64>,
+        metadata: Option<Metadata>,
+        actions: Vec<Action>,
     ) -> ServerResult<(u64, HarmonyMessage)> {
-        let SendMessageRequest {
-            guild_id,
-            channel_id,
-            content,
-            echo_id: _,
-            overrides,
-            in_reply_to,
-            metadata,
-        } = request;
-
         let message_id = self.get_next_message_id(guild_id, channel_id).await?;
         let key = make_msg_key(guild_id, channel_id, message_id); // [tag:msg_key_u64]
 
@@ -1513,9 +2057,10 @@ impl ChatTree {
             author_id: user_id,
             created_at,
             edited_at,
-            content,
+            content: Some(content),
             in_reply_to,
             overrides,
+            actions,
             reactions: Vec::new(),
         };
 
@@ -1525,7 +2070,7 @@ impl ChatTree {
         Ok((message_id, message))
     }
 
-    pub fn process_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
+    pub fn check_message_overrides(&self, overrides: Option<&Overrides>) -> ServerResult<()> {
         if let Some(ov) = overrides {
             if ov.username.as_ref().map_or(false, String::is_empty) {
                 bail!((
@@ -1546,247 +2091,221 @@ impl ChatTree {
         Ok(())
     }
 
-    pub async fn process_message_content(
+    pub async fn process_image_info(
         &self,
-        content: Option<Content>,
-        media_root: &Path,
-        host: &str,
-    ) -> ServerResult<Content> {
-        use content::Content as MsgContent;
+        deps: &Dependencies,
+        info: SendImageInfo,
+        id: String,
+        file_handle: FileHandle,
+    ) -> Result<(String, ImageInfo), ServerError> {
+        let SendImageInfo {
+            caption,
+            use_original,
+        } = info;
 
-        let inner_content = content.and_then(|c| c.content);
-        let content = if let Some(content) = inner_content {
-            let content = match content {
-                content::Content::TextMessage(text) => {
-                    if text.content.as_ref().map_or(true, |f| f.text.is_empty()) {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    content::Content::TextMessage(text)
+        let media_root = &deps.config.media.media_root;
+        let get_format = |path: &Path| {
+            Result::<_, ServerError>::Ok(
+                infer::get_from_path(path)?
+                    .and_then(|t| ImageFormat::from_mime_type(t.mime_type()))
+                    .expect("unsupported image format"),
+            )
+        };
+
+        // TODO: improve this code
+        let minithumbnail_id = format!("{}_jpegthumb", id);
+        let minithumbnail_path = media_root.join(&minithumbnail_id);
+
+        let id = use_original
+            .not()
+            .then(|| format!("{}_jpeg", id))
+            .unwrap_or(id);
+
+        let image_path = media_root.join(&id);
+        let image_format =
+            ImageFormat::from_mime_type(&file_handle.mime).expect("unsupported image format");
+
+        let is_animated = image_format == ImageFormat::Gif;
+        let is_webp = image_format == ImageFormat::WebP;
+
+        let id_ = id.clone();
+        let task_fn = move || -> Result<_, ServerError> {
+            let _guard =
+                tracing::debug_span!("image_processing", id = %id_, format = ?image_format)
+                    .entered();
+            if image_path.exists() && minithumbnail_path.exists() {
+                use image::io::Reader as ImageReader;
+
+                tracing::debug!("loading existing processed image and thumbnail");
+
+                let image_format = get_format(&image_path)?;
+                let ifile = BufReader::new(std::fs::File::open(&image_path)?);
+                let mut ireader = ImageReader::new(ifile);
+                ireader.set_format(image_format);
+                let idimensions = ireader
+                    .into_dimensions()
+                    .map_err(ServerError::ImageProcessError)?;
+
+                let minithumbnail_format = get_format(&minithumbnail_path)?;
+                let mut minireader = ImageReader::open(&minithumbnail_path)?;
+                minireader.set_format(minithumbnail_format);
+                let minisize = minireader
+                    .into_dimensions()
+                    .map_err(ServerError::ImageProcessError)?;
+
+                let minithumbnail = Minithumbnail {
+                    width: minisize.0,
+                    height: minisize.1,
+                    data: std::fs::read(&minithumbnail_path)?,
+                };
+
+                Ok((idimensions, minithumbnail))
+            } else {
+                tracing::debug!("loading original image and processing");
+
+                let raw = file_handle.read_blocking()?;
+
+                let image = is_webp
+                    .then(|| {
+                        let decoder = webp::Decoder::new(&raw);
+                        decoder.decode().map(|i| i.to_image())
+                    })
+                    .flatten();
+                let image = match image {
+                    Some(img) => img,
+                    None => image::load_from_memory_with_format(&raw, image_format)
+                        .map_err(ServerError::ImageProcessError)?,
+                };
+
+                let image_size = image.dimensions();
+                let minithumbnail = image.thumbnail(64, 64);
+                if use_original.not() {
+                    let encoded = is_animated.not().then(|| {
+                        let rgba = image.into_rgba8();
+                        let encoder =
+                            webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
+                        encoder.encode(100.0)
+                    });
+                    let image_raw = encoded.map(|m| m.to_vec()).unwrap_or(raw);
+                    std::fs::write(&image_path, &image_raw)?;
                 }
-                content::Content::PhotoMessage(mut photos) => {
-                    if photos.photos.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    for photo in photos.photos.drain(..).collect::<Vec<_>>() {
-                        // TODO: return error for invalid hmc
-                        if let Ok(file_id) = FileId::from_str(&photo.hmc) {
-                            // TODO: check if the hmc host matches ours, if not fetch the image from the other host
-                            let id = match &file_id {
-                                FileId::External(_) => bail!((
-                                    "h.photo-cant-have-external-url",
-                                    "message photo contents cant use external URL"
-                                )),
-                                FileId::Hmc(hmc) => hmc.id(),
-                                FileId::Id(id) => id.as_str(),
-                            };
 
-                            let image_id = format!("{}_{}", id, "jpeg");
-                            let image_path = media_root.join(&image_id);
-                            let minithumbnail_id = format!("{}_{}", id, "jpegthumb");
-                            let minithumbnail_path = media_root.join(&minithumbnail_id);
+                let rgba = minithumbnail.into_rgba8();
+                let encoder = webp::Encoder::from_rgba(rgba.as_ref(), rgba.width(), rgba.height());
+                let encoded = encoder.encode(100.0).to_vec();
 
-                            let ((file_size, isize), minithumbnail) =
-                                if image_path.exists() && minithumbnail_path.exists() {
-                                    let minithumbnail = tokio::fs::read(&minithumbnail_path)
-                                        .await
-                                        .map_err(ServerError::from)?;
+                std::fs::write(&minithumbnail_path, &encoded)?;
 
-                                    let ifile = tokio::fs::File::open(&image_path)
-                                        .await
-                                        .map_err(ServerError::from)?;
+                Ok((
+                    image_size,
+                    Minithumbnail {
+                        width: rgba.width(),
+                        height: rgba.height(),
+                        data: encoded,
+                    },
+                ))
+            }
+        };
 
-                                    let file_size =
-                                        ifile.metadata().await.map_err(ServerError::from)?.len();
-                                    let ifile = BufReader::new(ifile.into_std().await);
-                                    let ireader = image::io::Reader::new(ifile)
-                                        .with_guessed_format()
-                                        .map_err(ServerError::from)?;
-                                    // this should be cheap and shouldnt block...
-                                    let isize = ireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
+        let ((width, height), minithumbnail) = tokio::task::spawn_blocking(task_fn)
+            .await
+            .expect("image process task panicked")?;
 
-                                    let mut minithumbnail = std::io::Cursor::new(minithumbnail);
-                                    let minireader = image::io::Reader::new(&mut minithumbnail)
-                                        .with_guessed_format()
-                                        .map_err(ServerError::from)?;
-                                    let minisize = minireader
-                                        .into_dimensions()
-                                        .map_err(|_| ServerError::InternalServerError)?;
+        let info = ImageInfo {
+            width,
+            height,
+            minithumbnail: Some(minithumbnail),
+            caption,
+        };
 
-                                    (
-                                        (file_size as u32, isize),
-                                        Minithumbnail {
-                                            width: minisize.0,
-                                            height: minisize.1,
-                                            data: minithumbnail.into_inner(),
-                                        },
-                                    )
-                                } else {
-                                    let (_, mime, data, _) = get_file_full(media_root, id).await?;
+        Ok((id, info))
+    }
 
-                                    let is_animated = mime == "image/gif";
+    pub async fn process_attachment_info(
+        &self,
+        deps: &Dependencies,
+        info: Option<send_message_request::attachment::Info>,
+        id: String,
+        file_handle: FileHandle,
+    ) -> Result<(String, Option<attachment::Info>), ServerError> {
+        use send_message_request::attachment::Info;
 
-                                    let (minithumbnail, image_size, image_raw, data) =
-                                        tokio::task::spawn_blocking(move || {
-                                            let image = (mime == "image/webp")
-                                                .then(|| {
-                                                    let decoder = webp::Decoder::new(&data);
-                                                    decoder.decode().map(|i| i.to_image())
-                                                })
-                                                .flatten()
-                                                .or_else(|| image::load_from_memory(&data).ok())
-                                                .ok_or(ServerError::InternalServerError)?;
+        if let Some(info) = info {
+            let (id, info) = match info {
+                Info::Image(info) => {
+                    let (id, info) = self.process_image_info(deps, info, id, file_handle).await?;
 
-                                            let image_size = image.dimensions();
-                                            let minithumbnail = image.thumbnail(64, 64);
-                                            let encoded = is_animated.not().then(|| {
-                                                let rgba = image.into_rgba8();
-                                                let encoder = webp::Encoder::from_rgba(
-                                                    rgba.as_ref(),
-                                                    rgba.width(),
-                                                    rgba.height(),
-                                                );
-                                                encoder.encode(100.0)
-                                            });
-                                            ServerResult::Ok((
-                                                minithumbnail,
-                                                image_size,
-                                                encoded.map(|m| m.to_vec()),
-                                                data,
-                                            ))
-                                        })
-                                        .await
-                                        .map_err(|_| ServerError::InternalServerError)??;
-
-                                    let image_raw = image_raw.unwrap_or(data);
-
-                                    tokio::fs::write(&image_path, &image_raw)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    let (minithumb_size, minithumbnail_raw) =
-                                        tokio::task::spawn_blocking(move || {
-                                            let rgba = minithumbnail.into_rgba8();
-                                            let encoder = webp::Encoder::from_rgba(
-                                                rgba.as_ref(),
-                                                rgba.width(),
-                                                rgba.height(),
-                                            );
-                                            let encoded = encoder.encode(100.0);
-
-                                            ServerResult::Ok(((64, 64), encoded.to_vec()))
-                                        })
-                                        .await
-                                        .map_err(|_| ServerError::InternalServerError)??;
-
-                                    tokio::fs::write(&minithumbnail_path, &minithumbnail_raw)
-                                        .await
-                                        .map_err(ServerError::from)?;
-
-                                    (
-                                        (image_raw.len() as u32, image_size),
-                                        Minithumbnail {
-                                            width: minithumb_size.0,
-                                            height: minithumb_size.1,
-                                            data: minithumbnail_raw,
-                                        },
-                                    )
-                                };
-
-                            photos.photos.push(Photo {
-                                hmc: Hmc::new(host, image_id).unwrap().into(),
-                                minithumbnail: Some(minithumbnail),
-                                width: isize.0,
-                                height: isize.1,
-                                file_size,
-                                ..photo
-                            });
-                        } else {
-                            photos.photos.push(photo);
-                        }
-                    }
-                    content::Content::PhotoMessage(photos)
-                }
-                content::Content::AttachmentMessage(mut files) => {
-                    if files.files.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    for attachment in files.files.drain(..).collect::<Vec<_>>() {
-                        if let Ok(id) = FileId::from_str(&attachment.id) {
-                            let fill_file_local = move |attachment: Attachment, id: String| async move {
-                                let is_jpeg = is_id_jpeg(&id);
-                                let (mut file, metadata, path) =
-                                    get_file_handle(media_root, &id).await?;
-                                let (filename_raw, mimetype_raw, _) =
-                                    read_bufs(&path, &mut file, is_jpeg).await?;
-                                let (start, end) = calculate_range(
-                                    &filename_raw,
-                                    &mimetype_raw,
-                                    &metadata,
-                                    is_jpeg,
-                                );
-                                let size = end - start;
-
-                                Result::<_, ServerError>::Ok(Attachment {
-                                    name: attachment
-                                        .name
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(filename_raw)
-                                        })
-                                        .unwrap_or(attachment.name),
-                                    size: attachment
-                                        .size
-                                        .eq(&0)
-                                        .then(|| size as u32)
-                                        .unwrap_or(attachment.size),
-                                    mimetype: attachment
-                                        .mimetype
-                                        .is_empty()
-                                        .then(|| unsafe {
-                                            String::from_utf8_unchecked(mimetype_raw)
-                                        })
-                                        .unwrap_or(attachment.mimetype),
-                                    ..attachment
-                                })
-                            };
-                            match id {
-                                FileId::Hmc(hmc) => {
-                                    // TODO: fetch file from remote host if its not local
-                                    let id = hmc.id();
-                                    files
-                                        .files
-                                        .push(fill_file_local(attachment, id.to_string()).await?);
-                                }
-                                FileId::Id(id) => {
-                                    files.files.push(fill_file_local(attachment, id).await?)
-                                }
-                                _ => files.files.push(attachment),
-                            }
-                        } else {
-                            files.files.push(attachment);
-                        }
-                    }
-                    content::Content::AttachmentMessage(files)
-                }
-                content::Content::EmbedMessage(embed) => {
-                    if embed.embeds.is_empty() {
-                        bail!(ServerError::MessageContentCantBeEmpty);
-                    }
-                    content::Content::EmbedMessage(embed)
-                }
-                MsgContent::InviteAccepted(_)
-                | MsgContent::InviteRejected(_)
-                | MsgContent::RoomUpgradedToGuild(_) => {
-                    bail!(ServerError::ContentCantBeSentByUser);
+                    (id, attachment::Info::Image(info))
                 }
             };
-            Content {
-                content: Some(content),
-            }
+
+            Ok((id, Some(info)))
+        } else if file_handle.mime != "image/svg+xml" && file_handle.mime.starts_with("image") {
+            let (id, info) = self
+                .process_image_info(deps, SendImageInfo::default(), id, file_handle)
+                .await?;
+            Ok((id, Some(attachment::Info::Image(info))))
         } else {
+            Ok((id, None))
+        }
+    }
+
+    pub async fn process_attachment(
+        &self,
+        deps: &Dependencies,
+        send_message_request::Attachment { id, name, info }: send_message_request::Attachment,
+    ) -> ServerResult<Attachment> {
+        let file_handle = deps.media.get_file(&id).await?;
+
+        let size = file_handle.size;
+        let filename = name
+            .is_empty()
+            .then(|| file_handle.name.clone())
+            .unwrap_or(name);
+        let mimetype = file_handle.mime.clone();
+
+        let (id, info) = self
+            .process_attachment_info(deps, info, id, file_handle)
+            .await?;
+
+        Ok(Attachment {
+            id,
+            name: filename,
+            mimetype,
+            size: size as u32,
+            info,
+        })
+    }
+
+    pub async fn process_message_content(
+        &self,
+        deps: &Dependencies,
+        content: Option<send_message_request::Content>,
+    ) -> ServerResult<Content> {
+        let Some(content) = content else {
             bail!(ServerError::MessageContentCantBeEmpty);
+        };
+
+        let is_text_empty = content.text.is_empty();
+        let is_embeds_empty = content.embeds.is_empty();
+        let is_attachments_empty = content.attachments.is_empty();
+
+        // check if message content is empty
+        if is_attachments_empty && is_embeds_empty && is_text_empty {
+            bail!(ServerError::MessageContentCantBeEmpty);
+        }
+
+        let mut attachments = Vec::with_capacity(content.attachments.len());
+        for attachment in content.attachments {
+            attachments.push(self.process_attachment(deps, attachment).await?);
+        }
+
+        let content = Content {
+            text: content.text,
+            text_formats: content.text_formats,
+            embeds: content.embeds,
+            attachments,
+            extra: None,
         };
 
         Ok(content)
@@ -1800,90 +2319,141 @@ impl ChatTree {
 
     pub async fn send_with_system(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
-        content: content::Content,
+        content: Content,
     ) -> ServerResult<(u64, HarmonyMessage)> {
-        let request = SendMessageRequest::default()
-            .with_guild_id(guild_id)
-            .with_channel_id(channel_id)
-            .with_content(Content {
-                content: Some(content),
-            })
-            .with_overrides(Overrides {
-                username: Some("System".to_string()),
-                reason: Some(overrides::Reason::SystemMessage(Empty {})),
-                avatar: None,
-            });
-        self.send_message_logic(0, request).await
+        let overrides = Overrides {
+            username: Some("System".to_string()),
+            reason: Some(overrides::Reason::SystemMessage(Empty {})),
+            avatar: None,
+        };
+        self.send_message_logic(
+            guild_id,
+            channel_id,
+            0,
+            content,
+            Some(overrides),
+            None,
+            None,
+            Vec::new(),
+        )
+        .await
     }
 
-    pub async fn update_reaction(
+    /// Removes a reaction by decrementing the count, if count is zero
+    /// deletes the reaction from message reactions.
+    ///
+    /// Returns `true` if the message was deleted from message reactions.
+    pub async fn remove_reaction(
         &self,
         user_id: u64,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
         message_id: u64,
-        emote: Emote,
-        add: bool,
-    ) -> ServerResult<Option<Reaction>> {
-        let react_key =
-            make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &emote.image_id);
+        data: &str,
+    ) -> ServerResult<bool> {
+        let react_key = guild_id.map_or_else(
+            || make_user_reacted_msg_key_pc(channel_id, message_id, user_id, data),
+            |guild_id| make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, data),
+        );
+
         let reacted = self
             .chat_tree
             .contains_key(&react_key)
             .await
             .map_err(ServerError::from)?;
-        if matches!((add, reacted), (true, true) | (false, false)) {
-            return Ok(None);
+        if reacted.not() {
+            bail!(("h.cant-remove-react", "cant remove react if didnt react"));
         }
 
         // TODO: validate the emote image_id is below a certain size
-        self.check_guild_user_channel(guild_id, user_id, channel_id)
-            .await?;
-
         let (mut message, message_key) = self
             .get_message_logic(guild_id, channel_id, message_id)
             .await?;
 
-        let mut batch = Batch::default();
-        let reaction = if let Some(reaction) = message.reactions.iter_mut().find(|r| {
-            r.emote
-                .as_ref()
-                .map_or(false, |e| e.image_id == emote.image_id)
-        }) {
-            reaction.count = add
-                .then(|| reaction.count.saturating_add(1))
-                .unwrap_or_else(|| reaction.count.saturating_sub(1));
-            if reaction.count == 0 {
-                batch.remove(react_key);
-            }
-            Some(reaction.clone())
-        } else if add {
-            let reaction = Reaction {
-                count: 1,
-                emote: Some(emote),
-            };
-            batch.insert(react_key, Vec::new());
-            message.reactions.push(reaction.clone());
-            Some(reaction)
-        } else {
-            None
-        };
+        let remove_index = message
+            .reactions
+            .iter_mut()
+            .enumerate()
+            .find(|(_, r)| r.data == data)
+            .and_then(|(index, reaction)| {
+                reaction.count = reaction.count.saturating_sub(1);
+                (reaction.count == 0).then(|| index)
+            });
 
-        batch.insert(message_key, rkyv_ser(&message));
+        if let Some(index) = remove_index {
+            message.reactions.remove(index);
+        }
 
-        self.chat_tree
-            .apply_batch(batch)
+        self.insert(message_key, rkyv_ser(&message)).await?;
+        self.remove(react_key).await?;
+
+        Ok(remove_index.is_some())
+    }
+
+    /// Adds a new reaction by incrementing the count, if the reaction
+    /// doesn't already exist adds it to the message reactions.
+    ///
+    /// Returns `true` if the reaction was new.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_reaction(
+        &self,
+        user_id: u64,
+        guild_id: Option<u64>,
+        channel_id: u64,
+        message_id: u64,
+        data: String,
+        name: String,
+        kind: ReactionKind,
+    ) -> ServerResult<bool> {
+        let react_key = guild_id.map_or_else(
+            || make_user_reacted_msg_key_pc(channel_id, message_id, user_id, &data),
+            |guild_id| make_user_reacted_msg_key(guild_id, channel_id, message_id, user_id, &data),
+        );
+
+        let reacted = self
+            .chat_tree
+            .contains_key(&react_key)
             .await
             .map_err(ServerError::from)?;
+        if reacted {
+            bail!(("h.cant-react-multiple", "cant react multiple times"));
+        }
 
-        Ok(reaction)
+        // TODO: validate the emote image_id is below a certain size
+        let (mut message, message_key) = self
+            .get_message_logic(guild_id, channel_id, message_id)
+            .await?;
+
+        let did_increment = message
+            .reactions
+            .iter_mut()
+            .find(|r| r.data == data)
+            .map(|reaction| {
+                reaction.count = reaction.count.saturating_add(1);
+            })
+            .is_some();
+
+        if did_increment.not() {
+            let reaction = Reaction {
+                count: 1,
+                data,
+                kind: kind.into(),
+                name,
+            };
+            message.reactions.push(reaction);
+        }
+
+        self.insert(message_key, rkyv_ser(&message)).await?;
+        self.insert(react_key, []).await?;
+
+        Ok(did_increment.not())
     }
 
     pub async fn get_pinned_messages_logic(
         &self,
-        guild_id: u64,
+        guild_id: Option<u64>,
         channel_id: u64,
     ) -> Result<Vec<u64>, ServerError> {
         let pinned_msgs_raw = self.get(make_pinned_msgs_key(guild_id, channel_id)).await?;
@@ -1898,4 +2468,17 @@ impl ChatTree {
         self.remove(make_invite_key(invite_id.as_str())).await?;
         Ok(())
     }
+}
+
+// used for deserializing private channel or guild entries from the db
+// this function assumes that the passed id_raw is of structure `prefix + u64 + utf-8 string`
+fn deserialize_id_host(id_raw: &[u8], prefix_len: usize) -> (u64, &str) {
+    let (id_raw, host_raw) = id_raw.split_at(prefix_len).1.split_at(size_of::<u64>());
+
+    // Safety: this unwrap can never cause UB since we split at u64 boundary
+    let guild_id = u64::from_be_bytes(unsafe { id_raw.try_into().unwrap_unchecked() });
+    // Safety: we never store non UTF-8 hosts, so this can't cause UB
+    let host = unsafe { std::str::from_utf8_unchecked(host_raw) };
+
+    (guild_id, host)
 }

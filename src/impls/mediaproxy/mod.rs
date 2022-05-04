@@ -1,10 +1,13 @@
-use crate::api::mediaproxy::{fetch_link_metadata_response::Data, *};
+use crate::api::mediaproxy::{
+    fetch_link_metadata_response::{metadata::Data, Metadata as HarmonyMetadata},
+    *,
+};
 use ahash::RandomState;
 use dashmap::{mapref::one::Ref, DashMap};
 use reqwest::Client as HttpClient;
 use webpage::HTML;
 
-use std::time::Instant;
+use std::{ops::Not, time::Instant};
 
 use super::{get_mimetype, http, prelude::*};
 
@@ -17,12 +20,15 @@ fn site_metadata_from_html(html: &HTML) -> SiteMetadata {
         page_title: html.title.clone().unwrap_or_default(),
         description: html.description.clone().unwrap_or_default(),
         url: html.url.clone().unwrap_or_default(),
-        image: html
+        thumbnail: html
             .opengraph
             .images
-            .last()
-            .map(|og| og.url.clone())
-            .unwrap_or_default(),
+            .iter()
+            .map(|img| site_metadata::ThumbnailImage {
+                url: img.url.clone(),
+                ..Default::default()
+            })
+            .collect(),
         ..Default::default()
     }
 }
@@ -47,16 +53,42 @@ impl From<Metadata> for Data {
                 size,
             } => Data::IsMedia(MediaMetadata {
                 mimetype: mimetype.into(),
-                filename: filename.into(),
+                name: filename.into(),
                 size,
+                ..Default::default()
             }),
         }
     }
 }
 
+impl From<Metadata> for HarmonyMetadata {
+    fn from(metadata: Metadata) -> Self {
+        HarmonyMetadata::new(Data::from(metadata))
+    }
+}
+
+const DEFAULT_MAX_AGE: u64 = 30 * 60;
+
 struct TimedCacheValue<T> {
     value: T,
     since: Instant,
+    /// this corresponds to the `max-age` of `cache-control` header
+    max_age: u64,
+}
+
+impl<T> TimedCacheValue<T> {
+    fn new(value: T, max_age: u64) -> Self {
+        Self {
+            value,
+            since: Instant::now(),
+            max_age,
+        }
+    }
+
+    /// whether this value is stale (and should not be used) or not
+    fn is_stale(&self) -> bool {
+        self.since.elapsed().as_secs() >= self.max_age
+    }
 }
 
 // TODO: investigate possible optimization since the key will always be an URL?
@@ -69,7 +101,7 @@ fn get_from_cache(url: &str) -> Option<Ref<'_, String, TimedCacheValue<Metadata>
         // Value is available, check if it is expired
         Some(val) => {
             // Remove value if it is expired
-            if val.since.elapsed().as_secs() >= 30 * 60 {
+            if val.is_stale() {
                 drop(val); // explicit drop to tell we don't need it anymore
                 CACHE.remove(url);
                 None
@@ -118,6 +150,29 @@ impl MediaproxyServer {
             .error_for_status()
             .map_err(ServerError::FailedToFetchLink)?;
 
+        let max_age = response
+            .headers()
+            .get(&http::header::CACHE_CONTROL)
+            .and_then(|header| {
+                let header_str = header.to_str().ok()?;
+                let parse_max_age = || {
+                    header_str
+                        .split(',')
+                        .map(str::trim)
+                        .find_map(|item| {
+                            item.strip_prefix("max-age=")
+                                .or_else(|| item.strip_prefix("s-maxage="))
+                        })
+                        .and_then(|raw| raw.parse::<u64>().ok())
+                };
+                header_str
+                    .contains("no-store")
+                    .not()
+                    .then(parse_max_age)
+                    .unwrap_or(Some(0))
+            })
+            .unwrap_or(DEFAULT_MAX_AGE);
+
         let is_html = response
             .headers()
             .get(&http::header::CONTENT_TYPE)
@@ -158,13 +213,7 @@ impl MediaproxyServer {
         };
 
         // Insert to cache since successful
-        CACHE.insert(
-            raw_url,
-            TimedCacheValue {
-                value: metadata.clone(),
-                since: Instant::now(),
-            },
-        );
+        CACHE.insert(raw_url, TimedCacheValue::new(metadata.clone(), max_age));
 
         Ok(metadata)
     }

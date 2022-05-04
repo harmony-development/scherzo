@@ -17,7 +17,7 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .check_channel_user(guild_id, user_id, channel_id)
         .await?;
     chat_tree
         .check_perms(guild_id, Some(channel_id), user_id, "messages.view", false)

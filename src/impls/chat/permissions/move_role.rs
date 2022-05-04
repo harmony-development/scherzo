@@ -24,22 +24,17 @@ pub async fn handler(
         chat_tree
             .move_role_logic(guild_id, role_id, Some(pos.clone()))
             .await?;
-        svc.send_event_through_chan(
+        svc.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::RoleMoved(stream_event::RoleMoved {
                 guild_id,
                 role_id,
                 new_position: Some(pos),
             }),
-            Some(PermCheck::new(
-                guild_id,
-                None,
-                all_permissions::ROLES_GET,
-                false,
-            )),
+            Some(PermCheck::new(guild_id, None, all_permissions::ROLES_GET)),
             EventContext::empty(),
         );
     }
 
-    Ok((MoveRoleResponse {}).into_response())
+    Ok(MoveRoleResponse::new().into_response())
 }

@@ -20,5 +20,5 @@ pub async fn handler(
 
     chat_tree.delete_invite_logic(invite_id).await?;
 
-    Ok((DeleteInviteResponse {}).into_response())
+    Ok(DeleteInviteResponse::new().into_response())
 }

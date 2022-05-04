@@ -44,7 +44,7 @@ pub async fn handler(
 
     chat_tree.put_guild_logic(guild_id, guild_info).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::EditedGuild(stream_event::GuildUpdated {
             guild_id,
@@ -56,5 +56,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((UpdateGuildInformationResponse {}).into_response())
+    Ok(UpdateGuildInformationResponse::new().into_response())
 }

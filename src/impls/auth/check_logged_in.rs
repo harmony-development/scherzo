@@ -5,5 +5,5 @@ pub async fn handler(
     request: Request<CheckLoggedInRequest>,
 ) -> Result<Response<CheckLoggedInResponse>, HrpcServerError> {
     svc.deps.auth(&request).await?;
-    Ok((CheckLoggedInResponse {}).into_response())
+    Ok(CheckLoggedInResponse::new().into_response())
 }

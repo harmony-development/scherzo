@@ -242,10 +242,7 @@ pub async fn handler(
                     Event::UserLeft(user_left) => ResponseMessage::UserLeft(user_left),
                 };
 
-                bail_result!(
-                    tx.send_message(StreamMessageResponse::new(Some(message)))
-                        .await
-                );
+                bail_result!(tx.send_message(StreamMessageResponse::new(message)).await);
             }
             ServerResult::Ok(())
         };

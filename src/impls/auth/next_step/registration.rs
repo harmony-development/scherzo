@@ -130,7 +130,7 @@ pub async fn logic(
         .insert(make_user_profile_key(user_id), buf)
         .await?;
 
-    tracing::debug!("new user {} registered", user_id);
+    tracing::debug!("new user {user_id} registered");
 
     auth_tree
         .insert(auth_key(session_token.as_str()), user_id.to_be_bytes())

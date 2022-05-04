@@ -1,26 +1,33 @@
 use std::future::Future;
 
+use bytecheck::CheckBytes;
 use hrpc::server::gen_prelude::BoxFuture;
+use rkyv::{
+    de::deserializers::SharedDeserializeMap, ser::serializers::AllocSerializer,
+    validation::validators::DefaultValidator, Archive, Deserialize, Serialize,
+};
 use tracing::Instrument;
 
 use crate::db;
 
-use super::{Db, DbResult};
+use super::{rkyv_ser, Batch, Db, DbResult, Tree};
 
 mod add_account_kind;
 mod add_next_msg_ids;
 mod initial_db_version;
+mod proto_v2;
 mod remove_log_chan_id_from_admin_keys;
 mod timestamps_are_milliseconds;
 
 type Migration = for<'a> fn(&'a Db) -> BoxFuture<'a, DbResult<()>>;
 
-pub const MIGRATIONS: [Migration; 5] = [
+pub const MIGRATIONS: [Migration; 6] = [
     initial_db_version::migrate,
     add_next_msg_ids::migrate,
     remove_log_chan_id_from_admin_keys::migrate,
     add_account_kind::migrate,
     timestamps_are_milliseconds::migrate,
+    proto_v2::migrate,
 ];
 
 pub async fn get_db_version(db: &Db) -> DbResult<(usize, bool)> {
@@ -77,3 +84,38 @@ async fn increment_db_version(db: &Db) -> DbResult<()> {
     }
     Ok(())
 }
+
+async fn migrate_type<From, To, F>(tree: &Tree, prefix: &[u8], mut migrate: F) -> DbResult<()>
+where
+    From: Archive,
+    To: Archive + Serialize<AllocSerializer<1024>>,
+    From::Archived:
+        for<'a> CheckBytes<DefaultValidator<'a>> + Deserialize<From, SharedDeserializeMap>,
+    To::Archived: for<'a> CheckBytes<DefaultValidator<'a>>,
+    F: FnMut(From) -> To,
+{
+    let mut batch = Batch::default();
+    for res in tree.scan_prefix(prefix).await {
+        let (key, val) = res?;
+        let old = rkyv::from_bytes::<From>(&val);
+        if let Ok(old) = old {
+            let new_val = migrate(old);
+            let new_val = rkyv_ser(&new_val);
+            batch.insert(key, new_val);
+        }
+    }
+    tree.apply_batch(batch).await?;
+    Ok(())
+}
+
+macro_rules! define_migration {
+    (|$db:ident| $e:tt) => {
+        pub(super) fn migrate($db: &Db) -> BoxFuture<'_, DbResult<()>> {
+            let fut = Box::pin(async move { $e });
+
+            Box::pin(fut)
+        }
+    };
+}
+
+pub(self) use define_migration;

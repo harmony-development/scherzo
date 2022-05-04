@@ -15,7 +15,7 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree
-        .check_guild_user_channel(guild_id, user_id, channel_id)
+        .check_channel_user(guild_id, user_id, channel_id)
         .await?;
 
     chat_tree
@@ -29,23 +29,18 @@ pub async fn handler(
         .await?;
 
     let key = make_pinned_msgs_key(guild_id, channel_id);
-    let mut pinned_msgs_raw = chat_tree.get(key).await?.map_or_else(Vec::new, EVec::into);
+    let mut pinned_msgs_raw = chat_tree.get(&key).await?.map_or_else(Vec::new, EVec::into);
     pinned_msgs_raw.extend_from_slice(&message_id.to_be_bytes());
     chat_tree.insert(key, pinned_msgs_raw).await?;
 
-    svc.send_event_through_chan(
-        EventSub::Guild(guild_id),
+    svc.broadcast(
+        guild_id.map_or(EventSub::PrivateChannel(channel_id), EventSub::Guild),
         stream_event::Event::MessagePinned(stream_event::MessagePinned {
             guild_id,
             channel_id,
             message_id,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            all_permissions::MESSAGES_VIEW,
-            false,
-        )),
+        PermCheck::maybe_new(guild_id, channel_id, all_permissions::MESSAGES_VIEW),
         EventContext::empty(),
     );
 

@@ -80,7 +80,7 @@ pub async fn handler(
                             });
                         };
 
-                        tracing::debug!("handling form '{}'", title);
+                        tracing::debug!("handling form '{title}'");
 
                         let mut values = Vec::with_capacity(fields.len());
 
@@ -120,9 +120,9 @@ pub async fn handler(
         drop(step_stack);
 
         if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
-            tracing::debug!("sending next step: {:?}", next_step);
+            tracing::debug!("sending next step: {next_step:?}");
             if let Err(err) = chan.send(next_step.clone()).await {
-                tracing::error!("failed to send auth step: {}", err);
+                tracing::error!("failed to send auth step: {err}");
             }
         } else {
             tracing::debug!("no stream found, pushing to queue");
@@ -159,7 +159,7 @@ fn form<'a>(
             .map(|(name, r#type)| {
                 auth_step::form::FormField::new(name.to_string(), r#type.to_string())
             })
-            .collect(),
+            .collect::<Vec<_>>(),
     )))
 }
 
@@ -180,7 +180,7 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
             AuthStep {
                 can_go_back: true,
                 fallback_url: String::default(),
-                step: Some(auth_step::Step::new_choice(auth_step::Choice::new(
+                step: Some(auth_step::Step::Choice(auth_step::Choice::new(
                     "other-options".to_string(),
                     options,
                 ))),
@@ -217,10 +217,7 @@ pub fn handle_choice(svc: &AuthServer, choice: &str) -> ServerResult<AuthStep> {
                 step: form("register", fields),
             }
         }
-        choice => bail!((
-            "h.invalid-choice",
-            format!("got invalid choice: {}", choice),
-        )),
+        choice => bail!(("h.invalid-choice", format!("got invalid choice: {choice}"),)),
     };
 
     Ok(step)
@@ -292,7 +289,7 @@ pub fn handle_fields(
             }
             field => bail!((
                 "h.invalid-field-type",
-                format!("got invalid field type: {}", field)
+                format!("got invalid field type: {field}")
             )),
         }
     }

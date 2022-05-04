@@ -4,6 +4,8 @@ pub mod http_ratelimit;
 pub mod ratelimit;
 pub mod test;
 
+use std::future::Future;
+
 use hrpc::exports::{bytes::Bytes, http};
 use hyper::HeaderMap;
 use rand::Rng;
@@ -75,3 +77,42 @@ pub fn get_content_length(headers: &HeaderMap) -> http::HeaderValue {
             http::HeaderValue::from_maybe_shared_unchecked(Bytes::from_static(b"0"))
         })
 }
+
+pub fn opt_fut<FutIn, T>(fut: Option<FutIn>) -> impl Future<Output = Option<T>>
+where
+    FutIn: Future<Output = T>,
+{
+    async {
+        match fut {
+            Some(fut) => Some(fut.await),
+            None => None,
+        }
+    }
+}
+
+/// create an event. shorthand for oneof variant
+///
+/// ```no_compile
+/// event!(PrivateChannelUpdated { channel_id, new_name });
+/// ```
+macro_rules! event {
+    ($t:ident $fields:tt) => {{
+        stream_event::Event::$t(stream_event::$t $fields)
+    }};
+}
+
+pub(crate) use event;
+
+macro_rules! broadcast {
+    ($svc:ident, $sub:expr, $event:ident $fields:tt) => {
+        $crate::utils::broadcast!($svc, $sub, None, $event $fields)
+    };
+    ($svc:ident, $sub:expr, $perm:expr, $event:ident $fields:tt) => {
+        $crate::utils::broadcast!($svc, $sub, $perm, EventContext::empty(), $event $fields)
+    };
+    ($svc:ident, $sub:expr, $perm:expr, $ctx:expr, $event:ident $fields:tt) => {
+        $svc.broadcast($sub, $crate::utils::event!($event $fields), $perm, $ctx)
+    };
+}
+
+pub(crate) use broadcast;

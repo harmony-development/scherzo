@@ -26,7 +26,7 @@ pub async fn handler(
     let mut role = if let Some(raw) = chat_tree.get(key).await? {
         db::deser_role(raw)
     } else {
-        return Err(ServerError::NoSuchRole { guild_id, role_id }.into());
+        bail!(ServerError::NoSuchRole { guild_id, role_id });
     };
 
     if let Some(new_name) = new_name.clone() {
@@ -45,7 +45,7 @@ pub async fn handler(
     let ser_role = rkyv_ser(&role);
     chat_tree.insert(key, ser_role).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleUpdated(stream_event::RoleUpdated {
             guild_id,
@@ -55,14 +55,9 @@ pub async fn handler(
             new_hoist,
             new_pingable,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            None,
-            all_permissions::ROLES_GET,
-            false,
-        )),
+        Some(PermCheck::new(guild_id, None, all_permissions::ROLES_GET)),
         EventContext::empty(),
     );
 
-    Ok((ModifyGuildRoleResponse {}).into_response())
+    Ok(ModifyGuildRoleResponse::new().into_response())
 }

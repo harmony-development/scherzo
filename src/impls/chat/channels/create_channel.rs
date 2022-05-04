@@ -39,7 +39,7 @@ pub async fn handler(
         )
         .await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::CreatedChannel(stream_event::ChannelCreated {
             guild_id,
@@ -49,12 +49,7 @@ pub async fn handler(
             kind,
             metadata,
         }),
-        Some(PermCheck::new(
-            guild_id,
-            Some(channel_id),
-            "messages.view",
-            false,
-        )),
+        Some(PermCheck::new(guild_id, Some(channel_id), "messages.view")),
         EventContext::empty(),
     );
 

@@ -6,14 +6,19 @@ pub async fn handler(
 ) -> ServerResult<Response<GetGuildResponse>> {
     let user_id = svc.deps.auth(&request).await?;
 
-    let GetGuildRequest { guild_id } = request.into_message().await?;
+    let GetGuildRequest { guild_ids } = request.into_message().await?;
 
     let chat_tree = &svc.deps.chat_tree;
 
-    chat_tree.check_guild_user(guild_id, user_id).await?;
+    for guild_id in guild_ids.iter().copied() {
+        chat_tree.check_guild_user(guild_id, user_id).await?;
+    }
 
-    chat_tree
-        .get_guild_logic(guild_id)
-        .await
-        .map(|g| (GetGuildResponse { guild: Some(g) }).into_response())
+    let mut guilds = HashMap::with_capacity(guild_ids.len());
+    for guild_id in guild_ids {
+        let guild = chat_tree.get_guild_logic(guild_id).await?;
+        guilds.insert(guild_id, guild);
+    }
+
+    Ok(GetGuildResponse::new(guilds).into_response())
 }

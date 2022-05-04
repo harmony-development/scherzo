@@ -14,15 +14,15 @@ pub async fn handler(
     let (guild_id, mut invite) = if let Some(raw) = chat_tree.get(&key).await? {
         db::deser_invite_entry(raw)
     } else {
-        return Err(ServerError::NoSuchInvite(invite_id.into()).into());
+        bail!(ServerError::NoSuchInvite(invite_id.into()));
     };
 
     if chat_tree.is_user_banned_in_guild(guild_id, user_id).await? {
-        return Err(ServerError::UserBanned.into());
+        bail!(ServerError::UserBanned);
     }
 
     chat_tree
-        .is_user_in_guild(guild_id, user_id)
+        .check_user_in_guild(guild_id, user_id)
         .await
         .ok()
         .map_or(Ok(()), |_| Err(ServerError::UserAlreadyInGuild))?;
@@ -44,7 +44,7 @@ pub async fn handler(
         chat_tree.delete_invite_logic(invite_id).await?;
     }
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::JoinedMember(stream_event::MemberJoined {
             guild_id,

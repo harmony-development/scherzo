@@ -1,21 +1,22 @@
 pub mod admin_action;
 pub mod against;
 pub mod auth;
-pub mod batch;
 pub mod chat;
 pub mod emote;
+pub mod media;
 pub mod mediaproxy;
 pub mod profile;
 pub mod rest;
 pub mod sync;
-#[cfg(feature = "voice")]
-pub mod voice;
+#[cfg(feature = "webrtc")]
+pub mod webrtc;
 
+use harmony_rust_sdk::api::chat::{stream_event, Event};
 use prelude::*;
 
 use std::str::FromStr;
 
-use crate::api::HomeserverIdentifier;
+use crate::{api::HomeserverIdentifier, impls::chat::EventBroadcast};
 use hyper::{http, Uri};
 use lettre::{
     message::{header, Mailbox, MultiPart, SinglePart},
@@ -29,12 +30,17 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{config::Config, key, SharedConfig, SharedConfigData};
 
 use self::{
-    auth::AuthTree, chat::ChatTree, emote::EmoteTree, profile::ProfileTree, rest::RestServiceLayer,
+    auth::AuthTree,
+    chat::{ChatTree, EventContext, EventSub, PermCheck},
+    emote::EmoteTree,
+    media::MediaStore,
+    profile::ProfileTree,
+    rest::RestServiceLayer,
     sync::EventDispatch,
 };
 
 pub mod prelude {
-    pub use std::{convert::TryInto, mem::size_of};
+    pub use std::{collections::HashMap, convert::TryInto, mem::size_of};
 
     pub use crate::{
         db::{self, deser_id, rkyv_arch, rkyv_ser, Batch, Db, DbResult, Tree},
@@ -79,6 +85,7 @@ pub struct Dependencies {
     pub key_manager: Option<Arc<key::Manager>>,
     pub http: HttpClient,
     pub email: Option<AsyncSmtpTransport<Tokio1Executor>>,
+    pub media: MediaStore,
 
     pub config: Config,
     pub runtime_config: SharedConfig,
@@ -139,6 +146,7 @@ impl Dependencies {
                 }
                 builder.build()
             }),
+            media: MediaStore::new(&config.media),
 
             runtime_config: Arc::new(Mutex::new(SharedConfigData {
                 motd: config.motd.clone(),
@@ -148,6 +156,23 @@ impl Dependencies {
 
         Ok((Arc::new(this), fed_event_receiver))
     }
+
+    pub fn broadcast_chat(
+        &self,
+        sub: EventSub,
+        event: stream_event::Event,
+        perm_check: Option<PermCheck<'static>>,
+        context: EventContext,
+    ) {
+        let broadcast = EventBroadcast::new(sub, Event::Chat(event), perm_check, context);
+
+        tracing::trace!(
+            "broadcasting events to {} receivers",
+            self.chat_event_sender.receiver_count()
+        );
+
+        drop(self.chat_event_sender.send(Arc::new(broadcast)));
+    }
 }
 
 pub fn setup_server(
@@ -156,13 +181,11 @@ pub fn setup_server(
     log_level: tracing::Level,
 ) -> (impl MakeRoutes, RestServiceLayer) {
     use self::{
-        auth::AuthServer, batch::BatchServer, chat::ChatServer, emote::EmoteServer,
-        mediaproxy::MediaproxyServer, profile::ProfileServer, sync::SyncServer,
+        auth::AuthServer, chat::ChatServer, emote::EmoteServer, mediaproxy::MediaproxyServer,
+        profile::ProfileServer, sync::SyncServer,
     };
     use crate::api::{
-        auth::auth_service_server::AuthServiceServer,
-        batch::batch_service_server::BatchServiceServer,
-        chat::chat_service_server::ChatServiceServer,
+        auth::auth_service_server::AuthServiceServer, chat::chat_service_server::ChatServiceServer,
         emote::emote_service_server::EmoteServiceServer,
         mediaproxy::media_proxy_service_server::MediaProxyServiceServer,
         profile::profile_service_server::ProfileServiceServer,
@@ -176,29 +199,20 @@ pub fn setup_server(
     let chat_server = ChatServer::new(deps.clone());
     let mediaproxy_server = MediaproxyServer::new(deps.clone());
     let sync_server = SyncServer::new(deps.clone(), fed_event_receiver);
-    #[cfg(feature = "voice")]
-    let voice_server = self::voice::VoiceServer::new(deps.clone(), log_level);
+    #[cfg(feature = "webrtc")]
+    let webrtc_server = self::webrtc::WebRtcServer::new(deps.clone(), log_level);
 
-    let profile = ProfileServiceServer::new(profile_server.clone());
+    let profile = ProfileServiceServer::new(profile_server);
     let emote = EmoteServiceServer::new(emote_server);
     let auth = AuthServiceServer::new(auth_server);
-    let chat = ChatServiceServer::new(chat_server.clone());
-    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.clone());
+    let chat = ChatServiceServer::new(chat_server);
+    let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server);
     let sync = PostboxServiceServer::new(sync_server);
-    #[cfg(feature = "voice")]
-    let voice = crate::api::voice::voice_service_server::VoiceServiceServer::new(voice_server);
+    #[cfg(feature = "webrtc")]
+    let webrtc =
+        crate::api::webrtc::web_rtc_service_server::WebRtcServiceServer::new(webrtc_server);
 
-    let batchable_services = {
-        let profile = ProfileServiceServer::new(profile_server.batch());
-        let chat = ChatServiceServer::new(chat_server.batch());
-        let mediaproxy = MediaProxyServiceServer::new(mediaproxy_server.batch());
-        combine_services!(profile, chat, mediaproxy)
-    };
-
-    let rest = RestServiceLayer::new(deps.clone());
-
-    let batch_server = BatchServer::new(deps, batchable_services);
-    let batch = BatchServiceServer::new(batch_server);
+    let rest = RestServiceLayer::new(deps);
 
     let server = combine_services!(
         profile,
@@ -207,9 +221,8 @@ pub fn setup_server(
         chat,
         mediaproxy,
         sync,
-        #[cfg(feature = "voice")]
-        voice,
-        batch
+        #[cfg(feature = "webrtc")]
+        webrtc
     );
 
     (server, rest)
@@ -226,7 +239,7 @@ pub async fn send_email(
 ) -> ServerResult<()> {
     let to = to
         .parse::<Mailbox>()
-        .map_err(|err| ("h.invalid-email", format!("email is invalid: {}", err)))?;
+        .map_err(|err| ("h.invalid-email", format!("email is invalid: {err}")))?;
     let from = deps
         .config
         .email
@@ -270,13 +283,11 @@ pub async fn send_email(
         .map_err(|err| err.to_string())?;
 
     if !response.is_positive() {
+        let code = response.code();
+        let error = response.first_line().unwrap_or("unknown error");
         bail!((
             "scherzo.mailserver-error",
-            format!(
-                "failed to send email (code {}): {}",
-                response.code(),
-                response.first_line().unwrap_or("unknown error")
-            )
+            format!("failed to send email (code {code}): {error}")
         ));
     }
 

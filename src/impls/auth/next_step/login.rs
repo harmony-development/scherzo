@@ -35,7 +35,7 @@ pub async fn handle(svc: &AuthServer, values: &mut Vec<Field>) -> ServerResult<A
     );
     auth_tree.apply_batch(batch).await?;
 
-    tracing::debug!("user {} logged in with email {}", user_id, email);
+    tracing::debug!("user {user_id} logged in with email {email}");
 
     auth_tree
         .insert(auth_key(session_token.as_str()), user_id.to_be_bytes())

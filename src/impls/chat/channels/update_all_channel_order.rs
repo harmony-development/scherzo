@@ -44,7 +44,7 @@ pub async fn handler(
     let serialized_ordering = chat_tree.serialize_list_u64_logic(channel_ids.clone());
     chat_tree.insert(key, serialized_ordering).await?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::ChannelsReordered(stream_event::ChannelsReordered {
             guild_id,
@@ -54,5 +54,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((UpdateAllChannelOrderResponse {}).into_response())
+    Ok(UpdateAllChannelOrderResponse::new().into_response())
 }

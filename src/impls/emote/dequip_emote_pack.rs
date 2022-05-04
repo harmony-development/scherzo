@@ -20,5 +20,5 @@ pub async fn handler(
         EventContext::new(vec![user_id]),
     );
 
-    Ok((DequipEmotePackResponse {}).into_response())
+    Ok(DequipEmotePackResponse::new().into_response())
 }

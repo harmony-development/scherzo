@@ -15,12 +15,9 @@ pub async fn handler(
     // Safety: step stack can never be empty [ref:step_stack_non_empty]
     if unsafe { step_stack.last().unwrap_unchecked().can_go_back } {
         step_stack.pop();
-        tracing::debug!("auth session {} went to previous step", auth_id);
+        tracing::debug!("auth session {auth_id} went to previous step");
     } else {
-        tracing::debug!(
-            "auth session {} wanted prev step, but we can't go back",
-            auth_id
-        );
+        tracing::debug!("auth session {auth_id} wanted prev step, but we can't go back",);
     }
 
     // Safety: step stack can never be empty [ref:step_stack_non_empty]
@@ -29,12 +26,12 @@ pub async fn handler(
     drop(step_stack);
 
     if let Some(chan) = svc.send_step.get(auth_id.as_str()) {
-        tracing::debug!("sending prev step to {} stream", auth_id);
+        tracing::debug!("sending prev step to {auth_id} stream");
         if let Err(err) = chan.send(prev_step.clone()).await {
-            tracing::error!("failed to send auth step to {}: {}", auth_id, err);
+            tracing::error!("failed to send auth step to {auth_id}: {err}");
         }
     } else {
-        tracing::debug!("no stream found for auth id {}, pushing to queue", auth_id);
+        tracing::debug!("no stream found for auth id {auth_id}, pushing to queue");
         svc.queued_steps
             .entry(auth_id.into())
             .and_modify(|s| s.push(prev_step.clone()))

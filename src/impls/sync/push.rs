@@ -22,5 +22,5 @@ pub async fn handler(
     if let Some(event) = request.into_message().await?.event {
         svc.push_logic(&host, event).await?;
     }
-    Ok((PushResponse {}).into_response())
+    Ok(PushResponse::new().into_response())
 }

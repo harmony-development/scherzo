@@ -10,13 +10,13 @@ pub async fn handler(
     let auth_id: SmolStr = msg.auth_id.into();
 
     if svc.step_map.contains_key(auth_id.as_str()) {
-        tracing::debug!("auth id {} validated", auth_id);
+        tracing::debug!("auth id {auth_id} validated");
     } else {
-        tracing::error!("auth id {} is not valid", auth_id);
+        tracing::error!("auth id {auth_id} is not valid");
         return Err(ServerError::InvalidAuthId.into());
     }
 
-    tracing::debug!("creating stream for id {}", auth_id);
+    tracing::debug!("creating stream for id {auth_id}");
 
     if let Some(mut queued_steps) = svc.queued_steps.get_mut(auth_id.as_str()) {
         for step in queued_steps.drain(..) {
@@ -24,11 +24,7 @@ pub async fn handler(
                 .send_message(StreamStepsResponse { step: Some(step) })
                 .await
             {
-                tracing::error!(
-                    "error occured while sending step to id {}: {}",
-                    auth_id,
-                    err
-                );
+                tracing::error!("error occured while sending step to id {auth_id}: {err}",);
 
                 // Return from func since we errored
                 return Err(err.into());
@@ -38,14 +34,14 @@ pub async fn handler(
 
     let (tx, mut rx) = mpsc::channel(64);
     svc.send_step.insert(auth_id.clone(), tx);
-    tracing::debug!("pushed stream tx for id {}", auth_id);
+    tracing::debug!("pushed stream tx for id {auth_id}");
 
     let mut error = None;
     loop {
         tokio::select! {
             biased;
             Some(step) = rx.recv() => {
-                tracing::debug!("received auth step to send to id {}", auth_id);
+                tracing::debug!("received auth step to send to id {auth_id}");
                 let end_stream = matches!(
                     step,
                     AuthStep {
@@ -59,9 +55,7 @@ pub async fn handler(
                     .await
                 {
                     tracing::error!(
-                        "error occured while sending step to id {}: {}",
-                        auth_id,
-                        err
+                        "error occured while sending step to id {auth_id}: {err}"
                     );
 
                     // Break from loop since we errored
@@ -84,7 +78,7 @@ pub async fn handler(
     }
 
     svc.send_step.remove(&auth_id);
-    tracing::debug!("removing stream for id {}", auth_id);
+    tracing::debug!("removing stream for id {auth_id}");
 
     error.map_or(Ok(()), |err| Err(err.into()))
 }

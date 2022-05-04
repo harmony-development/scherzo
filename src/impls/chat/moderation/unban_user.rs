@@ -22,5 +22,5 @@ pub async fn handler(
         .remove(make_banned_member_key(guild_id, user_to_unban))
         .await?;
 
-    Ok((UnbanUserResponse {}).into_response())
+    Ok(UnbanUserResponse::new().into_response())
 }

@@ -22,17 +22,12 @@ pub async fn handler(
         .map_err(ServerError::DbError)?
         .ok_or(ServerError::NoSuchRole { guild_id, role_id })?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::RoleDeleted(stream_event::RoleDeleted { guild_id, role_id }),
-        Some(PermCheck::new(
-            guild_id,
-            None,
-            all_permissions::ROLES_GET,
-            false,
-        )),
+        Some(PermCheck::new(guild_id, None, all_permissions::ROLES_GET)),
         EventContext::empty(),
     );
 
-    Ok((DeleteGuildRoleResponse {}).into_response())
+    Ok(DeleteGuildRoleResponse::new().into_response())
 }

@@ -23,13 +23,7 @@ pub async fn handler(
     let guild_id = svc
         .deps
         .chat_tree
-        .create_guild_logic(
-            user_id,
-            name,
-            picture,
-            metadata,
-            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
-        )
+        .create_guild_logic(user_id, name, picture, metadata)
         .await?;
 
     svc.dispatch_guild_join(guild_id, user_id).await?;

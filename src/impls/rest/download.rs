@@ -1,10 +1,19 @@
-use std::{convert::Infallible, ops::Not};
+use std::{cmp, convert::Infallible, fs::Metadata, ops::Not};
 
-use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
+use hrpc::{
+    exports::futures_util::{
+        future::{self, BoxFuture, Either},
+        ready, stream, FutureExt, Stream, StreamExt,
+    },
+    server::transport::http::HttpResponse,
+};
+use prost::bytes::BytesMut;
 use reqwest::Client as HttpClient;
+use tokio::io::AsyncSeekExt;
+use tokio_util::io::poll_read_buf;
 use tower::Service;
 
-use crate::rest_error_response;
+use crate::{impls::media::FileHandle, rest_error_response};
 
 use super::*;
 
@@ -63,13 +72,12 @@ impl Service<HttpRequest> for DownloadService {
                 _ => return Ok(ServerError::InvalidFileId.into_rest_http_response()),
             };
 
-            let media_root = deps.config.media.media_root.as_path();
             let http_client = &deps.http;
             let host = &deps.config.host;
 
             let (content_disposition, content_type, content_body, content_length) = match file_id {
                 FileId::External(url) => {
-                    info!("Serving external image from {}", url);
+                    info!("Serving external image from {url}");
                     let filename = url.path().split('/').last().unwrap_or("unknown");
                     let disposition = unsafe { disposition_header(filename) };
                     let resp = match make_request(http_client, url.to_string()).await {
@@ -107,21 +115,19 @@ impl Service<HttpRequest> for DownloadService {
                     info!("Serving HMC from {}", hmc);
                     if format!("{}:{}", hmc.server(), hmc.port()) == host.as_str() {
                         info!("Serving local media with id {}", hmc.id());
-                        match get_file(media_root, hmc.id()).await {
-                            Ok(data) => data,
+                        match deps.media.get_file(hmc.id()).await {
+                            Ok(handle) => file_handle_to_data(handle),
                             Err(err) => return Ok(err.into_rest_http_response()),
                         }
                     } else {
                         // Safety: this is always valid, since HMC is a valid URL
                         let url = unsafe {
-                            format!(
-                                "https://{}:{}/_harmony/media/download/{}",
-                                hmc.server(),
-                                hmc.port(),
-                                hmc.id()
-                            )
-                            .parse()
-                            .unwrap_unchecked()
+                            let server = hmc.server();
+                            let port = hmc.port();
+                            let id = hmc.id();
+                            format!("https://{server}:{port}/_harmony/media/download/{id}")
+                                .parse()
+                                .unwrap_unchecked()
                         };
                         let resp = match make_request(http_client, url).await {
                             Ok(resp) => resp,
@@ -148,9 +154,9 @@ impl Service<HttpRequest> for DownloadService {
                     }
                 }
                 FileId::Id(id) => {
-                    info!("Serving local media with id {}", id);
-                    match get_file(media_root, &id).await {
-                        Ok(data) => data,
+                    info!("Serving local media with id {id}");
+                    match deps.media.get_file(&id).await {
+                        Ok(handle) => file_handle_to_data(handle),
                         Err(err) => return Ok(err.into_rest_http_response()),
                     }
                 }
@@ -180,128 +186,26 @@ pub fn handler(deps: Arc<Dependencies>) -> RateLimit<DownloadService> {
     )
 }
 
-// Safety: the `name` argument MUST ONLY contain ASCII characters.
+fn file_handle_to_data(handle: FileHandle) -> (HeaderValue, HeaderValue, Body, HeaderValue) {
+    let stream = Body::wrap_stream(file_stream(
+        handle.file.into_inner(),
+        optimal_buf_size(&handle.metadata),
+        handle.range,
+    ));
+    let disposition = unsafe { disposition_header(&handle.name) };
+    let mime = unsafe { string_header(handle.mime) };
+    let size = unsafe { string_header(handle.size.to_string()) };
+    (disposition, mime, stream, size)
+}
+
+// SAFETY: the `name` argument MUST ONLY contain ASCII characters.
 unsafe fn disposition_header(name: &str) -> HeaderValue {
-    HeaderValue::from_maybe_shared_unchecked(Bytes::from(
-        format!("inline; filename={}", name).into_bytes(),
-    ))
+    string_header(format!("inline; filename={name}"))
 }
 
-pub async fn get_file_handle(
-    media_root: &Path,
-    id: &str,
-) -> Result<(File, Metadata, PathBuf), ServerError> {
-    let file_path = media_root.join(id);
-    let file = tokio::fs::File::open(&file_path).await.map_err(|err| {
-        if let std::io::ErrorKind::NotFound = err.kind() {
-            ServerError::MediaNotFound
-        } else {
-            err.into()
-        }
-    })?;
-    let metadata = file.metadata().await?;
-    Ok((file, metadata, file_path))
-}
-
-pub async fn read_bufs<'file>(
-    path: &Path,
-    file: &'file mut File,
-    is_jpeg: bool,
-) -> Result<(Vec<u8>, Vec<u8>, BufReader<&'file mut File>), ServerError> {
-    if is_jpeg {
-        let mimetype = infer::get_from_path(path).ok().flatten().map_or_else(
-            || b"image/jpeg".to_vec(),
-            |t| t.mime_type().as_bytes().to_vec(),
-        );
-        Ok((b"unknown".to_vec(), mimetype, BufReader::new(file)))
-    } else {
-        let mut buf_reader = BufReader::new(file);
-
-        let mut filename_raw = Vec::with_capacity(20);
-        buf_reader.read_until(SEPERATOR, &mut filename_raw).await?;
-        filename_raw.pop();
-
-        let mut mimetype_raw = Vec::with_capacity(20);
-        buf_reader.read_until(SEPERATOR, &mut mimetype_raw).await?;
-        mimetype_raw.pop();
-
-        Ok((filename_raw, mimetype_raw, buf_reader))
-    }
-}
-
-pub async fn get_file_full(
-    media_root: &Path,
-    id: &str,
-) -> Result<(String, String, Vec<u8>, u64), ServerError> {
-    let is_jpeg = is_id_jpeg(id);
-    let (mut file, metadata, file_path) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, mut buf_reader) =
-        read_bufs(&file_path, &mut file, is_jpeg).await?;
-
-    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
-    let size = end - start;
-    let mut file_raw = Vec::with_capacity(size as usize);
-    buf_reader.read_to_end(&mut file_raw).await?;
-
-    unsafe {
-        Ok((
-            String::from_utf8_unchecked(filename_raw),
-            String::from_utf8_unchecked(mimetype_raw),
-            file_raw,
-            size,
-        ))
-    }
-}
-
-pub fn calculate_range(
-    filename_raw: &[u8],
-    mimetype_raw: &[u8],
-    metadata: &Metadata,
-    is_jpeg: bool,
-) -> (u64, u64) {
-    // + 2 is because we need to factor in the 2 b'\n' seperators
-    let start = is_jpeg
-        .then(|| 0)
-        .unwrap_or((filename_raw.len() + mimetype_raw.len()) as u64 + 2);
-    let end = metadata.len();
-
-    (start, end)
-}
-
-pub fn is_id_jpeg(id: &str) -> bool {
-    id.ends_with("_jpeg") || id.ends_with("_jpegthumb")
-}
-
-pub async fn get_file(
-    media_root: &Path,
-    id: &str,
-) -> Result<(HeaderValue, HeaderValue, hyper::Body, HeaderValue), ServerError> {
-    let is_jpeg = is_id_jpeg(id);
-    let (mut file, metadata, file_path) = get_file_handle(media_root, id).await?;
-    let (filename_raw, mimetype_raw, _) = read_bufs(&file_path, &mut file, is_jpeg).await?;
-
-    let (start, end) = calculate_range(&filename_raw, &mimetype_raw, &metadata, is_jpeg);
-    let mimetype: Bytes = mimetype_raw.into();
-
-    let disposition = unsafe {
-        let filename = std::str::from_utf8_unchecked(&filename_raw);
-        // Safety: filenames must be valid ASCII characters since we get them through only ASCII allowed structures [ref:ascii_filename_upload]
-        disposition_header(filename)
-    };
-    // Safety: mimetypes must be valid ASCII chars since we get them through only ASCII allowed structures [ref:ascii_mimetype_upload]
-    let mimetype = unsafe { HeaderValue::from_maybe_shared_unchecked(mimetype) };
-
-    let buf_size = optimal_buf_size(&metadata);
-    Ok((
-        disposition,
-        mimetype,
-        hyper::Body::wrap_stream(file_stream(file, buf_size, (start, end))),
-        unsafe {
-            HeaderValue::from_maybe_shared_unchecked(Bytes::from(
-                (end - start).to_string().into_bytes(),
-            ))
-        },
-    ))
+// SAFETY: the `string` argument MUST ONLY contain ASCII characters.
+unsafe fn string_header(string: String) -> HeaderValue {
+    HeaderValue::from_maybe_shared_unchecked(Bytes::from(string.into_bytes()))
 }
 
 fn file_stream(
@@ -312,8 +216,9 @@ fn file_stream(
     use std::io::SeekFrom;
 
     let seek = async move {
-        // We will always seek from a point that is non-zero
-        file.seek(SeekFrom::Start(start)).await?;
+        if start != 0 {
+            file.seek(SeekFrom::Start(start)).await?;
+        }
         Ok(file)
     };
 
@@ -335,7 +240,7 @@ fn file_stream(
                 let n = match ready!(poll_read_buf(Pin::new(&mut f), cx, &mut buf)) {
                     Ok(n) => n as u64,
                     Err(err) => {
-                        tracing::debug!("file read error: {}", err);
+                        tracing::debug!("file read error: {err}");
                         return Poll::Ready(Some(Err(err)));
                     }
                 };

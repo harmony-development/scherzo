@@ -2,15 +2,12 @@ use crate::{http, utils::http_ratelimit::RateLimit};
 
 use self::{about::AboutService, download::DownloadService, upload::UploadService};
 
-use super::{gen_rand_inline_str, get_content_length, prelude::*};
+use super::{get_content_length, prelude::*};
 
 use std::{
     borrow::Cow,
-    cmp,
     convert::Infallible,
-    fs::Metadata,
     future::Future,
-    path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
@@ -20,33 +17,23 @@ use std::{
 use crate::api::{
     exports::{
         hrpc::{
-            exports::futures_util::{
-                future::{self, BoxFuture, Either},
-                ready, stream, FutureExt, Stream, StreamExt,
-            },
+            exports::futures_util::{future::BoxFuture, FutureExt},
             server::transport::http::{box_body, HttpRequest, HttpResponse},
         },
-        prost::bytes::{Bytes, BytesMut},
+        prost::bytes::Bytes,
     },
     rest::{extract_file_info_from_download_response, FileId},
 };
 use hrpc::common::future::Ready;
-use http::{header, HeaderValue, Method, StatusCode, Uri};
+use http::{header, HeaderValue, Method, StatusCode};
 use hyper::Body;
 use pin_project::pin_project;
-use tokio::{
-    fs::File,
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter},
-};
-use tokio_util::io::poll_read_buf;
 use tower::{Layer, Service};
 use tracing::info;
 
 pub mod about;
 pub mod download;
 pub mod upload;
-
-const SEPERATOR: u8 = b'\n';
 
 type Out = Result<HttpResponse, Infallible>;
 

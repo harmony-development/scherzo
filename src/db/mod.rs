@@ -36,7 +36,7 @@ use std::{
 use crate::{config::DbConfig, utils::evec::EVec, ServerError, ServerResult};
 
 use crate::api::{
-    chat::{Channel, Guild, Invite, Message as HarmonyMessage, Role},
+    chat::{Channel, Guild, Invite, Message as HarmonyMessage, PrivateChannel, Role},
     emote::{Emote, EmotePack},
     profile::Profile,
 };
@@ -45,6 +45,8 @@ use rkyv::{
     AlignedVec, Archive, Serialize,
 };
 use tracing::Instrument;
+
+use self::chat::UserPendingInvites;
 
 pub mod migration;
 #[cfg(feature = "sled")]
@@ -92,11 +94,22 @@ impl Batch {
     pub fn remove(&mut self, key: impl Into<EVec>) {
         self.inserts.push((key.into(), None));
     }
+
+    pub fn merge(mut self, other: Batch) -> Self {
+        self.inserts.extend(other.inserts);
+        self
+    }
 }
 
 #[derive(Debug)]
 pub struct DbError {
     pub inner: Box<dyn StdError + Sync + Send>,
+}
+
+impl From<anyhow::Error> for DbError {
+    fn from(err: anyhow::Error) -> Self {
+        Self { inner: err.into() }
+    }
 }
 
 impl Display for DbError {
@@ -118,13 +131,13 @@ pub fn make_u64_iter_logic(raw: &[u8]) -> impl Iterator<Item = u64> + '_ {
 }
 
 pub mod profile {
-    use super::concat_static;
+    use super::concat_arrs;
 
     pub const USER_PREFIX: &[u8] = b"user_";
     pub const FOREIGN_PREFIX: &[u8] = b"fuser_";
 
     pub const fn make_local_to_foreign_user_key(local_id: u64) -> [u8; 15] {
-        concat_static(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
+        concat_arrs(&[FOREIGN_PREFIX, &local_id.to_be_bytes(), &[2]])
     }
 
     pub fn make_foreign_to_local_user_key(foreign_id: u64, host: &str) -> Vec<u8> {
@@ -138,11 +151,11 @@ pub mod profile {
     }
 
     pub const fn make_user_profile_key(user_id: u64) -> [u8; 13] {
-        concat_static(&[USER_PREFIX, &user_id.to_be_bytes()])
+        concat_arrs(&[USER_PREFIX, &user_id.to_be_bytes()])
     }
 
     pub fn make_user_metadata_prefix(user_id: u64) -> [u8; 14] {
-        concat_static(&[make_user_profile_key(user_id).as_ref(), [1].as_ref()])
+        concat_arrs(&[make_user_profile_key(user_id).as_ref(), [1].as_ref()])
     }
 
     pub fn make_user_metadata_key(user_id: u64, app_id: &str) -> Vec<u8> {
@@ -155,12 +168,12 @@ pub mod profile {
 }
 
 pub mod emote {
-    use super::{concat_static, profile::USER_PREFIX};
+    use super::{concat_arrs, profile::USER_PREFIX};
 
     pub const EMOTEPACK_PREFIX: &[u8] = b"emotep_";
 
     pub const fn make_emote_pack_key(pack_id: u64) -> [u8; 15] {
-        concat_static(&[EMOTEPACK_PREFIX, &pack_id.to_be_bytes()])
+        concat_arrs(&[EMOTEPACK_PREFIX, &pack_id.to_be_bytes()])
     }
 
     pub fn make_emote_pack_emote_key(pack_id: u64, image_id: &str) -> Vec<u8> {
@@ -173,21 +186,40 @@ pub mod emote {
     }
 
     pub const fn make_equipped_emote_prefix(user_id: u64) -> [u8; 14] {
-        concat_static(&[USER_PREFIX, &user_id.to_be_bytes(), &[9]])
+        concat_arrs(&[USER_PREFIX, &user_id.to_be_bytes(), &[9]])
     }
 
     pub const fn make_equipped_emote_key(user_id: u64, pack_id: u64) -> [u8; 22] {
-        concat_static(&[&make_equipped_emote_prefix(user_id), &pack_id.to_be_bytes()])
+        concat_arrs(&[&make_equipped_emote_prefix(user_id), &pack_id.to_be_bytes()])
     }
 }
 
 pub mod chat {
-    use super::concat_static;
+    use harmony_rust_sdk::api::chat::PendingInvite;
 
+    use super::concat_arrs;
+
+    pub const DM_WITH_USER_PREFIX: &[u8] = b"dm_with_";
+    pub const PENDING_INVITES_PREFIX: &[u8] = b"pending_invites_";
     pub const INVITE_PREFIX: &[u8] = b"invite_";
+    pub const PRIV_INVITE_PREFIX: &[u8] = b"priv_invite_";
+    pub const PRIV_CHANNEL_PREFIX: &[u8] = b"priv_";
     pub const ADMIN_GUILD_KEY: &[u8] = b"admin_guild_key_data";
 
     // perms
+
+    #[inline(always)]
+    pub const fn make_guild_key(guild_id: u64) -> [u8; 8] {
+        guild_id.to_be_bytes()
+    }
+
+    pub const fn make_pc_key(channel_id: u64) -> [u8; 13] {
+        concat_arrs(&[PRIV_CHANNEL_PREFIX, &channel_id.to_be_bytes()])
+    }
+
+    pub const fn make_pc_creator_key(channel_id: u64) -> [u8; 14] {
+        concat_arrs(&[&make_pc_key(channel_id), &[5]])
+    }
 
     pub fn make_guild_perm_key(guild_id: u64, role_id: u64, matches: &str) -> Vec<u8> {
         [
@@ -211,7 +243,7 @@ pub mod chat {
     }
 
     pub const fn make_role_guild_perms_prefix(guild_id: u64, role_id: u64) -> [u8; 18] {
-        concat_static(&[
+        concat_arrs(&[
             &make_guild_role_prefix(guild_id),
             &role_id.to_be_bytes(),
             &[9],
@@ -219,11 +251,11 @@ pub mod chat {
     }
 
     pub const fn make_guild_role_key(guild_id: u64, role_id: u64) -> [u8; 17] {
-        concat_static(&[&make_guild_role_prefix(guild_id), &role_id.to_be_bytes()])
+        concat_arrs(&[&make_guild_role_prefix(guild_id), &role_id.to_be_bytes()])
     }
 
     pub const fn make_guild_user_roles_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-        concat_static(&[
+        concat_arrs(&[
             &make_guild_user_roles_prefix(guild_id),
             &user_id.to_be_bytes(),
         ])
@@ -233,12 +265,34 @@ pub mod chat {
 
     // message
 
-    pub const fn make_pinned_msgs_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
-        concat_static(&[&make_chan_key(guild_id, channel_id), &[6]])
+    pub const fn make_pinned_msgs_key_guild(guild_id: u64, channel_id: u64) -> [u8; 18] {
+        concat_arrs(&[&make_chan_key(guild_id, channel_id), &[6]])
     }
 
-    pub const fn make_next_msg_id_key(guild_id: u64, channel_id: u64) -> [u8; 18] {
-        concat_static(&[&make_chan_key(guild_id, channel_id), &[7]])
+    pub const fn make_pinned_msgs_key_pc(channel_id: u64) -> [u8; 14] {
+        concat_arrs(&[&make_pc_key(channel_id), &[6]])
+    }
+
+    pub fn make_pinned_msgs_key(guild_id: Option<u64>, channel_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_pinned_msgs_key_pc(channel_id).to_vec(),
+            |guild_id| make_pinned_msgs_key_guild(guild_id, channel_id).to_vec(),
+        )
+    }
+
+    pub const fn make_next_msg_id_key_guild(guild_id: u64, channel_id: u64) -> [u8; 18] {
+        concat_arrs(&[&make_chan_key(guild_id, channel_id), &[7]])
+    }
+
+    pub const fn make_next_msg_id_key_pc(channel_id: u64) -> [u8; 14] {
+        concat_arrs(&[&make_pc_key(channel_id), &[7]])
+    }
+
+    pub fn make_next_msg_id_key(guild_id: Option<u64>, channel_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_next_msg_id_key_pc(channel_id).to_vec(),
+            |guild_id| make_next_msg_id_key_guild(guild_id, channel_id).to_vec(),
+        )
     }
 
     pub const fn make_role_channel_perms_prefix(
@@ -246,22 +300,52 @@ pub mod chat {
         channel_id: u64,
         role_id: u64,
     ) -> [u8; 26] {
-        concat_static(&[
+        concat_arrs(&[
             &make_chan_key(guild_id, channel_id),
             &[8],
             &role_id.to_be_bytes(),
         ])
     }
 
-    pub const fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
-        concat_static(&[&make_chan_key(guild_id, channel_id), &[9]])
+    pub const fn make_msg_prefix_pc(channel_id: u64) -> [u8; 13] {
+        concat_arrs(&[&make_pc_key(channel_id), &[9]])
     }
 
-    pub const fn make_msg_key(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
-        concat_static(&[
+    pub const fn make_msg_prefix(guild_id: u64, channel_id: u64) -> [u8; 18] {
+        concat_arrs(&[&make_chan_key(guild_id, channel_id), &[9]])
+    }
+
+    pub const fn make_msg_key_pc(channel_id: u64, message_id: u64) -> [u8; 21] {
+        concat_arrs(&[&make_msg_prefix_pc(channel_id), &message_id.to_be_bytes()])
+    }
+
+    pub const fn make_msg_key_guild(guild_id: u64, channel_id: u64, message_id: u64) -> [u8; 26] {
+        concat_arrs(&[
             &make_msg_prefix(guild_id, channel_id),
             &message_id.to_be_bytes(),
         ])
+    }
+
+    pub fn make_msg_key(guild_id: Option<u64>, channel_id: u64, message_id: u64) -> Vec<u8> {
+        guild_id.map_or_else(
+            || make_msg_key_pc(channel_id, message_id).to_vec(),
+            |guild_id| make_msg_key_guild(guild_id, channel_id, message_id).to_vec(),
+        )
+    }
+
+    pub fn make_user_reacted_msg_key_pc(
+        channel_id: u64,
+        message_id: u64,
+        user_id: u64,
+        data: &str,
+    ) -> Vec<u8> {
+        [
+            make_msg_key_pc(channel_id, message_id).as_ref(),
+            &[0],
+            user_id.to_be_bytes().as_ref(),
+            data.as_bytes(),
+        ]
+        .concat()
     }
 
     pub fn make_user_reacted_msg_key(
@@ -269,13 +353,13 @@ pub mod chat {
         channel_id: u64,
         message_id: u64,
         user_id: u64,
-        image_id: &str,
+        data: &str,
     ) -> Vec<u8> {
         [
-            make_msg_key(guild_id, channel_id, message_id).as_ref(),
+            make_msg_key_guild(guild_id, channel_id, message_id).as_ref(),
             &[0],
             user_id.to_be_bytes().as_ref(),
-            image_id.as_bytes(),
+            data.as_bytes(),
         ]
         .concat()
     }
@@ -284,12 +368,20 @@ pub mod chat {
 
     // member
 
+    pub const fn make_pc_mem_prefix(channel_id: u64) -> [u8; 14] {
+        concat_arrs(&[&make_pc_key(channel_id), &[8]])
+    }
+
+    pub const fn make_member_key_pc(channel_id: u64, user_id: u64) -> [u8; 22] {
+        concat_arrs(&[&make_pc_mem_prefix(channel_id), &user_id.to_be_bytes()])
+    }
+
     pub const fn make_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-        concat_static(&[&make_guild_mem_prefix(guild_id), &user_id.to_be_bytes()])
+        concat_arrs(&[&make_guild_mem_prefix(guild_id), &user_id.to_be_bytes()])
     }
 
     pub const fn make_banned_member_key(guild_id: u64, user_id: u64) -> [u8; 17] {
-        concat_static(&[
+        concat_arrs(&[
             &make_guild_banned_mem_prefix(guild_id),
             &user_id.to_be_bytes(),
         ])
@@ -300,35 +392,39 @@ pub mod chat {
     // guild
 
     pub const fn make_guild_mem_prefix(guild_id: u64) -> [u8; 9] {
-        concat_static(&[&guild_id.to_be_bytes(), &[9]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[9]])
     }
 
     pub const fn make_guild_chan_prefix(guild_id: u64) -> [u8; 9] {
-        concat_static(&[&guild_id.to_be_bytes(), &[8]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[8]])
     }
 
     pub const fn make_guild_banned_mem_prefix(guild_id: u64) -> [u8; 9] {
-        concat_static(&[&guild_id.to_be_bytes(), &[7]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[7]])
     }
 
     pub const fn make_guild_role_prefix(guild_id: u64) -> [u8; 9] {
-        concat_static(&[&guild_id.to_be_bytes(), &[5]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[5]])
     }
 
     pub const fn make_guild_user_roles_prefix(guild_id: u64) -> [u8; 9] {
-        concat_static(&[&guild_id.to_be_bytes(), &[4]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[4]])
+    }
+
+    pub const fn make_pc_list_key_prefix(user_id: u64) -> [u8; 10] {
+        concat_arrs(&[&user_id.to_be_bytes(), &[1, 4]])
     }
 
     pub const fn make_guild_role_ordering_key(guild_id: u64) -> [u8; 10] {
-        concat_static(&[&guild_id.to_be_bytes(), &[1, 3]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[1, 3]])
     }
 
     pub const fn make_guild_list_key_prefix(user_id: u64) -> [u8; 10] {
-        concat_static(&[&user_id.to_be_bytes(), &[1, 2]])
+        concat_arrs(&[&user_id.to_be_bytes(), &[1, 2]])
     }
 
     pub const fn make_guild_chan_ordering_key(guild_id: u64) -> [u8; 10] {
-        concat_static(&[&guild_id.to_be_bytes(), &[1, 1]])
+        concat_arrs(&[&guild_id.to_be_bytes(), &[1, 1]])
     }
 
     pub fn make_guild_list_key(user_id: u64, guild_id: u64, host: &str) -> Vec<u8> {
@@ -340,19 +436,55 @@ pub mod chat {
         .concat()
     }
 
+    pub fn make_pc_list_key(user_id: u64, channel_id: u64, host: &str) -> Vec<u8> {
+        [
+            make_pc_list_key_prefix(user_id).as_ref(),
+            channel_id.to_be_bytes().as_ref(),
+            host.as_bytes(),
+        ]
+        .concat()
+    }
+
     // guild
 
     pub const fn make_chan_key(guild_id: u64, channel_id: u64) -> [u8; 17] {
-        concat_static(&[&make_guild_chan_prefix(guild_id), &channel_id.to_be_bytes()])
+        concat_arrs(&[&make_guild_chan_prefix(guild_id), &channel_id.to_be_bytes()])
     }
 
     pub fn make_invite_key(name: &str) -> Vec<u8> {
         [INVITE_PREFIX, name.as_bytes()].concat()
     }
+
+    pub fn make_priv_invite_key(name: &str) -> Vec<u8> {
+        [PRIV_INVITE_PREFIX, name.as_bytes()].concat()
+    }
+
+    pub fn make_priv_invite_allowed_key(name: &str) -> Vec<u8> {
+        [&make_priv_invite_key(name), "_allowed_users".as_bytes()].concat()
+    }
+
+    pub const fn make_dm_with_user_key(user_id: u64, other_user_id: u64) -> [u8; 25] {
+        concat_arrs(&[
+            DM_WITH_USER_PREFIX,
+            &user_id.to_be_bytes(),
+            &[b'_'],
+            &other_user_id.to_be_bytes(),
+        ])
+    }
+
+    #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Default, Debug)]
+    #[archive_attr(derive(bytecheck::CheckBytes))]
+    pub struct UserPendingInvites {
+        pub invites: Vec<PendingInvite>,
+    }
+
+    pub const fn make_user_pending_invites_key(user_id: u64) -> [u8; 24] {
+        concat_arrs(&[PENDING_INVITES_PREFIX, &user_id.to_be_bytes()])
+    }
 }
 
 pub mod auth {
-    use super::concat_static;
+    use super::concat_arrs;
 
     pub const ATIME_PREFIX: &[u8] = b"atime_";
     pub const TOKEN_PREFIX: &[u8] = b"token_";
@@ -364,11 +496,11 @@ pub mod auth {
     }
 
     pub const fn token_key(user_id: u64) -> [u8; 14] {
-        concat_static(&[TOKEN_PREFIX, &user_id.to_be_bytes()])
+        concat_arrs(&[TOKEN_PREFIX, &user_id.to_be_bytes()])
     }
 
     pub const fn atime_key(user_id: u64) -> [u8; 14] {
-        concat_static(&[ATIME_PREFIX, &user_id.to_be_bytes()])
+        concat_arrs(&[ATIME_PREFIX, &user_id.to_be_bytes()])
     }
 
     pub fn single_use_token_key(token_hashed: &[u8]) -> Vec<u8> {
@@ -384,15 +516,22 @@ pub mod sync {
     }
 }
 
+pub async fn create_batch_delete_prefix(
+    tree: &Tree,
+    prefix: impl AsRef<[u8]>,
+) -> ServerResult<Batch> {
+    tree.scan_prefix(prefix.as_ref())
+        .await
+        .try_fold(Batch::default(), |mut batch, res| {
+            let (key, _) = res.map_err(ServerError::from)?;
+            batch.remove(key);
+            ServerResult::Ok(batch)
+        })
+        .map_err(Into::into)
+}
+
 pub async fn batch_delete_prefix(tree: &Tree, prefix: impl AsRef<[u8]>) -> ServerResult<()> {
-    let batch =
-        tree.scan_prefix(prefix.as_ref())
-            .await
-            .try_fold(Batch::default(), |mut batch, res| {
-                let (key, _) = res.map_err(ServerError::from)?;
-                batch.remove(key);
-                ServerResult::Ok(batch)
-            })?;
+    let batch = create_batch_delete_prefix(tree, prefix).await?;
     tree.apply_batch(batch).await?;
     Ok(())
 }
@@ -410,6 +549,8 @@ crate::impl_deser! {
     role, Role;
     emote, Emote;
     emote_pack, EmotePack;
+    private_channel, PrivateChannel;
+    pending_invites, UserPendingInvites;
 }
 
 pub fn deser_invite_entry_guild_id(data: &[u8]) -> u64 {
@@ -440,8 +581,9 @@ macro_rules! impl_deser {
     };
 }
 
-const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
+const fn concat_arrs<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
     // check if the lengths match.
+    #[cfg(debug_assertions)]
     {
         let mut new_len = 0;
         let mut arr_index = 0;
@@ -464,7 +606,7 @@ const fn concat_static<const LEN: usize>(arrs: &[&[u8]]) -> [u8; LEN] {
         // SAFETY:
         // - the pointers dont overlap because we use our own allocated array
         // - the pointers are guaranteed to be not null (we create one in fn body
-        // others are gotten as references
+        // others are gotten as references)
         // - the pointers are guaranteed to be aligned (are they?)
         unsafe {
             std::ptr::copy_nonoverlapping(arr.as_ptr(), new.as_mut_ptr().add(padding), arr.len());

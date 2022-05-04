@@ -53,7 +53,7 @@ pub async fn handler(
         .await
         .map_err(ServerError::DbError)?;
 
-    svc.send_event_through_chan(
+    svc.broadcast(
         EventSub::Guild(guild_id),
         stream_event::Event::DeletedChannel(stream_event::ChannelDeleted {
             guild_id,
@@ -63,5 +63,5 @@ pub async fn handler(
         EventContext::empty(),
     );
 
-    Ok((DeleteChannelResponse {}).into_response())
+    Ok(DeleteChannelResponse::new().into_response())
 }

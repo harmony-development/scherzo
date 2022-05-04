@@ -20,15 +20,15 @@ required-features = ["sled", "sqlite"]
 
 [features]
 default = ["sled"]
-voice = ["mediasoup"]
-jemalloc = ["tikv-jemallocator"]
+webrtc = ["mediasoup"]
+jemalloc = ["jemallocator"]
 
 # dbs
 sqlite = ["sqlx", "itertools"]
 
 [dependencies]
 scherzo_derive = { path = "./scherzo_derive" }
-harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
+harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "refactored", features = [
     "gen_all_protocols",
     "gen_client",
     "gen_server",
@@ -36,7 +36,7 @@ harmony_rust_sdk = { git = "https://github.com/harmony-development/harmony_rust_
     "rkyv",
     "rkyv_validation",
 ] }
-prost = { version = "0.9" }
+prost = { version = "0.10" }
 hrpc = { version = "0.33", features = [
     "http_server",
     "http_hyper_client",
@@ -57,11 +57,12 @@ hyper-rustls = { version = "0.23", default-features = false, features = [
     "http2",
 ] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
-tower-http = { version = "0.2", default-features = false, features = [
+tower-http = { version = "0.3", default-features = false, features = [
     "trace",
     "sensitive-headers",
     "map-response-body",
     "cors",
+    "catch-panic",
 ] }
 multer = { version = "2.0", default-features = false, features = ["tokio-io"] }
 sled = { version = "0.34.6", features = ["compression"], optional = true }
@@ -82,10 +83,9 @@ itertools = { version = "0.10", default-features = false, features = [
 ], optional = true }
 
 rand = "0.8"
-argon2 = "0.3"
+argon2 = "0.4"
 ed25519-compact = "1"
-sha3 = "0.10"
-ahash = { version = "0.7", default-features = false }
+ahash = "0.7"
 
 tokio = { version = "1.16", features = [
     "macros",
@@ -94,8 +94,7 @@ tokio = { version = "1.16", features = [
     "tracing",
     "signal",
 ] }
-tokio-util = "0.6.7"
-swimmer = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
@@ -106,12 +105,13 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "std",
 ] }
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main" }
-opentelemetry = { version = "0.16", features = ["rt-tokio"] }
-opentelemetry-jaeger = { version = "0.15", features = ["rt-tokio"] }
-tracing-opentelemetry = { version = "0.16", default-features = false }
+opentelemetry = { version = "0.17", features = ["rt-tokio"] }
+opentelemetry-jaeger = { version = "0.16", features = ["rt-tokio"] }
+tracing-opentelemetry = { version = "0.17" }
 
 pin-project = "1"
 
+crossbeam-epoch = "=0.9.7"
 dashmap = "=4.0"
 webpage = { git = "https://github.com/yusdacra/webpage-rs.git", branch = "chore/deps", default-features = false }
 paste = "1.0"
@@ -120,8 +120,8 @@ lazy_static = "1.4"
 smol_str = { version = "0.1", features = ["serde"] }
 git-version = "0.3"
 triomphe = { version = "0.1", default-features = false }
-image = { git = "https://github.com/image-rs/image.git", branch = "master" }
-webp = { git = "https://github.com/yusdacra/webp.git", branch = "master" }
+image = "0.24"
+webp = "0.2"
 infer = "0.7"
 anyhow = "1"
 
@@ -135,10 +135,10 @@ bytecheck = { version = "0.6" }
 
 mediasoup = { version = "0.9", optional = true }
 
-tikv-jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
+jemallocator = { git = "https://github.com/tikv/jemallocator.git", branch = "master", optional = true }
 
 [build-dependencies]
-harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "master", features = [
+harmony_build = { git = "https://github.com/harmony-development/harmony_rust_sdk.git", branch = "refactored", features = [
     "client",
     "server",
     "all_permissions",
@@ -179,6 +179,3 @@ key = "harmony.cachix.org-1:yv78QZHgS0UHkrMW56rccNghWHRz18fFRl8mWQ63M6E="
 markup5ever = { git = "https://github.com/servo/html5ever.git", rev = "0e03e1c2b1f63e81f831fd95b9eb8bbde18b7815" }
 string_cache = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
 string_cache_codegen = { git = "https://github.com/yusdacra/string-cache.git", branch = "chore/deps" }
-opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
-opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "482772f2317e242e6b98bfe04ed42e4dac8cf77b" }
-swimmer = { git = "https://github.com/yusdacra/swimmer-rs.git", branch = "master" }

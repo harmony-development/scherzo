@@ -1,6 +1,9 @@
 use std::convert::Infallible;
 
-use hrpc::{exports::futures_util::future::BoxFuture, server::transport::http::HttpResponse};
+use hrpc::{
+    exports::futures_util::{future::BoxFuture, TryStreamExt},
+    server::transport::http::HttpResponse,
+};
 use tower::Service;
 
 use crate::{impls::auth::get_token_from_header_map, rest_error_response};
@@ -72,18 +75,22 @@ impl Service<HttpRequest> for UploadService {
             match multipart.next_field().await {
                 Ok(maybe_field) => match maybe_field {
                     Some(field) => {
-                        let id =
-                            match write_file(deps.config.media.media_root.as_path(), field, None)
-                                .await
-                            {
-                                Ok(id) => id,
-                                Err(err) => return Ok(err.into_rest_http_response()),
-                            };
+                        let name = field.file_name().unwrap_or("unknown").to_string();
+                        let mime = field
+                            .content_type()
+                            .map_or("application/octet-stream", |m| m.essence_str())
+                            .to_string();
+                        let chunks = field.map_err(ServerError::MultipartError);
+
+                        let id = match deps.media.write_file(chunks, &name, &mime).await {
+                            Ok(id) => id,
+                            Err(err) => return Ok(err.into_rest_http_response()),
+                        };
 
                         Ok(http::Response::builder()
                             .status(StatusCode::OK)
                             .body(box_body(Body::from(
-                                format!(r#"{{ "id": "{}" }}"#, id).into_bytes(),
+                                format!(r#"{{ "id": "{id}" }}"#).into_bytes(),
                             )))
                             .unwrap())
                     }
@@ -95,54 +102,4 @@ impl Service<HttpRequest> for UploadService {
 
         Box::pin(fut)
     }
-}
-
-pub async fn write_file(
-    media_root: &Path,
-    mut part: multer::Field<'static>,
-    write_to: Option<PathBuf>,
-) -> Result<SmolStr, ServerError> {
-    let id = gen_rand_inline_str();
-    let path = write_to.unwrap_or_else(|| media_root.join(id.as_str()));
-    if path.exists() {
-        return Ok(id);
-    }
-    let first_chunk = part.chunk().await?.ok_or(ServerError::MissingFiles)?;
-
-    let file = tokio::fs::OpenOptions::default()
-        .append(true)
-        .create(true)
-        .open(path)
-        .await?;
-    let mut buf_writer = BufWriter::new(file);
-
-    // [tag:ascii_filename_upload]
-    let name = part.file_name().unwrap_or("unknown");
-    // [tag:ascii_mimetype_upload]
-    let content_type = part
-        .content_type()
-        .map(|m| m.essence_str())
-        .or_else(|| infer::get(&first_chunk).map(|t| t.mime_type()))
-        .unwrap_or("application/octet-stream");
-
-    // Write prefix
-    buf_writer.write_all(name.as_bytes()).await?;
-    buf_writer.write_all(&[SEPERATOR]).await?;
-    buf_writer.write_all(content_type.as_bytes()).await?;
-    buf_writer.write_all(&[SEPERATOR]).await?;
-
-    // Write our first chunk
-    buf_writer.write_all(&first_chunk).await?;
-
-    // flush before starting to write other chunks
-    buf_writer.flush().await?;
-
-    while let Some(chunk) = part.chunk().await? {
-        buf_writer.write_all(&chunk).await?;
-    }
-
-    // flush everything else
-    buf_writer.flush().await?;
-
-    Ok(id)
 }

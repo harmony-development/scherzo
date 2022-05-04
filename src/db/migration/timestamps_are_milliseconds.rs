@@ -1,8 +1,6 @@
 use super::*;
 
-use db::{
-    rkyv_ser, Batch
-};
+use db::{rkyv_ser, Batch};
 use harmony_rust_sdk::api::chat::Message as HarmonyMessage;
 
 pub(super) fn migrate(db: &Db) -> BoxFuture<'_, DbResult<()>> {

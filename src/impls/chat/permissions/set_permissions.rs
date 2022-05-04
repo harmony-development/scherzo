@@ -47,7 +47,7 @@ pub async fn handler(
             }
         }
         for perm in &perms_to_give {
-            svc.send_event_through_chan(
+            svc.broadcast(
                 EventSub::Guild(guild_id),
                 stream_event::Event::PermissionUpdated(stream_event::PermissionUpdated {
                     guild_id,
@@ -59,7 +59,7 @@ pub async fn handler(
                 EventContext::new(for_users.clone()),
             );
         }
-        svc.send_event_through_chan(
+        svc.broadcast(
             EventSub::Guild(guild_id),
             stream_event::Event::RolePermsUpdated(stream_event::RolePermissionsUpdated {
                 guild_id,
@@ -71,11 +71,10 @@ pub async fn handler(
                 guild_id,
                 None,
                 all_permissions::ROLES_MANAGE,
-                false,
             )),
             EventContext::empty(),
         );
-        Ok((SetPermissionsResponse {}).into_response())
+        Ok(SetPermissionsResponse::new().into_response())
     } else {
         Err(ServerError::NoPermissionsSpecified.into())
     }

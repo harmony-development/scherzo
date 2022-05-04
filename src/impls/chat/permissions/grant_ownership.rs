@@ -14,7 +14,9 @@ pub async fn handler(
     let chat_tree = &svc.deps.chat_tree;
 
     chat_tree.check_guild_user(guild_id, user_id).await?;
-    chat_tree.is_user_in_guild(guild_id, new_owner_id).await?;
+    chat_tree
+        .check_user_in_guild(guild_id, new_owner_id)
+        .await?;
 
     chat_tree
         .check_perms(guild_id, None, user_id, "", true)
@@ -24,5 +26,5 @@ pub async fn handler(
     guild.owner_ids.push(new_owner_id);
     chat_tree.put_guild_logic(guild_id, guild).await?;
 
-    Ok((GrantOwnershipResponse {}).into_response())
+    Ok(GrantOwnershipResponse::new().into_response())
 }

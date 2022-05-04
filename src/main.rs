@@ -5,13 +5,14 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use std::{
+    any::Any,
     net::SocketAddr,
     path::{Path, PathBuf},
     time::Duration,
 };
 
 use harmony_rust_sdk::api::{
-    chat::{content, guild_kind, ChannelKind, FormattedText, Permission},
+    chat::{ChannelKind, Permission},
     exports::hrpc::server::transport::{http::Hyper, Transport},
 };
 use hrpc::{
@@ -24,13 +25,15 @@ use hrpc::{
         MakeRoutes,
     },
 };
-use hyper::header;
+use hyper::{header, StatusCode};
 use scherzo::{
+    api::chat::Content,
     config::Config,
     db::{
         migration::{apply_migrations, get_db_version},
         Db,
     },
+    error::hrpc_error_response,
     impls::{
         admin_action, against,
         chat::{AdminGuildKeys, DEFAULT_ROLE_ID},
@@ -41,6 +44,7 @@ use scherzo::{
 };
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
+    catch_panic::CatchPanicLayer,
     cors::CorsLayer,
     map_response_body::MapResponseBodyLayer,
     sensitive_headers::SetSensitiveRequestHeadersLayer,
@@ -178,6 +182,7 @@ async fn setup_db(db_path: String, config: &Config) -> (Db, usize) {
     let (current_db_version, needs_migration) = get_db_version(&db)
         .await
         .expect("something went wrong while checking if the db needs migrations!!!");
+    info!("db version is {}", current_db_version);
     if needs_migration {
         // Backup db before attempting to apply migrations
         if current_db_version > 0 {
@@ -228,6 +233,25 @@ fn setup_transport(
         .expect("failed to create transport")
         .layer(cors)
         .layer(MapResponseBodyLayer::new(box_body))
+        .layer(CatchPanicLayer::custom(|err: Box<dyn Any + Send>| {
+            let err = err
+                .downcast_ref::<String>()
+                .map(String::clone)
+                .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()));
+
+            if let Some(err) = &err {
+                tracing::error!("service panicked: {}", err);
+            } else {
+                tracing::error!("service panicked but unable to extract error message");
+            }
+
+            hrpc_error_response(
+                hrpc::proto::Error::new_internal_server_error(
+                    err.unwrap_or_else(|| "unknown".to_string()),
+                ),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }))
         .layer(concurrency_limiter)
         .layer(SetSensitiveRequestHeadersLayer::new([
             header::AUTHORIZATION,
@@ -246,10 +270,23 @@ fn setup_transport(
         .layer(rest)
         .layer(against::AgainstLayer);
 
+    let mut enabled_tls = false;
     if let Some(tls_config) = deps.config.tls.as_ref() {
-        transport = transport
-            .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+        if tls_config.cert_file.exists() && tls_config.key_file.exists() {
+            transport = transport
+                .configure_tls_files(tls_config.cert_file.clone(), tls_config.key_file.clone());
+            enabled_tls = true;
+        } else {
+            error!("certificate file and key file specified, but the files don't exist");
+            warn!("not enabling TLS");
+        }
     }
+
+    info!(
+        "serving on {}://{}",
+        enabled_tls.then(|| "https").unwrap_or("http"),
+        addr
+    );
 
     transport.configure_hyper(
         HttpConfig::new()
@@ -324,13 +361,7 @@ fn setup_tracing(console: bool, jaeger: bool, level_filter: Level) {
 async fn setup_admin_guild(deps: &Dependencies) {
     let guild_id = deps
         .chat_tree
-        .create_guild_logic(
-            0,
-            "Admin".to_string(),
-            None,
-            None,
-            guild_kind::Kind::new_normal(guild_kind::Normal::new()),
-        )
+        .create_guild_logic(0, "Admin".to_string(), None, None)
         .await
         .unwrap();
     deps.chat_tree
@@ -364,14 +395,9 @@ async fn setup_admin_guild(deps: &Dependencies) {
         .unwrap();
     deps.chat_tree
         .send_with_system(
-            guild_id,
+            Some(guild_id),
             cmd_id,
-            content::Content::TextMessage(content::TextContent {
-                content: Some(FormattedText::new(
-                    admin_action::HELP_TEXT.to_string(),
-                    Vec::new(),
-                )),
-            }),
+            Content::default().with_text(admin_action::HELP_TEXT),
         )
         .await
         .unwrap();

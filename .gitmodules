@@ -1,3 +1,6 @@
 [submodule "protocols/before_account_kind"]
 	path = protocols/before_account_kind
 	url = https://github.com/harmony-development/protocol.git
+[submodule "protocols/before_proto_v2"]
+	path = protocols/before_proto_v2
+	url = https://github.com/harmony-development/protocol.git

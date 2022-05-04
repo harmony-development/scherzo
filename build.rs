@@ -5,24 +5,16 @@ fn main() -> Result<()> {
         "before_account_kind",
         &["profile.v1", "harmonytypes.v1"],
         &[],
-        |builder| {
-            builder.modify_hrpc_config(|cfg| {
-                cfg.type_attribute(
-                    ".protocol.profile.v1.Profile",
-                    "#[archive_attr(derive(::bytecheck::CheckBytes))]",
-                )
-            })
-        },
+    )?;
+    build_protocol(
+        "before_proto_v2",
+        &["profile.v1", "emote.v1", "chat.v1", "harmonytypes.v1"],
+        &[],
     )?;
     Ok(())
 }
 
-fn build_protocol(
-    version: &str,
-    stable_svcs: &[&str],
-    staging_svcs: &[&str],
-    f: impl FnOnce(Builder) -> Builder,
-) -> Result<()> {
+fn build_protocol(version: &str, stable_svcs: &[&str], staging_svcs: &[&str]) -> Result<()> {
     let protocol_path = format!("protocols/{}", version);
     let out_dir = {
         let mut dir = std::env::var("OUT_DIR").expect("no out dir, how");
@@ -42,16 +34,18 @@ fn build_protocol(
             cfg
         });
 
-    for service in all_services.filter(|a| "batch.v1".ne(**a)) {
+    for service in all_services {
         builder = builder.modify_hrpc_config(|cfg| {
             cfg.type_attribute(
                 format!(".protocol.{}", service),
                 "#[derive(::rkyv::Archive, ::rkyv::Serialize, ::rkyv::Deserialize)]",
             )
+            .type_attribute(
+                format!(".protocol.{}", service),
+                "#[archive_attr(derive(::bytecheck::CheckBytes))]",
+            )
         });
     }
-
-    let builder = f(builder);
 
     builder.generate(protocol, out_dir)?;
 

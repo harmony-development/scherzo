@@ -12,7 +12,7 @@ pub async fn handler(
         .and_modify(|s| *s = vec![initial_auth_step()])
         .or_insert_with(|| vec![initial_auth_step()]);
 
-    tracing::debug!("new auth session {}", auth_id);
+    tracing::debug!("new auth session {auth_id}");
 
     Ok((BeginAuthResponse {
         auth_id: auth_id.into(),
