@@ -37,6 +37,10 @@
             prev.commands
             ++ [
               {
+                name = "debug-server";
+                command = ''cargo run --no-default-features --features sled -- -d'';
+              }
+              {
                 name = "generate-cert";
                 command = ''
                   mkcert localhost 127.0.0.1 ::1
