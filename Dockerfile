@@ -5,7 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 # Update Ubuntu Software repository
 RUN apt update
-RUN apt install curl
+RUN apt install curl -y
 
 RUN cd /root && curl -L https://github.com/harmony-development/scherzo/releases/download/continuous/scherzo > scherzo && chmod +x scherzo
 
@@ -24,6 +24,8 @@ RUN set -x ; \
     addgroup www-data www-data 2>/dev/null && exit 0 ; exit 1
 
 RUN chown -cR www-data:www-data /srv/scherzo
+
+RUN apt update
 
 RUN apt install -y \
         curl \
