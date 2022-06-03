@@ -1,10 +1,15 @@
-FROM alpine:3.12 as builder
+FROM ubuntu:20.04 as builder
 
-RUN apk add --no-cache curl
+# Disable Prompt During Packages Installation
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Update Ubuntu Software repository
+RUN apt update
+RUN apt install curl
 
 RUN cd /root && curl -L https://github.com/harmony-development/scherzo/releases/download/continuous/scherzo > scherzo && chmod +x scherzo
 
-FROM alpine:3.12
+FROM ubuntu:20.04
 
 EXPOSE 2289
 
@@ -20,10 +25,10 @@ RUN set -x ; \
 
 RUN chown -cR www-data:www-data /srv/scherzo
 
-RUN apk add --no-cache \
+RUN apt install -y \
         curl \
         ca-certificates \
-        libgcc
+        gcc
 
 VOLUME ["/srv/scherzo/db", "/srv/scherzo/media", "/srv/scherzo/logs"]
 
