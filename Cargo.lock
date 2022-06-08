@@ -1792,13 +1792,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6105e89802af13fdf48c49d7646d3b533a70e536d818aae7e78ba0433d01acb8"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "js-sys",
+ "lazy_static",
+ "percent-encoding",
+ "pin-project",
+ "rand",
+ "thiserror",
+]
+
+[[package]]
 name = "opentelemetry-jaeger"
 version = "0.15.0"
 source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=482772f2317e242e6b98bfe04ed42e4dac8cf77b#482772f2317e242e6b98bfe04ed42e4dac8cf77b"
 dependencies = [
  "async-trait",
  "lazy_static",
- "opentelemetry",
+ "opentelemetry 0.16.0",
  "opentelemetry-semantic-conventions",
  "thiserror",
  "thrift",
@@ -1810,7 +1829,7 @@ name = "opentelemetry-semantic-conventions"
 version = "0.8.0"
 source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=482772f2317e242e6b98bfe04ed42e4dac8cf77b#482772f2317e242e6b98bfe04ed42e4dac8cf77b"
 dependencies = [
- "opentelemetry",
+ "opentelemetry 0.16.0",
 ]
 
 [[package]]
@@ -2425,7 +2444,7 @@ dependencies = [
  "lettre",
  "mediasoup",
  "multer",
- "opentelemetry",
+ "opentelemetry 0.16.0",
  "opentelemetry-jaeger",
  "parking_lot 0.12.0",
  "paste 1.0.6",
@@ -3254,11 +3273,12 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.16.0"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ffbf13a0f8b054a4e59df3a173b818e9c6177c02789871f2073977fd0062076"
+checksum = "93600c803bb15e2a32bd376001b8625587f268fe887669b5ac86af524637c242"
 dependencies = [
- "opentelemetry",
+ "once_cell",
+ "opentelemetry 0.17.0",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
