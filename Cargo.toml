@@ -108,7 +108,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 console-subscriber = { git = "https://github.com/tokio-rs/console.git", branch = "main" }
 opentelemetry = { version = "0.16", features = ["rt-tokio"] }
 opentelemetry-jaeger = { version = "0.15", features = ["rt-tokio"] }
-tracing-opentelemetry = { version = "0.16", default-features = false }
+tracing-opentelemetry = { version = "0.18", default-features = false }
 
 pin-project = "1"
 
